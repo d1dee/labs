@@ -1,0 +1,34 @@
+{
+    "name": "labs-firewall-dashboard",
+    "version": "1.0.0",
+    "description": "Teacher dashboard for managing lab firewall access via Mikrotik REST API",
+    "type": "module",
+    "scripts": {
+        "dev": "bun run backend/server.ts",
+        "build": "cd frontend && bun install && bun run build",
+        "build:all": "bun run build && tsc --noEmit",
+        "serve": "bun run backend/server.ts",
+        "start": "bun run build && bun run backend/server.ts",
+        "dev:frontend": "cd frontend && bun run dev"
+    },
+    "dependencies": {
+        "@better-auth/drizzle-adapter": "^1.6.10",
+        "@hono/node-server": "^2.0.2",
+        "better-auth": "^1.6.10",
+        "drizzle-orm": "^0.45.2",
+        "hono": "^4.12.18",
+        "kysely": "0.28.17",
+        "sql.js": "^1.8.0"
+    },
+    "devDependencies": {
+        "@types/bun": "^1.3.13",
+        "dotenv": "^17.4.2",
+        "drizzle-kit": "^0.31.10",
+        "kysely-bun-sqlite": "^0.4.0"
+    },
+    "module": "index.ts",
+    "private": true,
+    "peerDependencies": {
+        "typescript": "^6.0.3"
+    }
+}
