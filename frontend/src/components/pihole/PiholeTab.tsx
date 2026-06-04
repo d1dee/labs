@@ -7,7 +7,7 @@ import {
     type PiholeBlocking,
     type PiholeSummary,
     type PiholeTopDomains,
-} from '@/api';
+} from '@/api/pihole';
 import {
     Alert,
     Badge,
