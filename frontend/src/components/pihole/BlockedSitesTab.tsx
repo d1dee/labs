@@ -1,4 +1,4 @@
-import { getPiholeQueries, PiholeQueries, type PiholeQuery } from '@/api';
+import { getPiholeQueries, PiholeQueries, type PiholeQuery } from '@/api/pihole';
 import {
     Badge,
     Card,

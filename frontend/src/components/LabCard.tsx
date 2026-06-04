@@ -4,7 +4,7 @@ import {
     LabStats,
     getLabHistory,
     toggleLab,
-} from '@/api';
+} from '@/api/firewall';
 import {
     Badge,
     Button,

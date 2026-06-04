@@ -4,7 +4,7 @@ import {
     getPiholeDomains,
     type PiholeDomainItem,
     updatePiholeDomain,
-} from '@/api';
+} from '@/api/pihole';
 import {
     ActionIcon,
     Badge,

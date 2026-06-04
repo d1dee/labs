@@ -1,4 +1,4 @@
-import { getLabs, getLabStats, Lab, LabStats } from '@/api';
+import { getLabs, getLabStats, Lab, LabStats } from '@/api/firewall';
 import LabCard from '@/components/LabCard';
 import {
     Card,
@@ -82,10 +82,7 @@ const FirewallTab: FC = () => {
                 </Center>
             ) : (
                 <>
-                    <SimpleGrid
-                        cols={{ base: 2, md: 4 }}
-                        spacing='md'
-                    >
+                    <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
                         <Card withBorder>
                             <Text size='sm' c='dimmed'>
                                 Total Labs
