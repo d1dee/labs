@@ -24,6 +24,7 @@ import {
     Loader,
     Modal,
     Select,
+    SimpleGrid,
     Stack,
     Text,
     Title,
@@ -60,6 +61,7 @@ const ManagementTab: FC = () => {
     const [captureTaskTypeId, setCaptureTaskTypeId] = useState<number | null>(
         null,
     );
+    const [hosts, setHosts] = useState<FogHost[]>([]);
 
     const hostTableRef = useRef<HostTableHandle>(null);
 
@@ -136,11 +138,7 @@ const ManagementTab: FC = () => {
     ) => {
         setTaskLoading(true);
         try {
-            const result = await createFogTask(
-                host.id,
-                taskTypeId,
-                options,
-            );
+            const result = await createFogTask(host.id, taskTypeId, options);
             notifications.show({
                 color: 'green',
                 title: 'Task Created',
@@ -250,6 +248,86 @@ const ManagementTab: FC = () => {
         }
     };
 
+    const showBulkResult = (
+        action: string,
+        results: PromiseSettledResult<unknown>[],
+    ) => {
+        const succeeded = results.filter(
+            (r) => r.status === 'fulfilled',
+        ).length;
+        const failed = results.filter((r) => r.status === 'rejected').length;
+
+        if (succeeded > 0) {
+            notifications.show({
+                color: 'green',
+                title: `Bulk ${action}`,
+                message: `${action} succeeded for ${succeeded} host${succeeded !== 1 ? 's' : ''}`,
+                icon: <IconCheck size={16} />,
+            });
+        }
+        if (failed > 0) {
+            notifications.show({
+                color: 'red',
+                title: `Bulk ${action} Failed`,
+                message: `${action} failed for ${failed} host${failed !== 1 ? 's' : ''}`,
+                icon: <IconX size={16} />,
+            });
+        }
+    };
+
+    const handleBulkDeploy = async (hosts: FogHost[]) => {
+        if (!deployTaskTypeId) return;
+        setTaskLoading(true);
+        const results = await Promise.allSettled(
+            hosts.map((host) => createFogTask(host.id, deployTaskTypeId)),
+        );
+        showBulkResult('Deploy', results);
+        setTaskLoading(false);
+        await hostTableRef.current?.refresh();
+        hostTableRef.current?.clearSelection();
+    };
+
+    const handleBulkDelete = async (hosts: FogHost[]) => {
+        if (!confirm(`Delete ${hosts.length} host(s)?`)) return;
+        setTaskLoading(true);
+        const results = await Promise.allSettled(
+            hosts.map((host) => deleteFogHost(host.id)),
+        );
+        showBulkResult('Delete', results);
+        setTaskLoading(false);
+        if (selectedHost && hosts.some((h) => h.id === selectedHost.id)) {
+            setSelectedHost(null);
+        }
+        await hostTableRef.current?.refresh();
+        hostTableRef.current?.clearSelection();
+    };
+
+    const handleBulkAssignImage = async (hosts: FogHost[], imageId: number) => {
+        setTaskLoading(true);
+        const results = await Promise.allSettled(
+            hosts.map((host) => updateFogHost(host.id, { imageID: imageId })),
+        );
+        showBulkResult('Image Assignment', results);
+        setTaskLoading(false);
+        if (selectedHost) {
+            const detail = await getFogHost(selectedHost.id);
+            setSelectedHost(detail);
+        }
+        await hostTableRef.current?.refresh();
+        hostTableRef.current?.clearSelection();
+    };
+
+    const handleBulkSnapin = async (hosts: FogHost[], snapinId: number) => {
+        setTaskLoading(true);
+        const results = await Promise.allSettled(
+            hosts.map((host) => createFogSnapinTask(host.id, snapinId)),
+        );
+        showBulkResult('Snapin', results);
+        setTaskLoading(false);
+        await hostTableRef.current?.refresh();
+        hostTableRef.current?.clearSelection();
+    };
+
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);
         notifications.show({
@@ -288,44 +366,112 @@ const ManagementTab: FC = () => {
 
     return (
         <Stack gap='md'>
-            <Group justify='space-between'>
-                <Title order={4}>FOG Host Management</Title>
-                <Button
-                    size='xs'
-                    leftSection={<IconRefresh size={14} />}
-                    onClick={loadAll}
-                    loading={loading}
-                >
-                    Refresh
-                </Button>
-            </Group>
+            <Stack>
+                <Group justify='space-between'>
+                    <Title order={4}>Host Overview</Title>{' '}
+                    <Button
+                        size='xs'
+                        leftSection={<IconRefresh size={14} />}
+                        onClick={loadAll}
+                        loading={loading}
+                    >
+                        Refresh
+                    </Button>
+                </Group>
+                <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
+                    <Card withBorder>
+                        <Text size='sm' c='dimmed'>
+                            Total Hosts
+                        </Text>
+                        <Text size='xl' fw={700}>
+                            {hosts.length}
+                        </Text>
+                    </Card>
+                    <Card withBorder>
+                        <Text size='sm' c='dimmed'>
+                            Online
+                        </Text>
+                        <Group justify='space-between'>
+                            <Text size='xl' fw={700} c='green'>
+                                {
+                                    hosts.filter((h) => h.pingstatuscode === 0)
+                                        .length
+                                }
+                            </Text>
+                        </Group>
+                    </Card>
+                    <Card withBorder>
+                        <Text size='sm' c='dimmed'>
+                            Offline
+                        </Text>
+                        <Group justify='space-between'>
+                            <Text size='xl' fw={700} c='red'>
+                                {
+                                    hosts.filter((h) => h.pingstatuscode === 1)
+                                        .length
+                                }
+                            </Text>
+                        </Group>
+                    </Card>
+                    <Card withBorder>
+                        <Text size='sm' c='dimmed'>
+                            Images
+                        </Text>
+                        <Text size='xl' fw={700}>
+                            {images.length}
+                        </Text>
+                    </Card>
+                </SimpleGrid>
+            </Stack>
 
-            <HostTable
-                ref={hostTableRef}
-                onSelectHost={handleViewHost}
-                onDeploy={handleTableDeploy}
-                onSnapin={handleOpenSnapinModal}
-                onDelete={handleDeleteHost}
-                selectedHostId={selectedHost?.id ?? null}
-                deployTaskTypeId={deployTaskTypeId}
-                taskLoading={taskLoading}
-            />
-
+            <Stack>
+                <div>
+                    <Title order={5}>Registered Hosts</Title>
+                    <Text size='sm' c='dimmed'>
+                        Select a host to view details or perform actions.
+                    </Text>
+                </div>
+                <HostTable
+                    ref={hostTableRef}
+                    onSelectHost={handleViewHost}
+                    onDeploy={handleTableDeploy}
+                    onSnapin={handleOpenSnapinModal}
+                    onDelete={handleDeleteHost}
+                    selectedHostId={selectedHost?.id ?? null}
+                    deployTaskTypeId={deployTaskTypeId}
+                    taskLoading={taskLoading}
+                    images={images}
+                    snapins={snapins}
+                    onBulkDeploy={handleBulkDeploy}
+                    onBulkDelete={handleBulkDelete}
+                    onBulkAssignImage={handleBulkAssignImage}
+                    onBulkSnapin={handleBulkSnapin}
+                    onHostsChange={setHosts}
+                />
+            </Stack>
             {selectedHost && (
                 <Card withBorder p='md'>
                     <Stack gap='md'>
                         <Group justify='space-between'>
-                            <Title order={5}>{selectedHost.name}</Title>
+                            <div>
+                                <Title order={5}>{selectedHost.name}</Title>
+                                <Text size='sm' c='dimmed'>
+                                    Host details and available actions.
+                                </Text>
+                            </div>
                             <Badge size='lg'>ID: {selectedHost.id}</Badge>
                         </Group>
 
                         {hostDetailLoading && <Loader size='sm' />}
 
-                        <Group grow>
+                        <Group grow align='flex-start'>
                             <Stack gap='xs'>
-                                <Text size='sm' c='dimmed'>
-                                    MAC Addresses
-                                </Text>
+                                <div>
+                                    <Title order={6}>MAC Addresses</Title>
+                                    <Text size='sm' c='dimmed'>
+                                        Network addresses for this host.
+                                    </Text>
+                                </div>
                                 <Stack gap={4}>
                                     {selectedHost.macs?.map((mac) => (
                                         <Group key={mac} gap='xs'>
@@ -346,28 +492,38 @@ const ManagementTab: FC = () => {
                                 </Stack>
                             </Stack>
                             <Stack gap='xs'>
-                                <Text size='sm' c='dimmed'>
-                                    Description
-                                </Text>
+                                <div>
+                                    <Title order={6}>Description</Title>
+                                    <Text size='sm' c='dimmed'>
+                                        Notes or details about this host.
+                                    </Text>
+                                </div>
                                 <Text size='sm'>
                                     {selectedHost.description || '-'}
                                 </Text>
                             </Stack>
                         </Group>
 
-                        <Group grow>
+                        <Group grow align='flex-start'>
                             <Stack gap='xs'>
-                                <Text size='sm' c='dimmed'>
-                                    Current Image
-                                </Text>
+                                <div>
+                                    <Title order={6}>Current Image</Title>
+                                    <Text size='sm' c='dimmed'>
+                                        The image currently linked to this host.
+                                    </Text>
+                                </div>
                                 <Text size='sm' fw={500}>
                                     {selectedHost.imagename || 'None assigned'}
                                 </Text>
                             </Stack>
                             <Stack gap='xs'>
-                                <Text size='sm' c='dimmed'>
-                                    Assign Image
-                                </Text>
+                                <div>
+                                    <Title order={6}>Assign Image</Title>
+                                    <Text size='sm' c='dimmed'>
+                                        Choose a new image to deploy to this
+                                        host.
+                                    </Text>
+                                </div>
                                 <Select
                                     placeholder='Select image...'
                                     data={images.map((img) => ({
@@ -386,9 +542,12 @@ const ManagementTab: FC = () => {
                         </Group>
 
                         <Stack gap='xs'>
-                            <Text size='sm' c='dimmed'>
-                                Imaging Actions
-                            </Text>
+                            <div>
+                                <Title order={6}>Imaging Actions</Title>
+                                <Text size='sm' c='dimmed'>
+                                    Start deploy, capture, or snapin tasks.
+                                </Text>
+                            </div>
                             <Group gap='sm'>
                                 <Button
                                     size='sm'
@@ -419,10 +578,7 @@ const ManagementTab: FC = () => {
                                     color='orange'
                                     leftSection={<IconPlayerPlay size={14} />}
                                     onClick={() => {
-                                        if (
-                                            selectedHost &&
-                                            captureTaskTypeId
-                                        ) {
+                                        if (selectedHost && captureTaskTypeId) {
                                             handleCreateTask(
                                                 selectedHost,
                                                 captureTaskTypeId,
@@ -457,9 +613,14 @@ const ManagementTab: FC = () => {
 
                         {taskTypes.length > 0 && (
                             <Stack gap='xs'>
-                                <Text size='sm' c='dimmed'>
-                                    Available Task Types
-                                </Text>
+                                <div>
+                                    <Title order={6}>
+                                        Available Task Types
+                                    </Title>
+                                    <Text size='sm' c='dimmed'>
+                                        All task types defined in FOG.
+                                    </Text>
+                                </div>
                                 <Group gap='xs'>
                                     {taskTypes.map((tt) => (
                                         <Badge
