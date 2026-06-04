@@ -14,10 +14,10 @@ import {
     Title,
 } from '@mantine/core';
 import {
+    IconKey,
     IconLogout,
     IconNetwork,
     IconSettings,
-    IconShield,
     IconShieldCheck,
     IconTools,
 } from '@tabler/icons-react';
@@ -41,7 +41,7 @@ const Dashboard: FC<DashboardProps> = ({
     return (
         <AppShell header={{ height: 60 }} footer={{ height: 48 }} padding='md'>
             <AppShell.Header>
-                <Container h='100%'>
+                <Container size='xl' h='100%'>
                     <Group justify='space-between' h='100%'>
                         <Title order={3}>Labs FCD</Title>
                         <Group>
@@ -69,7 +69,7 @@ const Dashboard: FC<DashboardProps> = ({
                                 </Menu.Target>
                                 <Menu.Dropdown>
                                     <Menu.Item
-                                        leftSection={<IconShield size={16} />}
+                                        leftSection={<IconKey size={16} />}
                                         onClick={onChangePassword}
                                     >
                                         Change Password
@@ -90,7 +90,7 @@ const Dashboard: FC<DashboardProps> = ({
             </AppShell.Header>
 
             <AppShell.Main>
-                <Container>
+                <Container size='xl'>
                     <Tabs value={activeTab} onChange={setActiveTab} mb='xl'>
                         <Tabs.List>
                             <Tabs.Tab
