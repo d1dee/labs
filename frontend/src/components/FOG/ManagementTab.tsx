@@ -4,7 +4,6 @@ import {
     deleteFogHost,
     getFogHost,
     getFogStatus,
-    listFogHosts,
     listFogImages,
     listFogSnapins,
     listFogTaskTypes,
@@ -26,11 +25,8 @@ import {
     Modal,
     Select,
     Stack,
-    Table,
     Text,
-    TextInput,
     Title,
-    Tooltip,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
@@ -39,23 +35,17 @@ import {
     IconCopy,
     IconPlayerPlay,
     IconRefresh,
-    IconSearch,
-    IconTrash,
     IconX,
 } from '@tabler/icons-react';
-import { useEffect, useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
+import HostTable, { type HostTableHandle } from './HostTable';
 
 const ManagementTab: FC = () => {
     const [configured, setConfigured] = useState<boolean | null>(null);
-    const [hosts, setHosts] = useState<FogHost[]>([]);
     const [images, setImages] = useState<FogImage[]>([]);
     const [taskTypes, setTaskTypes] = useState<FogTaskType[]>([]);
     const [snapins, setSnapins] = useState<FogSnapin[]>([]);
     const [loading, setLoading] = useState(true);
-    const [searching, setSearching] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [searchName, setSearchName] = useState('');
-    const [searchMac, setSearchMac] = useState('');
     const [selectedHost, setSelectedHost] = useState<FogHost | null>(null);
     const [hostDetailLoading, setHostDetailLoading] = useState(false);
 
@@ -70,6 +60,8 @@ const ManagementTab: FC = () => {
     const [captureTaskTypeId, setCaptureTaskTypeId] = useState<number | null>(
         null,
     );
+
+    const hostTableRef = useRef<HostTableHandle>(null);
 
     const fetchStatus = async () => {
         try {
@@ -93,7 +85,6 @@ const ManagementTab: FC = () => {
             setTaskTypes(types.tasktypes);
             setSnapins(snaps.snapins);
 
-            // Auto-detect common task type IDs
             const deploy = types.tasktypes.find((t) =>
                 t.name?.toLowerCase().includes('deploy'),
             );
@@ -107,25 +98,12 @@ const ManagementTab: FC = () => {
         }
     };
 
-    const fetchHosts = async (search?: string) => {
-        setSearching(true);
-        setError(null);
-        try {
-            const data = await listFogHosts(search);
-            setHosts(data.hosts);
-        } catch (err) {
-            setError(String(err));
-        } finally {
-            setSearching(false);
-        }
-    };
-
     const loadAll = async () => {
         setLoading(true);
         const ok = await fetchStatus();
         if (ok) {
             await fetchReferenceData();
-            await fetchHosts();
+            await hostTableRef.current?.refresh();
         }
         setLoading(false);
     };
@@ -133,11 +111,6 @@ const ManagementTab: FC = () => {
     useEffect(() => {
         loadAll();
     }, []);
-
-    const handleSearch = () => {
-        const term = searchName.trim() || searchMac.trim() || undefined;
-        fetchHosts(term);
-    };
 
     const handleViewHost = async (host: FogHost) => {
         setHostDetailLoading(true);
@@ -157,22 +130,21 @@ const ManagementTab: FC = () => {
     };
 
     const handleCreateTask = async (
+        host: FogHost,
         taskTypeId: number,
         options?: Record<string, unknown>,
     ) => {
-        if (!selectedHost) return;
         setTaskLoading(true);
         try {
             const result = await createFogTask(
-                selectedHost.id,
+                host.id,
                 taskTypeId,
                 options,
             );
             notifications.show({
                 color: 'green',
                 title: 'Task Created',
-                message:
-                    result.message || `Task created for ${selectedHost.name}`,
+                message: result.message || `Task created for ${host.name}`,
                 icon: <IconCheck size={16} />,
             });
         } catch (err) {
@@ -184,6 +156,18 @@ const ManagementTab: FC = () => {
             });
         } finally {
             setTaskLoading(false);
+        }
+    };
+
+    const handleTableDeploy = (host: FogHost) => {
+        if (deployTaskTypeId) {
+            handleCreateTask(host, deployTaskTypeId);
+        } else {
+            notifications.show({
+                color: 'yellow',
+                title: 'No Deploy Type',
+                message: 'Could not detect deploy task type ID.',
+            });
         }
     };
 
@@ -231,6 +215,7 @@ const ManagementTab: FC = () => {
             });
             const detail = await getFogHost(selectedHost.id);
             setSelectedHost(detail);
+            await hostTableRef.current?.refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -251,8 +236,10 @@ const ManagementTab: FC = () => {
                 message: `${host.name} deleted`,
                 icon: <IconCheck size={16} />,
             });
-            setSelectedHost(null);
-            await fetchHosts();
+            if (selectedHost?.id === host.id) {
+                setSelectedHost(null);
+            }
+            await hostTableRef.current?.refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -313,142 +300,16 @@ const ManagementTab: FC = () => {
                 </Button>
             </Group>
 
-            {error && (
-                <Alert icon={<IconX size={18} />} title='Error' color='red'>
-                    {error}
-                </Alert>
-            )}
-
-            <Card withBorder p='md'>
-                <Stack gap='sm'>
-                    <Group grow>
-                        <TextInput
-                            label='Host Name'
-                            placeholder='Search by name...'
-                            value={searchName}
-                            onChange={(e) =>
-                                setSearchName(e.currentTarget.value)
-                            }
-                            onKeyDown={(e) =>
-                                e.key === 'Enter' && handleSearch()
-                            }
-                        />
-                        <TextInput
-                            label='MAC Address'
-                            placeholder='Search by MAC...'
-                            value={searchMac}
-                            onChange={(e) =>
-                                setSearchMac(e.currentTarget.value)
-                            }
-                            onKeyDown={(e) =>
-                                e.key === 'Enter' && handleSearch()
-                            }
-                        />
-                    </Group>
-                    <Group justify='flex-end'>
-                        <Button
-                            leftSection={<IconSearch size={14} />}
-                            onClick={handleSearch}
-                            loading={searching}
-                            size='sm'
-                        >
-                            Search
-                        </Button>
-                    </Group>
-                </Stack>
-            </Card>
-
-            {hosts.length > 0 && (
-                <Card withBorder p={0}>
-                    <Table highlightOnHover>
-                        <Table.Thead>
-                            <Table.Tr>
-                                <Table.Th>ID</Table.Th>
-                                <Table.Th>Name</Table.Th>
-                                <Table.Th>MACs</Table.Th>
-                                <Table.Th>Image</Table.Th>
-                                <Table.Th>Status</Table.Th>
-                                <Table.Th style={{ textAlign: 'right' }}>
-                                    Actions
-                                </Table.Th>
-                            </Table.Tr>
-                        </Table.Thead>
-                        <Table.Tbody>
-                            {hosts.map((host) => (
-                                <Table.Tr
-                                    key={host.id}
-                                    style={{
-                                        cursor: 'pointer',
-                                        background:
-                                            selectedHost?.id === host.id
-                                                ? 'var(--mantine-color-blue-light)'
-                                                : undefined,
-                                    }}
-                                    onClick={() => handleViewHost(host)}
-                                >
-                                    <Table.Td>{host.id}</Table.Td>
-                                    <Table.Td>
-                                        <Text fw={500}>{host.name}</Text>
-                                    </Table.Td>
-                                    <Table.Td>
-                                        <Text size='sm' ff='monospace'>
-                                            {host.macs?.[0] || '-'}
-                                        </Text>
-                                    </Table.Td>
-                                    <Table.Td>
-                                        {host?.imagename || (
-                                            <Text c='dimmed' size='sm'>
-                                                No image
-                                            </Text>
-                                        )}
-                                    </Table.Td>
-                                    <Table.Td>
-                                        <Badge
-                                            color={
-                                                host.pingstatuscode === 0
-                                                    ? 'green'
-                                                    : host.pingstatuscode === 1
-                                                      ? 'red'
-                                                      : 'gray'
-                                            }
-                                        >
-                                            {host.pingstatustext || 'unknown'}
-                                        </Badge>
-                                    </Table.Td>
-                                    <Table.Td>
-                                        <Group justify='flex-end' gap='xs'>
-                                            <Tooltip label='Send Snapin'>
-                                                <ActionIcon
-                                                    color='blue'
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleOpenSnapinModal(
-                                                            host,
-                                                        );
-                                                    }}
-                                                >
-                                                    <IconPlayerPlay size={16} />
-                                                </ActionIcon>
-                                            </Tooltip>
-                                            <Tooltip label='Delete'>
-                                                <ActionIcon
-                                                    color='red'
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDeleteHost(host);
-                                                    }}
-                                                >
-                                                    <IconTrash size={16} />
-                                                </ActionIcon>
-                                            </Tooltip>
-                                        </Group>
-                                    </Table.Td>
-                                </Table.Tr>
-                            ))}
-                        </Table.Tbody>
-                    </Table>
-                </Card>
-            )}
+            <HostTable
+                ref={hostTableRef}
+                onSelectHost={handleViewHost}
+                onDeploy={handleTableDeploy}
+                onSnapin={handleOpenSnapinModal}
+                onDelete={handleDeleteHost}
+                selectedHostId={selectedHost?.id ?? null}
+                deployTaskTypeId={deployTaskTypeId}
+                taskLoading={taskLoading}
+            />
 
             {selectedHost && (
                 <Card withBorder p='md'>
@@ -534,8 +395,11 @@ const ManagementTab: FC = () => {
                                     color='green'
                                     leftSection={<IconPlayerPlay size={14} />}
                                     onClick={() => {
-                                        if (deployTaskTypeId) {
-                                            handleCreateTask(deployTaskTypeId);
+                                        if (selectedHost && deployTaskTypeId) {
+                                            handleCreateTask(
+                                                selectedHost,
+                                                deployTaskTypeId,
+                                            );
                                         } else {
                                             notifications.show({
                                                 color: 'yellow',
@@ -555,8 +419,14 @@ const ManagementTab: FC = () => {
                                     color='orange'
                                     leftSection={<IconPlayerPlay size={14} />}
                                     onClick={() => {
-                                        if (captureTaskTypeId) {
-                                            handleCreateTask(captureTaskTypeId);
+                                        if (
+                                            selectedHost &&
+                                            captureTaskTypeId
+                                        ) {
+                                            handleCreateTask(
+                                                selectedHost,
+                                                captureTaskTypeId,
+                                            );
                                         } else {
                                             notifications.show({
                                                 color: 'yellow',

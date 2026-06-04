@@ -1,5 +1,5 @@
+import ManagementTab from '@/components/FOG/ManagementTab';
 import FormattingTab from '@/components/pihole/FormattingTab';
-import ManagementTab from '@/components/pihole/ManagementTab';
 import PiholeTab from '@/components/pihole/PiholeTab';
 import {
     ActionIcon,
