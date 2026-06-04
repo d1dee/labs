@@ -24,6 +24,22 @@ import {
     setPiholeBlocking,
     updatePiholeDomain,
 } from './pihole';
+import {
+    createFogHost,
+    createFogSnapinTask,
+    createFogTask,
+    deleteFogHost,
+    getFogHost,
+    getFogSystemInfo,
+    isFogConfigured,
+    listActiveMulticastSessions,
+    listActiveTasks,
+    listFogHosts,
+    listFogImages,
+    listFogSnapins,
+    listFogTaskTypes,
+    updateFogHost,
+} from './fog';
 
 // Create Better Auth tables (drizzle-kit doesn't support bun:sqlite)
 createAuthTables();
@@ -515,6 +531,240 @@ app.post('/api/pihole/blocking', async (c) => {
             timer?: number | null;
         }>();
         const result = await setPiholeBlocking(body.blocking, body.timer);
+        if (!result.success) {
+            return c.json({ error: result.error }, 500);
+        }
+        return c.json(result.data);
+    } catch (error) {
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+// FOG Project API routes
+app.get('/api/fog/status', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    return c.json({
+        configured: isFogConfigured(),
+        url: process.env.FOG_URL || null,
+    });
+});
+
+app.get('/api/fog/system-info', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const result = await getFogSystemInfo();
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.get('/api/fog/hosts', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const search = c.req.query('search');
+    const result = await listFogHosts(search || undefined);
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.get('/api/fog/hosts/:id', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const id = parseInt(c.req.param('id'), 10);
+    if (isNaN(id)) {
+        return c.json({ error: 'Invalid host ID' }, 400);
+    }
+
+    const result = await getFogHost(id);
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.post('/api/fog/hosts', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    try {
+        const body = await c.req.json<Record<string, unknown>>();
+        const result = await createFogHost(body);
+        if (!result.success) {
+            return c.json({ error: result.error }, 500);
+        }
+        return c.json(result.data);
+    } catch (error) {
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+app.put('/api/fog/hosts/:id', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const id = parseInt(c.req.param('id'), 10);
+    if (isNaN(id)) {
+        return c.json({ error: 'Invalid host ID' }, 400);
+    }
+
+    try {
+        const body = await c.req.json<Record<string, unknown>>();
+        const result = await updateFogHost(id, body);
+        if (!result.success) {
+            return c.json({ error: result.error }, 500);
+        }
+        return c.json(result.data);
+    } catch (error) {
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+app.delete('/api/fog/hosts/:id', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const id = parseInt(c.req.param('id'), 10);
+    if (isNaN(id)) {
+        return c.json({ error: 'Invalid host ID' }, 400);
+    }
+
+    const result = await deleteFogHost(id);
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json({ success: true });
+});
+
+app.get('/api/fog/images', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const result = await listFogImages();
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.get('/api/fog/tasktypes', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const result = await listFogTaskTypes();
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.get('/api/fog/snapins', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const result = await listFogSnapins();
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.get('/api/fog/tasks/active', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const result = await listActiveTasks();
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.get('/api/fog/multicastsessions/current', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const result = await listActiveMulticastSessions();
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json(result.data);
+});
+
+app.post('/api/fog/hosts/:id/task', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const hostId = parseInt(c.req.param('id'), 10);
+    if (isNaN(hostId)) {
+        return c.json({ error: 'Invalid host ID' }, 400);
+    }
+
+    try {
+        const body = await c.req.json<{
+            taskType: string;
+            [key: string]: unknown;
+        }>();
+        const result = await createFogTask(hostId, parseInt(body.taskType, 10), body);
+        if (!result.success) {
+            return c.json({ error: result.error }, 500);
+        }
+        return c.json(result.data);
+    } catch (error) {
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+app.post('/api/fog/hosts/:id/snapin-task', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const hostId = parseInt(c.req.param('id'), 10);
+    if (isNaN(hostId)) {
+        return c.json({ error: 'Invalid host ID' }, 400);
+    }
+
+    try {
+        const body = await c.req.json<{
+            snapinID: number;
+            [key: string]: unknown;
+        }>();
+        const result = await createFogSnapinTask(hostId, body.snapinID, body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }

@@ -1,0 +1,374 @@
+export interface FogHostScreen {
+    id: number | null;
+    hostID: number | null;
+    width: number | null;
+    height: number | null;
+    refresh: number | null;
+    orientation: number | null;
+    other1: number | null;
+    other2: number | null;
+}
+
+export interface FogHostAlo {
+    id: number | null;
+    hostID: number | null;
+    time: number | null;
+}
+
+export interface FogInventory {
+    id: number;
+    hostID: number;
+    primaryUser: string;
+    other1: string;
+    other2: string;
+    createdTime: string;
+    deleteDate: string;
+    sysman: string;
+    sysproduct: string;
+    sysversion: string;
+    sysserial: string;
+    sysuuid: string;
+    systype: string;
+    biosversion: string;
+    biosvendor: string;
+    biosdate: string;
+    mbman: string;
+    mbproductname: string;
+    mbversion: string;
+    mbserial: string;
+    mbasset: string;
+    cpuman: string;
+    cpuversion: string;
+    cpucurrent: string;
+    cpumax: string;
+    mem: string;
+    hdmodel: string;
+    hdserial: string;
+    hdfirmware: string;
+    caseman: string;
+    casever: string;
+    caseserial: string;
+    caseasset: string;
+    gpuvendors: string;
+    gpuproducts: string;
+    memory: string;
+}
+
+export interface FogImageDetails {
+    imageTypeID: number;
+    imagePartitionTypeID: number;
+    id: number;
+    name: string;
+    description: string;
+    path: string;
+    createdTime: string;
+    createdBy: string;
+    building: number;
+    size: string;
+    osID: number;
+    deployed: string;
+    format: string;
+    magnet: string;
+    protected: number;
+    compress: number;
+    isEnabled: string;
+    toReplicate: string;
+    srvsize: number;
+    os: Record<string, unknown>;
+    imagepartitiontype: Record<string, unknown>;
+    imagetype: Record<string, unknown>;
+}
+
+export interface FogHost {
+    id: number;
+    name: string;
+    description?: string;
+    ip?: string;
+    imageID?: number;
+    building?: number;
+    createdTime?: string;
+    deployed?: string;
+    createdBy?: string;
+    useAD?: string;
+    ADDomain?: string;
+    ADOU?: string;
+    ADUser?: string;
+    ADPass?: string;
+    ADPassLegacy?: string;
+    productKey?: string;
+    printerLevel?: string;
+    kernelArgs?: string;
+    kernel?: string;
+    kernelDevice?: string;
+    init?: string;
+    pending?: string;
+    pub_key?: string;
+    sec_tok?: string;
+    sec_time?: string;
+    pingstatus?: string;
+    biosexit?: string;
+    efiexit?: string;
+    enforce?: string;
+    token?: string;
+    tokenlock?: number;
+    primac?: string;
+    imagename?: string;
+    hostscreen?: FogHostScreen;
+    hostalo?: FogHostAlo;
+    inventory?: FogInventory;
+    image?: FogImageDetails;
+    pingstatuscode?: number;
+    pingstatustext?: string;
+    macs?: string[];
+    snapinID?: number[];
+    [key: string]: unknown;
+}
+
+export type ListFogHosts = {
+    count: number;
+    hosts: FogHost[];
+};
+
+export type ListFogImages = {
+    count: number;
+    images: FogImage[];
+};
+
+export type ListFogTaskTypes = {
+    count: number;
+    tasktypes: FogTaskType[];
+};
+
+export type ListFogSnapins = {
+    count: number;
+    snapins: FogSnapin[];
+};
+
+export type ListActiveFogTasks = {
+    count: number;
+    tasks: unknown[];
+};
+
+export type ListActiveFogMulticastSessions = {
+    count: number;
+    multicastsessions: unknown[];
+};
+
+export interface FogImage {
+    id: number;
+    name: string;
+    description?: string;
+    path?: string;
+    size?: string;
+    [key: string]: unknown;
+}
+
+export interface FogTaskType {
+    id: number;
+    name: string;
+    description?: string;
+    icon?: string;
+    type?: string;
+    [key: string]: unknown;
+}
+
+export interface FogSnapin {
+    id: number;
+    name: string;
+    description?: string;
+    file?: string;
+    args?: string;
+    [key: string]: unknown;
+}
+
+export interface FogTaskResult {
+    id?: number;
+    name?: string;
+    message?: string;
+    [key: string]: unknown;
+}
+
+export async function getFogStatus(): Promise<{
+    configured: boolean;
+    url: string | null;
+}> {
+    const response = await fetch('/api/fog/status', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch FOG status');
+    }
+    return response.json() as Promise<{
+        configured: boolean;
+        url: string | null;
+    }>;
+}
+
+export async function getFogSystemInfo(): Promise<unknown> {
+    const response = await fetch('/api/fog/system-info', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to fetch FOG system info');
+    }
+    return response.json();
+}
+
+export async function listFogHosts(search?: string): Promise<ListFogHosts> {
+    const query = search ? `?search=${encodeURIComponent(search)}` : '';
+    const response = await fetch(`/api/fog/hosts${query}`, {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to list FOG hosts');
+    }
+    return response.json() as Promise<ListFogHosts>;
+}
+
+export async function getFogHost(id: number): Promise<FogHost> {
+    const response = await fetch(`/api/fog/hosts/${id}`, {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get FOG host ${id}`);
+    }
+    return response.json() as Promise<FogHost>;
+}
+
+export async function createFogHost(hostData: {
+    name: string;
+    macs: string[];
+    description?: string;
+    imageID?: number;
+}): Promise<FogHost> {
+    const response = await fetch('/api/fog/hosts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(hostData),
+    });
+    if (!response.ok) {
+        throw new Error('Failed to create FOG host');
+    }
+    return response.json() as Promise<FogHost>;
+}
+
+export async function updateFogHost(
+    id: number,
+    updates: Partial<FogHost>,
+): Promise<FogHost> {
+    const response = await fetch(`/api/fog/hosts/${id}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to update FOG host ${id}`);
+    }
+    return response.json() as Promise<FogHost>;
+}
+
+export async function deleteFogHost(id: number): Promise<{ success: boolean }> {
+    const response = await fetch(`/api/fog/hosts/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to delete FOG host ${id}`);
+    }
+    return response.json() as Promise<{ success: boolean }>;
+}
+
+export async function listFogImages(): Promise<ListFogImages> {
+    const response = await fetch('/api/fog/images', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to list FOG images');
+    }
+    return response.json() as Promise<ListFogImages>;
+}
+
+export async function listFogTaskTypes(): Promise<ListFogTaskTypes> {
+    const response = await fetch('/api/fog/tasktypes', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to list FOG task types');
+    }
+    return response.json() as Promise<ListFogTaskTypes>;
+}
+
+export async function listFogSnapins(): Promise<ListFogSnapins> {
+    const response = await fetch('/api/fog/snapins', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to list FOG snapins');
+    }
+    return response.json() as Promise<ListFogSnapins>;
+}
+
+export async function listActiveFogTasks(): Promise<ListActiveFogTasks> {
+    const response = await fetch('/api/fog/tasks/active', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to list active FOG tasks');
+    }
+    return response.json() as Promise<ListActiveFogTasks>;
+}
+
+export async function listActiveFogMulticastSessions(): Promise<ListActiveFogMulticastSessions> {
+    const response = await fetch('/api/fog/multicastsessions/current', {
+        method: 'GET',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        throw new Error('Failed to list active multicast sessions');
+    }
+    return response.json() as Promise<ListActiveFogMulticastSessions>;
+}
+
+export async function createFogTask(
+    hostId: number,
+    taskTypeId: number,
+    options?: Record<string, unknown>,
+): Promise<FogTaskResult> {
+    const response = await fetch(`/api/fog/hosts/${hostId}/task`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskType: String(taskTypeId), ...options }),
+    });
+    if (!response.ok) {
+        throw new Error('Failed to create FOG task');
+    }
+    return response.json() as Promise<FogTaskResult>;
+}
+
+export async function createFogSnapinTask(
+    hostId: number,
+    snapinId: number,
+    options?: Record<string, unknown>,
+): Promise<FogTaskResult> {
+    const response = await fetch(`/api/fog/hosts/${hostId}/snapin-task`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapinID: snapinId, ...options }),
+    });
+    if (!response.ok) {
+        throw new Error('Failed to create FOG snapin task');
+    }
+    return response.json() as Promise<FogTaskResult>;
+}
