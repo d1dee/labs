@@ -1,375 +1,355 @@
-/*     {selectedHost && (
-                <Card withBorder p='md'>
-                    <Stack gap='md'>
-                        <Group justify='space-between'>
-                            <div>
-                                <Title order={5}>{selectedHost.name}</Title>
-                                <Text size='sm' c='dimmed'>
-                                    Host details and available actions.
-                                </Text>
-                            </div>
-                            <Badge size='lg'>ID: {selectedHost.id}</Badge>
-                        </Group>
+import type { FogHost, FogImage, FogSnapin, FogTaskType } from '@/api/fog';
+import {
+    ActionIcon,
+    Badge,
+    Button,
+    Card,
+    Divider,
+    Group,
+    Menu,
+    Stack,
+    Text,
+    Title,
+} from '@mantine/core';
+import {
+    IconChevronDown,
+    IconDatabase,
+    IconDots,
+    IconPlayerPlay,
+    IconTrash,
+    IconX,
+} from '@tabler/icons-react';
+import { useState } from 'react';
+import { DeletePanel } from './panels/DeletePanel';
+import { ImagePanel } from './panels/ImagePanel';
+import { SnapinPanel } from './panels/SnapinPanel';
+import { TaskPanel } from './panels/TaskPanel';
 
-                        {hostDetailLoading && <Loader size='sm' />}
+export interface SelectedHostCardProps {
+    /** The currently selected host(s) */
+    hosts: FogHost[];
+    images: FogImage[];
+    snapins: FogSnapin[];
+    taskTypes: FogTaskType[];
+    deployTaskTypeId: number | null;
+    captureTaskTypeId: number | null;
+    /** Called when hosts were deleted so the parent can remove them */
+    onHostsDeleted: (deletedIds: number[]) => void;
+    /** Called when a single host was updated so parent can refresh its copy */
+    onHostUpdated: (host: FogHost) => void;
+    /** Called to dismiss/clear the selection */
+    onClose: () => void;
+}
 
-                        <Group grow align='flex-start'>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>MAC Addresses</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        Network addresses for this host.
-                                    </Text>
-                                </div>
-                                <Stack gap={4}>
-                                    {selectedHost.macs?.map((mac) => (
-                                        <Group key={mac} gap='xs'>
-                                            <Text ff='monospace' size='sm'>
-                                                {mac}
-                                            </Text>
-                                            <ActionIcon
-                                                size='xs'
-                                                variant='subtle'
-                                                onClick={() =>
-                                                    copyToClipboard(mac)
-                                                }
-                                            >
-                                                <IconCopy size={12} />
-                                            </ActionIcon>
-                                        </Group>
-                                    )) || <Text size='sm'>-</Text>}
-                                </Stack>
-                            </Stack>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>Description</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        Notes or details about this host.
-                                    </Text>
-                                </div>
-                                <Text size='sm'>
-                                    {selectedHost.description || '-'}
-                                </Text>
-                            </Stack>
-                        </Group>
+export function SelectedHostCard({
+    hosts,
+    images,
+    snapins,
+    taskTypes,
+    deployTaskTypeId,
+    captureTaskTypeId,
+    onHostsDeleted,
+    onHostUpdated,
+    onClose,
+}: SelectedHostCardProps) {
+    /** Which action panel is currently active (null = hidden) */
+    const [activeAction, setActiveAction] = useState<string | null>(null);
 
-                        <Group grow align='flex-start'>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>Current Image</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        The image currently linked to this host.
-                                    </Text>
-                                </div>
-                                <Text size='sm' fw={500}>
-                                    {selectedHost.imagename || 'None assigned'}
-                                </Text>
-                            </Stack>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>Assign Image</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        Choose a new image to deploy to this
-                                        host.
-                                    </Text>
-                                </div>
-                                <Select
-                                    placeholder='Select image...'
-                                    data={images.map((img) => ({
-                                        value: String(img.id),
-                                        label: img.name,
-                                    }))}
-                                    onChange={(val) => {
-                                        if (val)
-                                            handleAssignImage(
-                                                parseInt(val, 10),
-                                            );
-                                    }}
-                                    clearable
-                                />
-                            </Stack>
-                        </Group>
+    if (hosts.length === 0) return null;
 
-                        <Stack gap='xs'>
-                            <div>
-                                <Title order={6}>Imaging Actions</Title>
-                                <Text size='sm' c='dimmed'>
-                                    Start deploy, capture, or snapin tasks.
-                                </Text>
-                            </div>
-                            <Group gap='sm'>
-                                <Button
-                                    size='sm'
-                                    color='green'
-                                    leftSection={<IconPlayerPlay size={14} />}
-                                    onClick={() => {
-                                        if (selectedHost && deployTaskTypeId) {
-                                            handleCreateTask(
-                                                selectedHost,
-                                                deployTaskTypeId,
-                                            );
-                                        } else {
-                                            notifications.show({
-                                                color: 'yellow',
-                                                title: 'No Deploy Type',
-                                                message:
-                                                    'Could not detect deploy task type ID.',
-                                            });
-                                        }
-                                    }}
-                                    loading={taskLoading}
-                                    disabled={!deployTaskTypeId}
-                                >
-                                    Deploy
-                                </Button>
-                                <Button
-                                    size='sm'
-                                    color='orange'
-                                    leftSection={<IconPlayerPlay size={14} />}
-                                    onClick={() => {
-                                        if (selectedHost && captureTaskTypeId) {
-                                            handleCreateTask(
-                                                selectedHost,
-                                                captureTaskTypeId,
-                                            );
-                                        } else {
-                                            notifications.show({
-                                                color: 'yellow',
-                                                title: 'No Capture Type',
-                                                message:
-                                                    'Could not detect capture task type ID.',
-                                            });
-                                        }
-                                    }}
-                                    loading={taskLoading}
-                                    disabled={!captureTaskTypeId}
-                                >
-                                    Capture
-                                </Button>
-                                <Button
-                                    size='sm'
-                                    color='blue'
+    const isBulk = hosts.length > 1;
+
+    // Toggle active action (opens if different/closed, closes if same)
+    const handleToggleAction = (action: string) => {
+        setActiveAction((prev) => (prev === action ? null : action));
+    };
+
+    // Pre-resolve the deploy and capture task types from the reference list
+    const deployTaskType = deployTaskTypeId
+        ? taskTypes.find((t) => t.id === deployTaskTypeId)
+        : undefined;
+
+    const captureTaskType = captureTaskTypeId
+        ? taskTypes.find((t) => t.id === captureTaskTypeId)
+        : undefined;
+
+    /** Task types not directly surfaced as top-level buttons or capture */
+    const extraTaskTypes = taskTypes.filter(
+        (tt) =>
+            tt.id !== deployTaskTypeId && tt.id !== captureTaskTypeId,
+    );
+
+    // Resolve the active task type if the current active action is a task
+    const activeTaskType = activeAction?.startsWith('task-')
+        ? taskTypes.find((t) => `task-${t.id}` === activeAction)
+        : undefined;
+
+    // Determine the title of the active panel
+    let panelTitle = '';
+    if (activeAction === 'image') panelTitle = 'Image Assignment';
+    else if (activeAction === 'snapin') panelTitle = 'Send Snapin';
+    else if (activeAction === 'delete') panelTitle = 'Delete Hosts';
+    else if (activeTaskType) panelTitle = `Run Task: ${activeTaskType.name}`;
+
+    // ──────────────────────────────────────────────
+    //  Header summary
+    // ──────────────────────────────────────────────
+    const headerTitle = isBulk
+        ? `${hosts.length} hosts selected`
+        : hosts[0].name;
+    const headerSub = isBulk
+        ? hosts
+              .slice(0, 3)
+              .map((h) => h.name)
+              .join(', ') +
+          (hosts.length > 3 ? `, +${hosts.length - 3} more` : '')
+        : hosts[0].imagename
+          ? `Image: ${hosts[0].imagename}`
+          : 'No image assigned';
+
+    return (
+        <Card withBorder p='md'>
+            <Stack gap='md'>
+                {/* ── Header ── */}
+                <Group justify='space-between' wrap='nowrap'>
+                    <div style={{ minWidth: 0 }}>
+                        <Title order={5} style={{ wordBreak: 'break-word' }}>
+                            {headerTitle}
+                        </Title>
+                        <Text size='sm' c='dimmed' truncate>
+                            {headerSub}
+                        </Text>
+                    </div>
+                    <Group gap='xs' wrap='nowrap'>
+                        {!isBulk && (
+                            <Badge size='lg' variant='outline'>
+                                ID: {hosts[0].id}
+                            </Badge>
+                        )}
+                        <ActionIcon
+                            variant='subtle'
+                            color='gray'
+                            onClick={onClose}
+                            aria-label='Dismiss selection'
+                        >
+                            <IconX size={16} />
+                        </ActionIcon>
+                    </Group>
+                </Group>
+
+                <Divider />
+
+                {/* ── Action buttons toolbar ── */}
+                <Group gap='xs' wrap='wrap'>
+                    {deployTaskType && (
+                        <Button
+                            size='sm'
+                            variant={
+                                activeAction === `task-${deployTaskType.id}`
+                                    ? 'filled'
+                                    : 'light'
+                            }
+                            color='green'
+                            leftSection={<IconPlayerPlay size={14} />}
+                            onClick={() =>
+                                handleToggleAction(`task-${deployTaskType.id}`)
+                            }
+                        >
+                            Deploy
+                        </Button>
+                    )}
+
+                    <Button
+                        size='sm'
+                        variant={activeAction === 'snapin' ? 'filled' : 'light'}
+                        color='indigo'
+                        leftSection={<IconPlayerPlay size={14} />}
+                        onClick={() => handleToggleAction('snapin')}
+                    >
+                        Snapin
+                    </Button>
+
+                    <Button
+                        size='sm'
+                        variant={activeAction === 'image' ? 'filled' : 'light'}
+                        color='blue'
+                        leftSection={<IconDatabase size={14} />}
+                        onClick={() => handleToggleAction('image')}
+                    >
+                        Image
+                    </Button>
+
+                    {/* Three-dot menu for all other actions hidden away */}
+                    <Menu shadow='md' width={220} position='bottom-start'>
+                        <Menu.Target>
+                            <Button
+                                size='sm'
+                                variant='default'
+                                aria-label='More actions'
+                                leftSection={<IconDots size={16} />}
+                                rightSection={<IconChevronDown size={14} />}
+                            >
+                                More
+                            </Button>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                            <Menu.Label>Actions</Menu.Label>
+                            <Menu.Item
+                                color='red'
+                                leftSection={<IconTrash size={14} />}
+                                onClick={() => handleToggleAction('delete')}
+                            >
+                                Delete
+                            </Menu.Item>
+                            {captureTaskType && (
+                                <Menu.Item
                                     leftSection={<IconPlayerPlay size={14} />}
                                     onClick={() =>
-                                        handleOpenSnapinModal(selectedHost)
+                                        handleToggleAction(
+                                            `task-${captureTaskType.id}`,
+                                        )
                                     }
-                                    loading={taskLoading}
-                                >
-                                    Send Snapin
-                                </Button>
-                            </Group>
-                        </Stack>
-
-                        {taskTypes.length > 0 && (
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>
-                                        Available Task Types
-                                    </Title>
-                                    <Text size='sm' c='dimmed'>
-                                        All task types defined in FOG.
-                                    </Text>
-                                </div>
-                                <Group gap='xs'>
-                                    {taskTypes.map((tt) => (
-                                        <Badge
-                                            key={tt.id}
-                                            variant='outline'
-                                            size='sm'
-                                        >
-                                            {tt.id}: {tt.name}
-                                        </Badge>
-                                    ))}
-                                </Group>
-                            </Stack>
-                        )}
-                    </Stack>
-                </Card>
-            )}    {selectedHost && (
-                <Card withBorder p='md'>
-                    <Stack gap='md'>
-                        <Group justify='space-between'>
-                            <div>
-                                <Title order={5}>{selectedHost.name}</Title>
-                                <Text size='sm' c='dimmed'>
-                                    Host details and available actions.
-                                </Text>
-                            </div>
-                            <Badge size='lg'>ID: {selectedHost.id}</Badge>
-                        </Group>
-
-                        {hostDetailLoading && <Loader size='sm' />}
-
-                        <Group grow align='flex-start'>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>MAC Addresses</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        Network addresses for this host.
-                                    </Text>
-                                </div>
-                                <Stack gap={4}>
-                                    {selectedHost.macs?.map((mac) => (
-                                        <Group key={mac} gap='xs'>
-                                            <Text ff='monospace' size='sm'>
-                                                {mac}
-                                            </Text>
-                                            <ActionIcon
-                                                size='xs'
-                                                variant='subtle'
-                                                onClick={() =>
-                                                    copyToClipboard(mac)
-                                                }
-                                            >
-                                                <IconCopy size={12} />
-                                            </ActionIcon>
-                                        </Group>
-                                    )) || <Text size='sm'>-</Text>}
-                                </Stack>
-                            </Stack>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>Description</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        Notes or details about this host.
-                                    </Text>
-                                </div>
-                                <Text size='sm'>
-                                    {selectedHost.description || '-'}
-                                </Text>
-                            </Stack>
-                        </Group>
-
-                        <Group grow align='flex-start'>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>Current Image</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        The image currently linked to this host.
-                                    </Text>
-                                </div>
-                                <Text size='sm' fw={500}>
-                                    {selectedHost.imagename || 'None assigned'}
-                                </Text>
-                            </Stack>
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>Assign Image</Title>
-                                    <Text size='sm' c='dimmed'>
-                                        Choose a new image to deploy to this
-                                        host.
-                                    </Text>
-                                </div>
-                                <Select
-                                    placeholder='Select image...'
-                                    data={images.map((img) => ({
-                                        value: String(img.id),
-                                        label: img.name,
-                                    }))}
-                                    onChange={(val) => {
-                                        if (val)
-                                            handleAssignImage(
-                                                parseInt(val, 10),
-                                            );
-                                    }}
-                                    clearable
-                                />
-                            </Stack>
-                        </Group>
-
-                        <Stack gap='xs'>
-                            <div>
-                                <Title order={6}>Imaging Actions</Title>
-                                <Text size='sm' c='dimmed'>
-                                    Start deploy, capture, or snapin tasks.
-                                </Text>
-                            </div>
-                            <Group gap='sm'>
-                                <Button
-                                    size='sm'
-                                    color='green'
-                                    leftSection={<IconPlayerPlay size={14} />}
-                                    onClick={() => {
-                                        if (selectedHost && deployTaskTypeId) {
-                                            handleCreateTask(
-                                                selectedHost,
-                                                deployTaskTypeId,
-                                            );
-                                        } else {
-                                            notifications.show({
-                                                color: 'yellow',
-                                                title: 'No Deploy Type',
-                                                message:
-                                                    'Could not detect deploy task type ID.',
-                                            });
-                                        }
-                                    }}
-                                    loading={taskLoading}
-                                    disabled={!deployTaskTypeId}
-                                >
-                                    Deploy
-                                </Button>
-                                <Button
-                                    size='sm'
-                                    color='orange'
-                                    leftSection={<IconPlayerPlay size={14} />}
-                                    onClick={() => {
-                                        if (selectedHost && captureTaskTypeId) {
-                                            handleCreateTask(
-                                                selectedHost,
-                                                captureTaskTypeId,
-                                            );
-                                        } else {
-                                            notifications.show({
-                                                color: 'yellow',
-                                                title: 'No Capture Type',
-                                                message:
-                                                    'Could not detect capture task type ID.',
-                                            });
-                                        }
-                                    }}
-                                    loading={taskLoading}
-                                    disabled={!captureTaskTypeId}
                                 >
                                     Capture
-                                </Button>
-                                <Button
-                                    size='sm'
-                                    color='blue'
+                                </Menu.Item>
+                            )}
+
+                            {extraTaskTypes.length > 0 && <Menu.Divider />}
+                            {extraTaskTypes.length > 0 && (
+                                <Menu.Label>Other Tasks</Menu.Label>
+                            )}
+                            {extraTaskTypes.map((tt) => (
+                                <Menu.Item
+                                    key={tt.id}
                                     leftSection={<IconPlayerPlay size={14} />}
                                     onClick={() =>
-                                        handleOpenSnapinModal(selectedHost)
+                                        handleToggleAction(`task-${tt.id}`)
                                     }
-                                    loading={taskLoading}
                                 >
-                                    Send Snapin
-                                </Button>
-                            </Group>
-                        </Stack>
+                                    {tt.name}
+                                </Menu.Item>
+                            ))}
+                        </Menu.Dropdown>
+                    </Menu>
+                </Group>
 
-                        {taskTypes.length > 0 && (
-                            <Stack gap='xs'>
-                                <div>
-                                    <Title order={6}>
-                                        Available Task Types
-                                    </Title>
-                                    <Text size='sm' c='dimmed'>
-                                        All task types defined in FOG.
-                                    </Text>
-                                </div>
-                                <Group gap='xs'>
-                                    {taskTypes.map((tt) => (
-                                        <Badge
-                                            key={tt.id}
-                                            variant='outline'
-                                            size='sm'
-                                        >
-                                            {tt.id}: {tt.name}
-                                        </Badge>
-                                    ))}
-                                </Group>
-                            </Stack>
+                {/* ── Active Action Panel ── */}
+                {activeAction && (
+                    <Card p='sm' mt='xs' withBorder>
+                        <Group justify='space-between' mb='sm'>
+                            <Text fw={600} size='sm'>
+                                {panelTitle}
+                            </Text>
+                            <ActionIcon
+                                size='xs'
+                                variant='subtle'
+                                color='gray'
+                                onClick={() => setActiveAction(null)}
+                                aria-label='Close panel'
+                            >
+                                <IconX size={12} />
+                            </ActionIcon>
+                        </Group>
+
+                        {activeAction === 'image' && (
+                            <ImagePanel
+                                hosts={hosts}
+                                images={images}
+                                onDone={(updated) => {
+                                    setActiveAction(null);
+                                    if (updated) onHostUpdated(updated);
+                                }}
+                            />
                         )}
+                        {activeAction === 'snapin' && (
+                            <SnapinPanel
+                                hosts={hosts}
+                                snapins={snapins}
+                                onDone={() => setActiveAction(null)}
+                            />
+                        )}
+                        {activeAction === 'delete' && (
+                            <DeletePanel
+                                hosts={hosts}
+                                onDone={(deletedIds) => {
+                                    setActiveAction(null);
+                                    onHostsDeleted(deletedIds);
+                                }}
+                            />
+                        )}
+                        {activeTaskType && (
+                            <TaskPanel
+                                key={activeAction}
+                                hosts={hosts}
+                                taskType={activeTaskType}
+                                onDone={() => setActiveAction(null)}
+                            />
+                        )}
+                    </Card>
+                )}
+
+                {/* ── Single-host details ── */}
+                {!isBulk && (
+                    <Stack gap='xs'>
+                        <Divider label='Host details' labelPosition='left' />
+                        <Group grow align='flex-start'>
+                            <Stack gap={4}>
+                                <Text
+                                    size='xs'
+                                    fw={600}
+                                    tt='uppercase'
+                                    c='dimmed'
+                                >
+                                    MAC Addresses
+                                </Text>
+                                {hosts[0].macs && hosts[0].macs.length > 0 ? (
+                                    hosts[0].macs.map((mac) => (
+                                        <Text
+                                            key={mac}
+                                            size='sm'
+                                            ff='monospace'
+                                        >
+                                            {mac}
+                                        </Text>
+                                    ))
+                                ) : (
+                                    <Text size='sm' c='dimmed'>
+                                        —
+                                    </Text>
+                                )}
+                            </Stack>
+                            <Stack gap={4}>
+                                <Text
+                                    size='xs'
+                                    fw={600}
+                                    tt='uppercase'
+                                    c='dimmed'
+                                >
+                                    Description
+                                </Text>
+                                <Text size='sm'>
+                                    {hosts[0].description || '—'}
+                                </Text>
+                            </Stack>
+                            {hosts[0].ip && (
+                                <Stack gap={4}>
+                                    <Text
+                                        size='xs'
+                                        fw={600}
+                                        tt='uppercase'
+                                        c='dimmed'
+                                    >
+                                        IP
+                                    </Text>
+                                    <Text size='sm' ff='monospace'>
+                                        {hosts[0].ip}
+                                    </Text>
+                                </Stack>
+                            )}
+                        </Group>
                     </Stack>
-                </Card>
-            )} */
+                )}
+            </Stack>
+        </Card>
+    );
+}

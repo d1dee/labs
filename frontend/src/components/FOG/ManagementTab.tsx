@@ -22,8 +22,9 @@ import {
     Title,
 } from '@mantine/core';
 import { IconAlertCircle, IconRefresh } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { HostTable } from './HostTable';
+import { SelectedHostCard } from './SelectedHostCard';
 
 function ManagementTab() {
     const [configured, setConfigured] = useState<boolean | null>(null);
@@ -31,13 +32,10 @@ function ManagementTab() {
     const [taskTypes, setTaskTypes] = useState<FogTaskType[]>([]);
     const [snapins, setSnapins] = useState<FogSnapin[]>([]);
     const [loading, setLoading] = useState(true);
-    const [selectedHost, setSelectedHost] = useState<FogHost | null>(null);
-    const [hostDetailLoading, setHostDetailLoading] = useState(false);
+    const [allHosts, setAllHosts] = useState<FogHost[]>([]);
 
-    const [snapinModalOpen, setSnapinModalOpen] = useState(false);
-    const [selectedSnapin, setSelectedSnapin] = useState<string | null>(null);
-    const [taskingHost, setTaskingHost] = useState<FogHost | null>(null);
-    const [taskLoading, setTaskLoading] = useState(false);
+    // Selection state lives here and is shared down to both table and card
+    const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
     const [deployTaskTypeId, setDeployTaskTypeId] = useState<number | null>(
         null,
@@ -45,7 +43,6 @@ function ManagementTab() {
     const [captureTaskTypeId, setCaptureTaskTypeId] = useState<number | null>(
         null,
     );
-    const [allHosts, setAllHosts] = useState<FogHost[]>([]);
 
     const fetchStatus = async () => {
         try {
@@ -69,7 +66,11 @@ function ManagementTab() {
             setImages(imgs.images);
             setTaskTypes(types.tasktypes);
             setSnapins(snaps.snapins);
+
+            // Reconcile selection against the fresh host list
+            const freshIds = new Set(hosts.hosts.map((h) => h.id));
             setAllHosts(hosts.hosts);
+            setSelectedIds((prev) => prev.filter((id) => freshIds.has(id)));
 
             const deploy = types.tasktypes.find((t) =>
                 t.name?.toLowerCase().includes('deploy'),
@@ -97,6 +98,47 @@ function ManagementTab() {
     useEffect(() => {
         loadAll();
     }, []);
+
+    // O(1) lookup set for selected IDs
+    const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+    // Derive the actual FogHost objects for selected IDs — O(n)
+    const selectedHosts = useMemo(
+        () => allHosts.filter((h) => selectedSet.has(h.id)),
+        [allHosts, selectedSet],
+    );
+
+    // Memoised stat counts — single pass
+    const { onlineCount, offlineCount } = useMemo(
+        () =>
+            allHosts.reduce(
+                (acc, h) => {
+                    if (h.pingstatuscode === 0) acc.onlineCount++;
+                    else if (h.pingstatuscode === 1) acc.offlineCount++;
+                    return acc;
+                },
+                { onlineCount: 0, offlineCount: 0 },
+            ),
+        [allHosts],
+    );
+
+    // When hosts are deleted, remove them from allHosts and clear selection
+    const handleHostsDeleted = useCallback((deletedIds: number[]) => {
+        const del = new Set(deletedIds);
+        setAllHosts((prev) => prev.filter((h) => !del.has(h.id)));
+        setSelectedIds((prev) => prev.filter((id) => !del.has(id)));
+    }, []);
+
+    // When a single host is updated, patch it in place
+    const handleHostUpdated = useCallback((updated: FogHost) => {
+        setAllHosts((prev) =>
+            prev.map((h) => (h.id === updated.id ? updated : h)),
+        );
+    }, []);
+
+    // Stable key for SelectedHostCard — forces remount (resets tab state) when
+    // the set of selected hosts changes identity
+    const cardKey = selectedIds.slice().sort().join(',');
 
     if (loading && configured === null) {
         return (
@@ -151,29 +193,17 @@ function ManagementTab() {
                         <Text size='sm' c='dimmed'>
                             Online
                         </Text>
-                        <Group justify='space-between'>
-                            <Text size='xl' fw={700} c='green'>
-                                {
-                                    allHosts.filter(
-                                        (h) => h.pingstatuscode === 0,
-                                    ).length
-                                }
-                            </Text>
-                        </Group>
+                        <Text size='xl' fw={700} c='green'>
+                            {onlineCount}
+                        </Text>
                     </Card>
                     <Card withBorder>
                         <Text size='sm' c='dimmed'>
                             Offline
                         </Text>
-                        <Group justify='space-between'>
-                            <Text size='xl' fw={700} c='red'>
-                                {
-                                    allHosts.filter(
-                                        (h) => h.pingstatuscode === 1,
-                                    ).length
-                                }
-                            </Text>
-                        </Group>
+                        <Text size='xl' fw={700} c='red'>
+                            {offlineCount}
+                        </Text>
                     </Card>
                     <Card withBorder>
                         <Text size='sm' c='dimmed'>
@@ -190,10 +220,30 @@ function ManagementTab() {
                 <div>
                     <Title order={5}>Registered Hosts</Title>
                     <Text size='sm' c='dimmed'>
-                        Select a host to view details or perform actions.
+                        Select one or more hosts to perform actions.
                     </Text>
                 </div>
-                <HostTable allHosts={allHosts} />
+
+                <HostTable
+                    allHosts={allHosts}
+                    selectedIds={selectedIds}
+                    onSelectionChange={setSelectedIds}
+                />
+
+                {selectedHosts.length > 0 && (
+                    <SelectedHostCard
+                        key={cardKey}
+                        hosts={selectedHosts}
+                        images={images}
+                        snapins={snapins}
+                        taskTypes={taskTypes}
+                        deployTaskTypeId={deployTaskTypeId}
+                        captureTaskTypeId={captureTaskTypeId}
+                        onHostsDeleted={handleHostsDeleted}
+                        onHostUpdated={handleHostUpdated}
+                        onClose={() => setSelectedIds([])}
+                    />
+                )}
             </Stack>
         </Stack>
     );

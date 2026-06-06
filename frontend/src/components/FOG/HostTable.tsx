@@ -1,4 +1,5 @@
-import { ListFogHosts, type FogHost } from '@/api/fog';
+import type { FogHost } from '@/api/fog';
+import type { ListFogHosts } from '@/api/fog';
 import {
     ActionIcon,
     Badge,
@@ -14,7 +15,6 @@ import {
     TextInput,
     Tooltip,
 } from '@mantine/core';
-import { useSelection } from '@mantine/hooks';
 import {
     IconPlayerPlay,
     IconSearch,
@@ -22,6 +22,12 @@ import {
     IconX,
 } from '@tabler/icons-react';
 import { useDeferredValue, useMemo, useState } from 'react';
+
+/** Build a O(1) lookup set from the selectedIds array */
+function useSelectedSet(selectedIds: number[]): Set<number> {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return useMemo(() => new Set(selectedIds), [selectedIds]);
+}
 
 interface Filters {
     search: string;
@@ -61,18 +67,34 @@ function toOptions(
         .map((v) => ({ value: v, label: v }));
 }
 
-export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
+export interface HostTableProps {
+    allHosts: ListFogHosts['hosts'];
+    selectedIds: number[];
+    onSelectionChange: (ids: number[]) => void;
+    onDeploy?: (host: FogHost) => void;
+    onSnapin?: (host: FogHost) => void;
+    onDelete?: (host: FogHost) => void;
+}
+
+export function HostTable({
+    allHosts,
+    selectedIds,
+    onSelectionChange,
+    onDeploy,
+    onSnapin,
+    onDelete,
+}: HostTableProps) {
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
 
-    // Deferred: filters drives the expensive memo + table render at low priority.
-    // The input itself updates at high priority so the controlled value stays instant.
     const deferredFilters = useDeferredValue(filters);
     const isPending = filters !== deferredFilters;
+
+    // O(1) selected-id lookup — rebuilt only when selectedIds reference changes
+    const selectedSet = useSelectedSet(selectedIds);
 
     const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) =>
         setFilters((prev) => ({ ...prev, [key]: value }));
 
-    // Derive unique option lists from allHosts
     const imageOptions = useMemo(
         () => toOptions(allHosts.map((h) => h.imagename)),
         [allHosts],
@@ -94,39 +116,69 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
 
     const filteredHosts = useMemo(() => {
         return allHosts.filter((host) => {
-            if (filters.search && !matchesSearch(host, filters.search))
-                return false;
-            if (filters.image && host.imagename !== filters.image) return false;
             if (
-                filters.status &&
-                (host.pingstatustext ?? 'unknown') !== filters.status
+                deferredFilters.search &&
+                !matchesSearch(host, deferredFilters.search)
             )
                 return false;
             if (
-                filters.manufacturer &&
-                host.inventory?.sysman !== filters.manufacturer
+                deferredFilters.image &&
+                host.imagename !== deferredFilters.image
             )
                 return false;
-            if (filters.model && host.inventory?.sysproduct !== filters.model)
+            if (
+                deferredFilters.status &&
+                (host.pingstatustext ?? 'unknown') !== deferredFilters.status
+            )
+                return false;
+            if (
+                deferredFilters.manufacturer &&
+                host.inventory?.sysman !== deferredFilters.manufacturer
+            )
+                return false;
+            if (
+                deferredFilters.model &&
+                host.inventory?.sysproduct !== deferredFilters.model
+            )
                 return false;
             return true;
         });
-    }, [allHosts, filters]);
+    }, [allHosts, deferredFilters]);
 
     const filteredIds = useMemo(
         () => filteredHosts.map((h) => h.id),
         [filteredHosts],
     );
 
-    const [selection, selectionHandlers] = useSelection<number>({
-        data: filteredIds,
-        resetSelectionOnDataChange: true,
-    });
+    const isAllSelected =
+        filteredIds.length > 0 &&
+        filteredIds.every((id) => selectedSet.has(id));
+    const isSomeSelected =
+        filteredIds.some((id) => selectedSet.has(id)) && !isAllSelected;
+
+    const toggleAll = () => {
+        if (isAllSelected) {
+            // Deselect all filtered ids — use a set for O(n) total
+            const filteredSet = new Set(filteredIds);
+            onSelectionChange(selectedIds.filter((id) => !filteredSet.has(id)));
+        } else {
+            // Select all filtered ids (merge with existing)
+            const merged = [...new Set([...selectedIds, ...filteredIds])];
+            onSelectionChange(merged);
+        }
+    };
+
+    const toggleOne = (id: number) => {
+        if (selectedSet.has(id)) {
+            onSelectionChange(selectedIds.filter((i) => i !== id));
+        } else {
+            onSelectionChange([...selectedIds, id]);
+        }
+    };
 
     const hasActiveFilters = Object.values(filters).some(
         (v) => v !== null && v !== '',
     );
-
     const clearFilters = () => setFilters(EMPTY_FILTERS);
 
     return (
@@ -210,6 +262,7 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                     <Text size='sm' c='dimmed'>
                                         Showing {filteredHosts.length} of{' '}
                                         {allHosts.length} hosts
+                                        {isPending && ' …'}
                                     </Text>
                                     <Button
                                         size='xs'
@@ -220,6 +273,13 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                         Clear filters
                                     </Button>
                                 </Group>
+                            )}
+                            {selectedIds.length > 0 && (
+                                <Text size='sm' c='blue' fw={500}>
+                                    {selectedIds.length} host
+                                    {selectedIds.length !== 1 ? 's' : ''}{' '}
+                                    selected
+                                </Text>
                             )}
                         </Stack>
                     </Card>
@@ -241,22 +301,9 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                             <Table.Th>
                                                 <Checkbox
                                                     aria-label='Select all rows'
-                                                    checked={selectionHandlers.isAllSelected()}
-                                                    indeterminate={
-                                                        selectionHandlers.isSomeSelected() &&
-                                                        !selectionHandlers.isAllSelected()
-                                                    }
-                                                    onChange={() => {
-                                                        if (
-                                                            selectionHandlers.isAllSelected()
-                                                        ) {
-                                                            selectionHandlers.resetSelection();
-                                                        } else {
-                                                            selectionHandlers.setSelection(
-                                                                filteredIds,
-                                                            );
-                                                        }
-                                                    }}
+                                                    checked={isAllSelected}
+                                                    indeterminate={isSomeSelected}
+                                                    onChange={toggleAll}
                                                 />
                                             </Table.Th>
                                             <Table.Th>ID</Table.Th>
@@ -286,21 +333,29 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                                 <Table.Tr
                                                     key={host.id}
                                                     bg={
-                                                        selection.includes(
+                                                        selectedSet.has(
                                                             host.id,
                                                         )
                                                             ? 'var(--mantine-color-blue-light)'
                                                             : undefined
                                                     }
+                                                    style={{ cursor: 'pointer' }}
+                                                    onClick={() =>
+                                                        toggleOne(host.id)
+                                                    }
                                                 >
-                                                    <Table.Td>
+                                                    <Table.Td
+                                                        onClick={(e) =>
+                                                            e.stopPropagation()
+                                                        }
+                                                    >
                                                         <Checkbox
                                                             aria-label='Select row'
-                                                            checked={selection.includes(
+                                                            checked={selectedSet.has(
                                                                 host.id,
                                                             )}
                                                             onChange={() =>
-                                                                selectionHandlers.toggle(
+                                                                toggleOne(
                                                                     host.id,
                                                                 )
                                                             }
@@ -333,7 +388,7 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                                     </Table.Td>
                                                     <Table.Td
                                                         onClick={(e) =>
-                                                            e.preventDefault()
+                                                            e.stopPropagation()
                                                         }
                                                     >
                                                         {host.inventory ? (
@@ -374,7 +429,14 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                                             }
                                                         >
                                                             <Tooltip label='Deploy'>
-                                                                <ActionIcon color='green'>
+                                                                <ActionIcon
+                                                                    color='green'
+                                                                    onClick={() =>
+                                                                        onDeploy?.(
+                                                                            host,
+                                                                        )
+                                                                    }
+                                                                >
                                                                     <IconPlayerPlay
                                                                         size={
                                                                             16
@@ -383,7 +445,14 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                             <Tooltip label='Send Snapin'>
-                                                                <ActionIcon color='blue'>
+                                                                <ActionIcon
+                                                                    color='blue'
+                                                                    onClick={() =>
+                                                                        onSnapin?.(
+                                                                            host,
+                                                                        )
+                                                                    }
+                                                                >
                                                                     <IconPlayerPlay
                                                                         size={
                                                                             16
@@ -392,7 +461,14 @@ export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                             <Tooltip label='Delete'>
-                                                                <ActionIcon color='red'>
+                                                                <ActionIcon
+                                                                    color='red'
+                                                                    onClick={() =>
+                                                                        onDelete?.(
+                                                                            host,
+                                                                        )
+                                                                    }
+                                                                >
                                                                     <IconTrash
                                                                         size={
                                                                             16
