@@ -7,7 +7,7 @@
 
 # --- Configuration ---
 # URL to the hosted zip file (HTTPS is highly recommended)
- $DownloadUrl = "https://your-domain.com/path/to/GPO_Backup.zip"
+ $DownloadUrl = "https://192.168.1.21/iso/GPO-policies/GPO_Backup.zip"
 
 # Local path where the zip will be temporarily saved
  $ZipFilePath = "$env:Temp\FogGpoRestore.zip"
@@ -28,7 +28,7 @@
 Write-Output "Downloading GPO backup from $DownloadUrl..."
 try {
     # Download the file. Using -OutFile automatically handles saving the stream correctly.
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipFilePath -UseBasicParsing
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipFilePath -UseBasicParsing  -SkipCertificateCheck
     Write-Output "Download complete. Saved to $ZipFilePath"
 }
 catch {
