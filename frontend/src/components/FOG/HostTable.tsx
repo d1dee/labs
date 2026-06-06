@@ -1,187 +1,324 @@
-import {
-    ListFogHosts,
-    listFogHosts,
-    type FogHost,
-    type FogImage,
-    type FogSnapin,
-} from '@/api/fog';
+import { ListFogHosts, type FogHost } from '@/api/fog';
 import {
     ActionIcon,
     Badge,
     Button,
     Card,
+    Checkbox,
     Group,
     HoverCard,
+    Select,
     Stack,
     Table,
     Text,
     TextInput,
     Tooltip,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
-import { IconPlayerPlay, IconSearch, IconTrash } from '@tabler/icons-react';
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { useSelection } from '@mantine/hooks';
+import {
+    IconPlayerPlay,
+    IconSearch,
+    IconTrash,
+    IconX,
+} from '@tabler/icons-react';
+import { useDeferredValue, useMemo, useState } from 'react';
 
-export interface HostTableHandle {
-    refresh: () => Promise<void>;
-    getSelectedHosts: () => FogHost[];
-    clearSelection: () => void;
+interface Filters {
+    search: string;
+    image: string | null;
+    status: string | null;
+    manufacturer: string | null;
+    model: string | null;
 }
 
-interface HostTableProps {
-    onSelectHost: (host: FogHost) => void;
-    onDeploy: (host: FogHost) => void;
-    onSnapin: (host: FogHost) => void;
-    onDelete: (host: FogHost) => void;
-    selectedHostId?: number | null;
-    deployTaskTypeId?: number | null;
-    taskLoading?: boolean;
-    onSelectionChange?: (selectedHosts: FogHost[]) => void;
+const EMPTY_FILTERS: Filters = {
+    search: '',
+    image: null,
+    status: null,
+    manufacturer: null,
+    model: null,
+};
 
-    images?: FogImage[];
-    snapins?: FogSnapin[];
-    onBulkDeploy?: (hosts: FogHost[]) => void;
-    onBulkDelete?: (hosts: FogHost[]) => void;
-    onBulkAssignImage?: (hosts: FogHost[], imageId: number) => void;
-    onBulkSnapin?: (hosts: FogHost[], snapinId: number) => void;
-    onHostsChange?: (hosts: FogHost[]) => void;
+function matchesSearch(host: FogHost, term: string): boolean {
+    const t = term.toLowerCase();
+    return (
+        host.name?.toLowerCase().includes(t) ||
+        host.macs?.some((m) => m.toLowerCase().includes(t)) ||
+        host.imagename?.toLowerCase().includes(t) ||
+        host.inventory?.sysman?.toLowerCase().includes(t) ||
+        host.inventory?.sysproduct?.toLowerCase().includes(t) ||
+        host.inventory?.cpuversion?.toLowerCase().includes(t) ||
+        host.ip?.toLowerCase().includes(t) ||
+        false
+    );
 }
 
-const HostTable = forwardRef<HostTableHandle, HostTableProps>(
-    (
-        {
-            onSelectHost,
-            onDeploy,
-            onSnapin,
-            onDelete,
-            deployTaskTypeId,
-            taskLoading,
-            onHostsChange,
-        },
-        ref,
-    ) => {
-        const [searchName, setSearchName] = useState('');
-        const [searchMac, setSearchMac] = useState('');
-        const [searching, setSearching] = useState(false);
-        const [hosts, setHosts] = useState<ListFogHosts['hosts']>([]);
+function toOptions(
+    values: (string | undefined | null)[],
+): { value: string; label: string }[] {
+    return [...new Set(values.filter(Boolean) as string[])]
+        .sort()
+        .map((v) => ({ value: v, label: v }));
+}
 
-        const fetchHosts = async (search?: string) => {
-            setSearching(true);
-            try {
-                const data = await listFogHosts(search);
-                setHosts(data.hosts);
-                onHostsChange?.(data.hosts);
-            } catch (err) {
-                notifications.show({
-                    color: 'red',
-                    title: 'Error',
-                    message: String(err),
-                });
-            } finally {
-                setSearching(false);
-            }
-        };
+export function HostTable({ allHosts }: { allHosts: ListFogHosts['hosts'] }) {
+    const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
 
-        useImperativeHandle(ref, () => ({
-            refresh: () => fetchHosts(),
-            getSelectedHosts: () => [],
-            clearSelection: () => {},
-        }));
+    // Deferred: filters drives the expensive memo + table render at low priority.
+    // The input itself updates at high priority so the controlled value stays instant.
+    const deferredFilters = useDeferredValue(filters);
+    const isPending = filters !== deferredFilters;
 
-        const handleSearch = () => {
-            const term = searchName.trim() || searchMac.trim() || undefined;
-            fetchHosts(term);
-        };
+    const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) =>
+        setFilters((prev) => ({ ...prev, [key]: value }));
 
-        useEffect(() => {
-            fetchHosts();
-        }, []);
+    // Derive unique option lists from allHosts
+    const imageOptions = useMemo(
+        () => toOptions(allHosts.map((h) => h.imagename)),
+        [allHosts],
+    );
+    const manufacturerOptions = useMemo(
+        () => toOptions(allHosts.map((h) => h.inventory?.sysman)),
+        [allHosts],
+    );
+    const modelOptions = useMemo(
+        () => toOptions(allHosts.map((h) => h.inventory?.sysproduct)),
+        [allHosts],
+    );
+    const statusOptions = useMemo(() => {
+        const seen = new Set(
+            allHosts.map((h) => h.pingstatustext ?? 'unknown'),
+        );
+        return [...seen].sort().map((v) => ({ value: v, label: v }));
+    }, [allHosts]);
 
-        const inventory = (host: FogHost) => host.inventory;
+    const filteredHosts = useMemo(() => {
+        return allHosts.filter((host) => {
+            if (filters.search && !matchesSearch(host, filters.search))
+                return false;
+            if (filters.image && host.imagename !== filters.image) return false;
+            if (
+                filters.status &&
+                (host.pingstatustext ?? 'unknown') !== filters.status
+            )
+                return false;
+            if (
+                filters.manufacturer &&
+                host.inventory?.sysman !== filters.manufacturer
+            )
+                return false;
+            if (filters.model && host.inventory?.sysproduct !== filters.model)
+                return false;
+            return true;
+        });
+    }, [allHosts, filters]);
 
-        return (
-            <Stack gap='md'>
-                <Card p='md' withBorder>
-                    <Stack>
-                        <Card p='md' withBorder>
-                            <Stack gap='sm'>
-                                <Group grow>
-                                    <TextInput
-                                        label='Host Name'
-                                        placeholder='Search by name...'
-                                        value={searchName}
-                                        onChange={(e) =>
-                                            setSearchName(e.currentTarget.value)
-                                        }
-                                        onKeyDown={(e) =>
-                                            e.key === 'Enter' && handleSearch()
-                                        }
-                                    />
-                                    <TextInput
-                                        label='MAC Address'
-                                        placeholder='Search by MAC...'
-                                        value={searchMac}
-                                        onChange={(e) =>
-                                            setSearchMac(e.currentTarget.value)
-                                        }
-                                        onKeyDown={(e) =>
-                                            e.key === 'Enter' && handleSearch()
-                                        }
-                                    />
-                                </Group>
-                                <Group justify='flex-end'>
+    const filteredIds = useMemo(
+        () => filteredHosts.map((h) => h.id),
+        [filteredHosts],
+    );
+
+    const [selection, selectionHandlers] = useSelection<number>({
+        data: filteredIds,
+        resetSelectionOnDataChange: true,
+    });
+
+    const hasActiveFilters = Object.values(filters).some(
+        (v) => v !== null && v !== '',
+    );
+
+    const clearFilters = () => setFilters(EMPTY_FILTERS);
+
+    return (
+        <Stack gap='md'>
+            <Card p='md' withBorder>
+                <Stack>
+                    {/* Filter panel */}
+                    <Card p='md' withBorder>
+                        <Stack gap='sm'>
+                            <Group grow align='flex-end'>
+                                <TextInput
+                                    label='Search'
+                                    placeholder='Name, MAC, image, manufacturer, model, IP…'
+                                    value={filters.search}
+                                    onChange={(e) =>
+                                        setFilter(
+                                            'search',
+                                            e.currentTarget.value,
+                                        )
+                                    }
+                                    leftSection={<IconSearch size={14} />}
+                                    rightSection={
+                                        filters.search ? (
+                                            <ActionIcon
+                                                size='xs'
+                                                variant='subtle'
+                                                onClick={() =>
+                                                    setFilter('search', '')
+                                                }
+                                            >
+                                                <IconX size={12} />
+                                            </ActionIcon>
+                                        ) : undefined
+                                    }
+                                />
+                            </Group>
+                            <Group grow align='flex-end'>
+                                <Select
+                                    label='Image'
+                                    placeholder='All images'
+                                    data={imageOptions}
+                                    value={filters.image}
+                                    onChange={(v) => setFilter('image', v)}
+                                    clearable
+                                    searchable
+                                    nothingFoundMessage='No images'
+                                />
+                                <Select
+                                    label='Status'
+                                    placeholder='All statuses'
+                                    data={statusOptions}
+                                    value={filters.status}
+                                    onChange={(v) => setFilter('status', v)}
+                                    clearable
+                                />
+                                <Select
+                                    label='Manufacturer'
+                                    placeholder='All manufacturers'
+                                    data={manufacturerOptions}
+                                    value={filters.manufacturer}
+                                    onChange={(v) =>
+                                        setFilter('manufacturer', v)
+                                    }
+                                    clearable
+                                    searchable
+                                    nothingFoundMessage='No manufacturers'
+                                />
+                                <Select
+                                    label='Model'
+                                    placeholder='All models'
+                                    data={modelOptions}
+                                    value={filters.model}
+                                    onChange={(v) => setFilter('model', v)}
+                                    clearable
+                                    searchable
+                                    nothingFoundMessage='No models'
+                                />
+                            </Group>
+                            {hasActiveFilters && (
+                                <Group justify='space-between'>
+                                    <Text size='sm' c='dimmed'>
+                                        Showing {filteredHosts.length} of{' '}
+                                        {allHosts.length} hosts
+                                    </Text>
                                     <Button
-                                        leftSection={<IconSearch size={14} />}
-                                        onClick={handleSearch}
-                                        loading={searching}
+                                        size='xs'
+                                        variant='subtle'
+                                        leftSection={<IconX size={12} />}
+                                        onClick={clearFilters}
                                     >
-                                        Search
+                                        Clear filters
                                     </Button>
                                 </Group>
-                            </Stack>
-                        </Card>
-                        {hosts.length > 0 && (
-                            <Card p={0} withBorder>
-                                <Table.ScrollContainer
-                                    minWidth='100%'
-                                    maxHeight={520}
+                            )}
+                        </Stack>
+                    </Card>
+
+                    {/* Table */}
+                    {allHosts.length > 0 && (
+                        <Card p={0} withBorder>
+                            <Table.ScrollContainer
+                                minWidth='100%'
+                                maxHeight={520}
+                            >
+                                <Table
+                                    highlightOnHover
+                                    withRowBorders
+                                    stickyHeader
                                 >
-                                    <Table highlightOnHover withRowBorders>
-                                        <Table.Thead>
+                                    <Table.Thead>
+                                        <Table.Tr>
+                                            <Table.Th>
+                                                <Checkbox
+                                                    aria-label='Select all rows'
+                                                    checked={selectionHandlers.isAllSelected()}
+                                                    indeterminate={
+                                                        selectionHandlers.isSomeSelected() &&
+                                                        !selectionHandlers.isAllSelected()
+                                                    }
+                                                    onChange={() => {
+                                                        if (
+                                                            selectionHandlers.isAllSelected()
+                                                        ) {
+                                                            selectionHandlers.resetSelection();
+                                                        } else {
+                                                            selectionHandlers.setSelection(
+                                                                filteredIds,
+                                                            );
+                                                        }
+                                                    }}
+                                                />
+                                            </Table.Th>
+                                            <Table.Th>ID</Table.Th>
+                                            <Table.Th>Name</Table.Th>
+                                            <Table.Th>Image</Table.Th>
+                                            <Table.Th>Brand / Model</Table.Th>
+                                            <Table.Th>Status</Table.Th>
+                                            <Table.Th>Actions</Table.Th>
+                                        </Table.Tr>
+                                    </Table.Thead>
+                                    <Table.Tbody>
+                                        {filteredHosts.length === 0 ? (
                                             <Table.Tr>
-                                                <Table.Th>ID</Table.Th>
-                                                <Table.Th>Name</Table.Th>
-                                                <Table.Th>MACs</Table.Th>
-                                                <Table.Th>Image</Table.Th>
-                                                <Table.Th>
-                                                    Brand / Model
-                                                </Table.Th>
-                                                <Table.Th>Status</Table.Th>
-                                                <Table.Th>Actions</Table.Th>
+                                                <Table.Td
+                                                    colSpan={7}
+                                                    ta='center'
+                                                    py='xl'
+                                                >
+                                                    <Text c='dimmed' size='sm'>
+                                                        No hosts match the
+                                                        current filters
+                                                    </Text>
+                                                </Table.Td>
                                             </Table.Tr>
-                                        </Table.Thead>
-                                        <Table.Tbody>
-                                            {hosts.map((host) => (
+                                        ) : (
+                                            filteredHosts.map((host) => (
                                                 <Table.Tr
                                                     key={host.id}
-                                                    style={{
-                                                        cursor: 'pointer',
-                                                    }}
-                                                    onClick={() =>
-                                                        onSelectHost(host)
+                                                    bg={
+                                                        selection.includes(
+                                                            host.id,
+                                                        )
+                                                            ? 'var(--mantine-color-blue-light)'
+                                                            : undefined
                                                     }
                                                 >
+                                                    <Table.Td>
+                                                        <Checkbox
+                                                            aria-label='Select row'
+                                                            checked={selection.includes(
+                                                                host.id,
+                                                            )}
+                                                            onChange={() =>
+                                                                selectionHandlers.toggle(
+                                                                    host.id,
+                                                                )
+                                                            }
+                                                        />
+                                                    </Table.Td>
                                                     <Table.Td>
                                                         {host.id}
                                                     </Table.Td>
                                                     <Table.Td>
-                                                        <Text size='sm' fw={500}>
-                                                            {host.name}
-                                                        </Text>
-                                                    </Table.Td>
-                                                    <Table.Td>
                                                         <Text
                                                             size='sm'
+                                                            fw={500}
+                                                        >
+                                                            {host.name}
+                                                        </Text>
+                                                        <Text
+                                                            size='sm'
+                                                            c='dimmed'
                                                             ff='monospace'
                                                         >
                                                             {host.macs?.[0] ||
@@ -196,193 +333,13 @@ const HostTable = forwardRef<HostTableHandle, HostTableProps>(
                                                     </Table.Td>
                                                     <Table.Td
                                                         onClick={(e) =>
-                                                            e.stopPropagation()
+                                                            e.preventDefault()
                                                         }
                                                     >
-                                                        {inventory(host) ? (
-                                                            <HoverCard
-                                                                width={320}
-                                                                shadow='md'
-                                                                withArrow
-                                                            >
-                                                                <HoverCard.Target>
-                                                                    <Badge
-                                                                        style={{
-                                                                            cursor: 'help',
-                                                                        }}
-                                                                    >
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.sysman ||
-                                                                            'Unknown'}{' '}
-                                                                        /{' '}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.sysproduct ||
-                                                                            'Unknown'}
-                                                                    </Badge>
-                                                                </HoverCard.Target>
-                                                                <HoverCard.Dropdown>
-                                                                    <Stack gap='xs'>
-                                                                        <Text
-                                                                            size='sm'
-                                                                            fw={
-                                                                                600
-                                                                            }
-                                                                        >
-                                                                            Inventory
-                                                                        </Text>
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.sysman && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    Manufacturer:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.sysman
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.sysproduct && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    Model:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.sysproduct
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.sysversion && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    Version:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.sysversion
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.sysserial && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    Serial:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.sysserial
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.biosvendor && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    BIOS:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.biosvendor
-                                                                                }{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.biosversion
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.cpuman && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    CPU:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.cpuman
-                                                                                }{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.cpuversion
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.mem && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    Memory:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.mem
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                        {inventory(
-                                                                            host,
-                                                                        )
-                                                                            ?.hdmodel && (
-                                                                            <Text size='xs'>
-                                                                                <strong>
-                                                                                    HDD:
-                                                                                </strong>{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.hdmodel
-                                                                                }{' '}
-                                                                                {
-                                                                                    inventory(
-                                                                                        host,
-                                                                                    )
-                                                                                        ?.hdserial
-                                                                                }
-                                                                            </Text>
-                                                                        )}
-                                                                    </Stack>
-                                                                </HoverCard.Dropdown>
-                                                            </HoverCard>
+                                                        {host.inventory ? (
+                                                            <InventoryCard
+                                                                host={host}
+                                                            />
                                                         ) : (
                                                             <Text
                                                                 c='dimmed'
@@ -417,20 +374,7 @@ const HostTable = forwardRef<HostTableHandle, HostTableProps>(
                                                             }
                                                         >
                                                             <Tooltip label='Deploy'>
-                                                                <ActionIcon
-                                                                    color='green'
-                                                                    disabled={
-                                                                        !deployTaskTypeId
-                                                                    }
-                                                                    loading={
-                                                                        taskLoading
-                                                                    }
-                                                                    onClick={() =>
-                                                                        onDeploy(
-                                                                            host,
-                                                                        )
-                                                                    }
-                                                                >
+                                                                <ActionIcon color='green'>
                                                                     <IconPlayerPlay
                                                                         size={
                                                                             16
@@ -439,17 +383,7 @@ const HostTable = forwardRef<HostTableHandle, HostTableProps>(
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                             <Tooltip label='Send Snapin'>
-                                                                <ActionIcon
-                                                                    color='blue'
-                                                                    loading={
-                                                                        taskLoading
-                                                                    }
-                                                                    onClick={() =>
-                                                                        onSnapin(
-                                                                            host,
-                                                                        )
-                                                                    }
-                                                                >
+                                                                <ActionIcon color='blue'>
                                                                     <IconPlayerPlay
                                                                         size={
                                                                             16
@@ -458,14 +392,7 @@ const HostTable = forwardRef<HostTableHandle, HostTableProps>(
                                                                 </ActionIcon>
                                                             </Tooltip>
                                                             <Tooltip label='Delete'>
-                                                                <ActionIcon
-                                                                    color='red'
-                                                                    onClick={() =>
-                                                                        onDelete(
-                                                                            host,
-                                                                        )
-                                                                    }
-                                                                >
+                                                                <ActionIcon color='red'>
                                                                     <IconTrash
                                                                         size={
                                                                             16
@@ -476,19 +403,84 @@ const HostTable = forwardRef<HostTableHandle, HostTableProps>(
                                                         </Group>
                                                     </Table.Td>
                                                 </Table.Tr>
-                                            ))}
-                                        </Table.Tbody>
-                                    </Table>
-                                </Table.ScrollContainer>
-                            </Card>
-                        )}
-                    </Stack>
-                </Card>
-            </Stack>
-        );
-    },
-);
+                                            ))
+                                        )}
+                                    </Table.Tbody>
+                                </Table>
+                            </Table.ScrollContainer>
+                        </Card>
+                    )}
+                </Stack>
+            </Card>
+        </Stack>
+    );
+}
 
-HostTable.displayName = 'HostTable';
-
-export default HostTable;
+function InventoryCard({ host }: { host: FogHost }) {
+    const inventory = host?.inventory;
+    return (
+        <HoverCard width={320} shadow='md' withArrow>
+            <HoverCard.Target>
+                <Badge
+                    radius={'md'}
+                    style={{
+                        cursor: 'help',
+                    }}
+                >
+                    {inventory?.sysman || 'Unknown'} /{' '}
+                    {inventory?.sysproduct || 'Unknown'}
+                </Badge>
+            </HoverCard.Target>
+            <HoverCard.Dropdown>
+                <Stack gap='xs'>
+                    <Text size='sm' fw={600}>
+                        Inventory
+                    </Text>
+                    {inventory?.sysman && (
+                        <Text size='xs'>
+                            <strong>Manufacturer:</strong> {inventory?.sysman}
+                        </Text>
+                    )}
+                    {inventory?.sysproduct && (
+                        <Text size='xs'>
+                            <strong>Model:</strong> {inventory?.sysproduct}
+                        </Text>
+                    )}
+                    {inventory?.sysversion && (
+                        <Text size='xs'>
+                            <strong>Version:</strong> {inventory?.sysversion}
+                        </Text>
+                    )}
+                    {inventory?.sysserial && (
+                        <Text size='xs'>
+                            <strong>Serial:</strong> {inventory?.sysserial}
+                        </Text>
+                    )}
+                    {inventory?.biosvendor && (
+                        <Text size='xs'>
+                            <strong>BIOS:</strong> {inventory?.biosvendor}{' '}
+                            {inventory?.biosversion}
+                        </Text>
+                    )}
+                    {inventory?.cpuman && (
+                        <Text size='xs'>
+                            <strong>CPU:</strong> {inventory?.cpuman}{' '}
+                            {inventory?.cpuversion}
+                        </Text>
+                    )}
+                    {inventory?.mem && (
+                        <Text size='xs'>
+                            <strong>Memory:</strong> {inventory?.mem}
+                        </Text>
+                    )}
+                    {inventory?.hdmodel && (
+                        <Text size='xs'>
+                            <strong>HDD:</strong> {inventory?.hdmodel}{' '}
+                            {inventory?.hdserial}
+                        </Text>
+                    )}
+                </Stack>
+            </HoverCard.Dropdown>
+        </HoverCard>
+    );
+}
