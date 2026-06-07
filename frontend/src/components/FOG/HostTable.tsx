@@ -1,5 +1,4 @@
-import type { FogHost } from '@/api/fog';
-import type { ListFogHosts } from '@/api/fog';
+import type { FogHost, ListFogHosts } from '@/api/fog';
 import {
     ActionIcon,
     Badge,
@@ -74,6 +73,7 @@ export interface HostTableProps {
     onDeploy?: (host: FogHost) => void;
     onSnapin?: (host: FogHost) => void;
     onDelete?: (host: FogHost) => void;
+    loading?: boolean;
 }
 
 export function HostTable({
@@ -83,6 +83,7 @@ export function HostTable({
     onDeploy,
     onSnapin,
     onDelete,
+    loading = false,
 }: HostTableProps) {
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
 
@@ -183,7 +184,7 @@ export function HostTable({
 
     return (
         <Stack gap='md'>
-            <Card p='md' withBorder>
+            <Card p='md' withBorder style={{ position: 'relative' }}>
                 <Stack>
                     {/* Filter panel */}
                     <Card p='md' withBorder>
@@ -302,7 +303,9 @@ export function HostTable({
                                                 <Checkbox
                                                     aria-label='Select all rows'
                                                     checked={isAllSelected}
-                                                    indeterminate={isSomeSelected}
+                                                    indeterminate={
+                                                        isSomeSelected
+                                                    }
                                                     onChange={toggleAll}
                                                 />
                                             </Table.Th>
@@ -314,6 +317,7 @@ export function HostTable({
                                             <Table.Th>Actions</Table.Th>
                                         </Table.Tr>
                                     </Table.Thead>
+
                                     <Table.Tbody>
                                         {filteredHosts.length === 0 ? (
                                             <Table.Tr>
@@ -333,13 +337,13 @@ export function HostTable({
                                                 <Table.Tr
                                                     key={host.id}
                                                     bg={
-                                                        selectedSet.has(
-                                                            host.id,
-                                                        )
+                                                        selectedSet.has(host.id)
                                                             ? 'var(--mantine-color-blue-light)'
                                                             : undefined
                                                     }
-                                                    style={{ cursor: 'pointer' }}
+                                                    style={{
+                                                        cursor: 'pointer',
+                                                    }}
                                                     onClick={() =>
                                                         toggleOne(host.id)
                                                     }

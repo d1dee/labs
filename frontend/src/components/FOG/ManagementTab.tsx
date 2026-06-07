@@ -1,4 +1,7 @@
 import {
+    createFogSnapinTask,
+    createFogTask,
+    deleteFogHost,
     getFogStatus,
     listFogHosts,
     listFogImages,
@@ -16,12 +19,20 @@ import {
     Center,
     Group,
     Loader,
+    Select,
     SimpleGrid,
     Stack,
     Text,
     Title,
 } from '@mantine/core';
-import { IconAlertCircle, IconRefresh } from '@tabler/icons-react';
+import { modals } from '@mantine/modals';
+import { notifications } from '@mantine/notifications';
+import {
+    IconAlertCircle,
+    IconCheck,
+    IconRefresh,
+    IconX,
+} from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { HostTable } from './HostTable';
 import { SelectedHostCard } from './SelectedHostCard';
@@ -136,6 +147,94 @@ function ManagementTab() {
         );
     }, []);
 
+    const handleDeploy = useCallback((host: FogHost) => {
+        if (!deployTaskTypeId) {
+            notifications.show({
+                color: 'red',
+                title: 'Deploy Failed',
+                message: 'No deploy task type is configured.',
+                icon: <IconX size={16} />,
+            });
+            return;
+        }
+
+        modals.openConfirmModal({
+            title: 'Deploy Host',
+            children: (
+                <Text size="sm">
+                    Are you sure you want to create a Deploy task for host <strong>{host.name}</strong>?
+                </Text>
+            ),
+            labels: { confirm: 'Deploy', cancel: 'Cancel' },
+            confirmProps: { color: 'green' },
+            onConfirm: async () => {
+                try {
+                    await createFogTask(host.id, deployTaskTypeId);
+                    notifications.show({
+                        color: 'green',
+                        title: 'Deploy Started',
+                        message: `Deploy task created for host ${host.name}`,
+                        icon: <IconCheck size={16} />,
+                    });
+                } catch {
+                    notifications.show({
+                        color: 'red',
+                        title: 'Deploy Failed',
+                        message: `Failed to create deploy task for ${host.name}`,
+                        icon: <IconX size={16} />,
+                    });
+                }
+            },
+        });
+    }, [deployTaskTypeId]);
+
+    const handleSnapin = useCallback((host: FogHost) => {
+        const modalId = 'snapin-quick-action';
+        modals.open({
+            modalId,
+            title: 'Send Snapin',
+            children: (
+                <SnapinQuickActionModal
+                    host={host}
+                    snapins={snapins}
+                    onClose={() => modals.close(modalId)}
+                />
+            ),
+        });
+    }, [snapins]);
+
+    const handleDelete = useCallback((host: FogHost) => {
+        modals.openConfirmModal({
+            title: 'Delete Host',
+            children: (
+                <Text size="sm">
+                    Are you sure you want to delete host <strong>{host.name}</strong>? This action is permanent and cannot be undone.
+                </Text>
+            ),
+            labels: { confirm: 'Delete', cancel: 'Cancel' },
+            confirmProps: { color: 'red' },
+            onConfirm: async () => {
+                try {
+                    await deleteFogHost(host.id);
+                    notifications.show({
+                        color: 'green',
+                        title: 'Host Deleted',
+                        message: `Deleted host ${host.name}`,
+                        icon: <IconCheck size={16} />,
+                    });
+                    handleHostsDeleted([host.id]);
+                } catch {
+                    notifications.show({
+                        color: 'red',
+                        title: 'Delete Failed',
+                        message: `Failed to delete host ${host.name}`,
+                        icon: <IconX size={16} />,
+                    });
+                }
+            },
+        });
+    }, [handleHostsDeleted]);
+
     // Stable key for SelectedHostCard — forces remount (resets tab state) when
     // the set of selected hosts changes identity
     const cardKey = selectedIds.slice().sort().join(',');
@@ -228,6 +327,10 @@ function ManagementTab() {
                     allHosts={allHosts}
                     selectedIds={selectedIds}
                     onSelectionChange={setSelectedIds}
+                    onDeploy={handleDeploy}
+                    onSnapin={handleSnapin}
+                    onDelete={handleDelete}
+                    loading={loading}
                 />
 
                 {selectedHosts.length > 0 && (
@@ -245,6 +348,76 @@ function ManagementTab() {
                     />
                 )}
             </Stack>
+        </Stack>
+    );
+}
+
+interface SnapinQuickActionModalProps {
+    host: FogHost;
+    snapins: FogSnapin[];
+    onClose: () => void;
+}
+
+function SnapinQuickActionModal({
+    host,
+    snapins,
+    onClose,
+}: SnapinQuickActionModalProps) {
+    const [selectedSnapinId, setSelectedSnapinId] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    const handleSend = async () => {
+        if (!selectedSnapinId) return;
+        const snapinId = parseInt(selectedSnapinId, 10);
+        setLoading(true);
+
+        try {
+            await createFogSnapinTask(host.id, snapinId);
+            notifications.show({
+                color: 'green',
+                title: 'Snapin Sent',
+                message: `Snapin sent to host ${host.name}`,
+                icon: <IconCheck size={16} />,
+            });
+            onClose();
+        } catch {
+            notifications.show({
+                color: 'red',
+                title: 'Snapin Failed',
+                message: `Failed to send snapin to host ${host.name}`,
+                icon: <IconX size={16} />,
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <Stack gap="sm">
+            <Text size="sm">
+                Select a snapin to send to host <strong>{host.name}</strong>.
+            </Text>
+            <Select
+                label="Select snapin"
+                placeholder="Choose snapin…"
+                data={snapins.map((s) => ({
+                    value: String(s.id),
+                    label: s.name,
+                }))}
+                value={selectedSnapinId}
+                onChange={setSelectedSnapinId}
+                clearable
+                searchable
+                nothingFoundMessage="No snapins found"
+            />
+            <Group justify="flex-end" gap="xs" mt="md">
+                <Button variant="default" onClick={onClose} disabled={loading}>
+                    Cancel
+                </Button>
+                <Button onClick={handleSend} disabled={!selectedSnapinId} loading={loading}>
+                    Send
+                </Button>
+            </Group>
         </Stack>
     );
 }
