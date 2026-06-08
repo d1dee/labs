@@ -9,9 +9,10 @@ interface Props {
     hosts: FogHost[];
     images: FogImage[];
     onDone: (updatedHost?: FogHost) => void;
+    onImageAssigned?: (hosts: FogHost[]) => void;
 }
 
-export function ImagePanel({ hosts, images, onDone }: Props) {
+export function ImagePanel({ hosts, images, onDone, onImageAssigned }: Props) {
     const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -54,6 +55,16 @@ export function ImagePanel({ hosts, images, onDone }: Props) {
                 });
             }
             setLoading(false);
+            if (onImageAssigned) {
+                const updated = hosts.map((h) => ({
+                    ...h,
+                    imageID: imageId,
+                    imagename:
+                        images.find((img) => img.id === imageId)?.name ||
+                        h.imagename,
+                }));
+                onImageAssigned(updated);
+            }
             onDone();
         } else {
             const host = hosts[0];
@@ -67,6 +78,9 @@ export function ImagePanel({ hosts, images, onDone }: Props) {
                 });
                 const updated = await getFogHost(host.id);
                 setLoading(false);
+                if (onImageAssigned && updated) {
+                    onImageAssigned([updated]);
+                }
                 onDone(updated);
             } catch (err) {
                 notifications.show({
