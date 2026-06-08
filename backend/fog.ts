@@ -1,4 +1,4 @@
-import type { FogHost, ListFogHosts } from "../frontend/src/api";
+import type { FogHost, ListFogHosts } from '../frontend/src/api';
 
 const FOG_URL = process.env.FOG_URL?.replace(/\/$/, '') || '';
 const FOG_API_TOKEN = process.env.FOG_API_TOKEN || '';

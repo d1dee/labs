@@ -10,20 +10,6 @@ import { createAuthTables } from '../db/migrate';
 import { activationHistory, dataUsageHistory } from '../db/schema';
 import { auth } from './auth';
 import { seedTestTeachers } from './database';
-import { getDHCPLeases, getRuleStatus, toggleRuleDisabled } from './mikrotik';
-import {
-    addPiholeDomain,
-    deletePiholeDomain,
-    getPiholeBlocking,
-    getPiholeDomains,
-    getPiholeQueries,
-    getPiholeRecentBlocked,
-    getPiholeSummary,
-    getPiholeTopDomains,
-    isPiholeConfigured,
-    setPiholeBlocking,
-    updatePiholeDomain,
-} from './pihole';
 import {
     createFogHost,
     createFogSnapinTask,
@@ -40,6 +26,20 @@ import {
     listFogTaskTypes,
     updateFogHost,
 } from './fog';
+import { getDHCPLeases, getRuleStatus, toggleRuleDisabled } from './mikrotik';
+import {
+    addPiholeDomain,
+    deletePiholeDomain,
+    getPiholeBlocking,
+    getPiholeDomains,
+    getPiholeQueries,
+    getPiholeRecentBlocked,
+    getPiholeSummary,
+    getPiholeTopDomains,
+    isPiholeConfigured,
+    setPiholeBlocking,
+    updatePiholeDomain,
+} from './pihole';
 
 // Create Better Auth tables (drizzle-kit doesn't support bun:sqlite)
 createAuthTables();
@@ -276,7 +276,10 @@ async function saveDataUsageSnapshot() {
     }
 }
 
-const DATA_USAGE_SNAPSHOT_INTERVAL = parseInt(process.env.DATA_USAGE_SNAPSHOT_INTERVAL || '300000', 10);
+const DATA_USAGE_SNAPSHOT_INTERVAL = parseInt(
+    process.env.DATA_USAGE_SNAPSHOT_INTERVAL || '300000',
+    10,
+);
 setInterval(saveDataUsageSnapshot, DATA_USAGE_SNAPSHOT_INTERVAL);
 saveDataUsageSnapshot();
 
@@ -738,7 +741,12 @@ app.post('/api/fog/hosts/:id/task', async (c) => {
             taskType: string;
             [key: string]: unknown;
         }>();
-        const result = await createFogTask(hostId, parseInt(body.taskType, 10), body);
+        const { taskType, ...options } = body;
+        const result = await createFogTask(
+            hostId,
+            parseInt(body.taskType, 10),
+            options,
+        );
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }
