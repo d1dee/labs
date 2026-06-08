@@ -75,8 +75,7 @@ export function SelectedHostCard({
 
     /** Task types not directly surfaced as top-level buttons or capture */
     const extraTaskTypes = taskTypes.filter(
-        (tt) =>
-            tt.id !== deployTaskTypeId && tt.id !== captureTaskTypeId,
+        (tt) => tt.id !== deployTaskTypeId && tt.id !== captureTaskTypeId,
     );
 
     // Resolve the active task type if the current active action is a task
@@ -258,6 +257,11 @@ export function SelectedHostCard({
                                 onDone={(updated) => {
                                     setActiveAction(null);
                                     if (updated) onHostUpdated(updated);
+                                }}
+                                onImageAssigned={(updatedHosts) => {
+                                    updatedHosts.forEach((h) =>
+                                        onHostUpdated(h),
+                                    );
                                 }}
                             />
                         )}
