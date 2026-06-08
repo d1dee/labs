@@ -50,7 +50,7 @@ export function HostTable({
         () => filteredHosts.map((v) => v.id),
         [filteredHosts],
     );
-    console.log(hostIds);
+
     const [selection, handlers] = useSelection({
         data: hostIds,
         resetSelectionOnDataChange: true,
@@ -58,7 +58,6 @@ export function HostTable({
 
     useEffect(() => {
         setSelectedIds(selection);
-        console.log('gh');
     }, [selection.join()]);
 
     return (

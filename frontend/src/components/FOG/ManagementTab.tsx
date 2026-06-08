@@ -252,7 +252,7 @@ function ManagementTab() {
         },
         [handleHostsDeleted],
     );
-    console.log(selectedIds);
+
     // Stable key for SelectedHostCard — forces remount (resets tab state) when
     // the set of selected hosts changes identity
     const cardKey = selectedIds.slice().sort().join(',');
