@@ -318,37 +318,6 @@ export async function listFogSnapins(): Promise<{
     }
 }
 
-export async function createFogTask(
-    hostId: number,
-    taskTypeId: number,
-    options?: Record<string, unknown>,
-): Promise<{ success: boolean; data?: FogTaskResult; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        // Docs say body should be {"taskType": "1"} (string per FOG docs)
-        const res = await fogRequest('POST', `/fog/host/${hostId}/task`, {
-            taskType: String(taskTypeId),
-            ...options,
-        });
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as FogTaskResult;
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
-
 export async function createFogSnapinTask(
     hostId: number,
     snapinId: number,
@@ -358,10 +327,11 @@ export async function createFogSnapinTask(
         return { success: false, error: 'FOG not configured' };
     }
     try {
-        // Single Snapin task type is 11 per official docs
+        // Single Snapin task type is 13 - based on actual API response
+        // Reference: https://github.com/FOGProject/fogproject/blob/620b8cee/packages/web/lib/fog/tasktype.class.php
         const res = await fogRequest('POST', `/fog/host/${hostId}/task`, {
-            taskType: '11',
-            snapinID: String(snapinId),
+            taskTypeID: 13,  // Single Snapin task type
+            snapinID: snapinId,
             ...options,
         });
         if (!res.ok) {
@@ -374,8 +344,42 @@ export async function createFogSnapinTask(
                 error: json.error || json.message || `HTTP ${res.status}`,
             };
         }
-        const data = (await res.json()) as FogTaskResult;
-        return { success: true, data };
+        // FOG returns null on successful task creation
+        const data = (await res.json()) as FogTaskResult | null;
+        return { success: true, data: data ?? {} };
+    } catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+
+export async function createFogTask(
+    hostId: number,
+    taskTypeId: number,
+    options?: Record<string, unknown>,
+): Promise<{ success: boolean; data?: FogTaskResult; error?: string }> {
+    if (!isFogConfigured()) {
+        return { success: false, error: 'FOG not configured' };
+    }
+    try {
+        // FOG API expects taskTypeID (camelCase) - integer type
+        // Returns null on success: https://docs.fogproject.org/en/latest/kb/integrations/api/
+        const res = await fogRequest('POST', `/fog/host/${hostId}/task`, {
+            taskTypeID: taskTypeId,
+            ...options,
+        });
+        if (!res.ok) {
+            const json = (await res.json()) as {
+                error?: string;
+                message?: string;
+            };
+            return {
+                success: false,
+                error: json.error || json.message || `HTTP ${res.status}`,
+            };
+        }
+        // FOG returns null on successful task creation
+        const data = (await res.json()) as FogTaskResult | null;
+        return { success: true, data: data ?? {} };
     } catch (err) {
         return { success: false, error: String(err) };
     }

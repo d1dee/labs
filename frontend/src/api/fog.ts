@@ -348,10 +348,16 @@ export async function createFogTask(
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskType: String(taskTypeId), ...options }),
+        body: JSON.stringify({ taskTypeID: taskTypeId, ...options }),
     });
     if (!response.ok) {
-        throw new Error('Failed to create FOG task');
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || error.message || 'Failed to create FOG task');
+    }
+    // FOG returns null or "" on success
+    const text = await response.text();
+    if (text === '' || text === 'null') {
+        return { success: true };
     }
     return response.json() as Promise<FogTaskResult>;
 }
