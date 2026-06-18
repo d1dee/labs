@@ -340,16 +340,6 @@ function ManagementTab() {
                         Select one or more hosts to perform actions.
                     </Text>
                 </div>
-
-                <HostTable
-                    allHosts={allHosts}
-                    setSelectedIds={setSelectedIds}
-                    onDeploy={handleDeploy}
-                    onSnapin={handleSnapin}
-                    onDelete={handleDelete}
-                    loading={loading}
-                />
-
                 {selectedIds.length > 0 && (
                     <SelectedHostCard
                         key={cardKey}
@@ -364,6 +354,14 @@ function ManagementTab() {
                         onClose={() => setSelectedIds([])}
                     />
                 )}
+                <HostTable
+                    allHosts={allHosts}
+                    setSelectedIds={setSelectedIds}
+                    onDeploy={handleDeploy}
+                    onSnapin={handleSnapin}
+                    onDelete={handleDelete}
+                    loading={loading}
+                />
             </Stack>
         </Stack>
     );

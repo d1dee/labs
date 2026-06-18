@@ -8,8 +8,9 @@ import {
     Stack,
     Text,
     TextInput,
+    Tooltip,
 } from '@mantine/core';
-import { IconSearch, IconX } from '@tabler/icons-react';
+import { IconAdjustments, IconSearch, IconX } from '@tabler/icons-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 
 export interface Filters {
@@ -171,10 +172,12 @@ export function HostFilterPanel({
     manufacturerOptions,
     modelOptions,
 }: HostFilterPanelProps) {
+    const [showFilters, setShowFilters] = useState(false);
+
     return (
         <Card p='md' withBorder>
             <Stack gap='sm'>
-                <Group grow align='flex-end'>
+                <Group align='flex-end'>
                     <TextInput
                         label='Search'
                         placeholder='Name, MAC, image, manufacturer, model, IP…'
@@ -194,48 +197,60 @@ export function HostFilterPanel({
                                 </ActionIcon>
                             ) : undefined
                         }
+                        style={{ flex: 1 }}
                     />
+                    <Tooltip label='Filters'>
+                        <ActionIcon
+                            size='lg'
+                            variant={showFilters ? 'filled' : 'default'}
+                            onClick={() => setShowFilters((v) => !v)}
+                        >
+                            <IconAdjustments size={18} />
+                        </ActionIcon>
+                    </Tooltip>
                 </Group>
-                <Group grow align='flex-end'>
-                    <Select
-                        label='Image'
-                        placeholder='All images'
-                        data={imageOptions}
-                        value={filters.image}
-                        onChange={(v) => setFilter('image', v)}
-                        clearable
-                        searchable
-                        nothingFoundMessage='No images'
-                    />
-                    <Select
-                        label='Status'
-                        placeholder='All statuses'
-                        data={statusOptions}
-                        value={filters.status}
-                        onChange={(v) => setFilter('status', v)}
-                        clearable
-                    />
-                    <Select
-                        label='Manufacturer'
-                        placeholder='All manufacturers'
-                        data={manufacturerOptions}
-                        value={filters.manufacturer}
-                        onChange={(v) => setFilter('manufacturer', v)}
-                        clearable
-                        searchable
-                        nothingFoundMessage='No manufacturers'
-                    />
-                    <Select
-                        label='Model'
-                        placeholder='All models'
-                        data={modelOptions}
-                        value={filters.model}
-                        onChange={(v) => setFilter('model', v)}
-                        clearable
-                        searchable
-                        nothingFoundMessage='No models'
-                    />
-                </Group>
+                {showFilters && (
+                    <Group grow align='flex-end'>
+                        <Select
+                            label='Image'
+                            placeholder='All images'
+                            data={imageOptions}
+                            value={filters.image}
+                            onChange={(v) => setFilter('image', v)}
+                            clearable
+                            searchable
+                            nothingFoundMessage='No images'
+                        />
+                        <Select
+                            label='Status'
+                            placeholder='All statuses'
+                            data={statusOptions}
+                            value={filters.status}
+                            onChange={(v) => setFilter('status', v)}
+                            clearable
+                        />
+                        <Select
+                            label='Manufacturer'
+                            placeholder='All manufacturers'
+                            data={manufacturerOptions}
+                            value={filters.manufacturer}
+                            onChange={(v) => setFilter('manufacturer', v)}
+                            clearable
+                            searchable
+                            nothingFoundMessage='No manufacturers'
+                        />
+                        <Select
+                            label='Model'
+                            placeholder='All models'
+                            data={modelOptions}
+                            value={filters.model}
+                            onChange={(v) => setFilter('model', v)}
+                            clearable
+                            searchable
+                            nothingFoundMessage='No models'
+                        />
+                    </Group>
+                )}
                 {hasActiveFilters && (
                     <Group justify='space-between'>
                         <Text size='sm' c='dimmed'>

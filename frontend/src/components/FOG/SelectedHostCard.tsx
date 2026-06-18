@@ -7,6 +7,7 @@ import {
     Divider,
     Group,
     Menu,
+    ScrollArea,
     Stack,
     Text,
     Title,
@@ -179,7 +180,12 @@ export function SelectedHostCard({
                     </Button>
 
                     {/* Three-dot menu for all other actions hidden away */}
-                    <Menu shadow='md' width={220} position='bottom-start'>
+                    <Menu
+                        shadow='md'
+                        width={220}
+                        position='bottom-start'
+                        withinPortal
+                    >
                         <Menu.Target>
                             <Button
                                 size='sm'
@@ -200,6 +206,7 @@ export function SelectedHostCard({
                             >
                                 Delete
                             </Menu.Item>
+
                             {captureTaskType && (
                                 <Menu.Item
                                     leftSection={<IconPlayerPlay size={14} />}
@@ -217,17 +224,21 @@ export function SelectedHostCard({
                             {extraTaskTypes.length > 0 && (
                                 <Menu.Label>Other Tasks</Menu.Label>
                             )}
-                            {extraTaskTypes.map((tt) => (
-                                <Menu.Item
-                                    key={tt.id}
-                                    leftSection={<IconPlayerPlay size={14} />}
-                                    onClick={() =>
-                                        handleToggleAction(`task-${tt.id}`)
-                                    }
-                                >
-                                    {tt.name}
-                                </Menu.Item>
-                            ))}
+                            {extraTaskTypes.length > 0 && (
+                                <ScrollArea.Autosize mah={200}>
+                                    {extraTaskTypes.map((tt) => (
+                                        <Menu.Item
+                                            key={tt.id}
+                                            leftSection={<IconPlayerPlay size={14} />}
+                                            onClick={() =>
+                                                handleToggleAction(`task-${tt.id}`)
+                                            }
+                                        >
+                                            {tt.name}
+                                        </Menu.Item>
+                                    ))}
+                                </ScrollArea.Autosize>
+                            )}
                         </Menu.Dropdown>
                     </Menu>
                 </Group>
@@ -290,68 +301,6 @@ export function SelectedHostCard({
                             />
                         )}
                     </Card>
-                )}
-
-                {/* ── Single-host details ── */}
-                {!isBulk && (
-                    <Stack gap='xs'>
-                        <Divider label='Host details' labelPosition='left' />
-                        <Group grow align='flex-start'>
-                            <Stack gap={4}>
-                                <Text
-                                    size='xs'
-                                    fw={600}
-                                    tt='uppercase'
-                                    c='dimmed'
-                                >
-                                    MAC Addresses
-                                </Text>
-                                {hosts[0].macs && hosts[0].macs.length > 0 ? (
-                                    hosts[0].macs.map((mac) => (
-                                        <Text
-                                            key={mac}
-                                            size='sm'
-                                            ff='monospace'
-                                        >
-                                            {mac}
-                                        </Text>
-                                    ))
-                                ) : (
-                                    <Text size='sm' c='dimmed'>
-                                        —
-                                    </Text>
-                                )}
-                            </Stack>
-                            <Stack gap={4}>
-                                <Text
-                                    size='xs'
-                                    fw={600}
-                                    tt='uppercase'
-                                    c='dimmed'
-                                >
-                                    Description
-                                </Text>
-                                <Text size='sm'>
-                                    {hosts[0].description || '—'}
-                                </Text>
-                            </Stack>
-                            {hosts[0].ip && (
-                                <Stack gap={4}>
-                                    <Text
-                                        size='xs'
-                                        fw={600}
-                                        tt='uppercase'
-                                        c='dimmed'
-                                    >
-                                        IP
-                                    </Text>
-                                    <Text size='sm' ff='monospace'>
-                                        {hosts[0].ip}
-                                    </Text>
-                                </Stack>
-                            )}
-                        </Group>
-                    </Stack>
                 )}
             </Stack>
         </Card>

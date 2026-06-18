@@ -6,6 +6,7 @@ import {
     Checkbox,
     Group,
     HoverCard,
+    Pagination,
     Stack,
     Table,
     Text,
@@ -13,7 +14,7 @@ import {
 } from '@mantine/core';
 import { useSelection } from '@mantine/hooks';
 import { IconPlayerPlay, IconTrash } from '@tabler/icons-react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { HostFilterPanel, useHostFilters } from './HostFilterPanel';
 
 export interface HostTableProps {
@@ -46,9 +47,18 @@ export function HostTable({
         modelOptions,
     } = useHostFilters(allHosts);
 
+    const [page, setPage] = useState(1);
+    const PAGE_SIZE = 20;
+
+    const paginatedHosts = useMemo(
+        () => filteredHosts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+        [filteredHosts, page],
+    );
+    const totalPages = Math.max(1, Math.ceil(filteredHosts.length / PAGE_SIZE));
+
     const hostIds = useMemo(
-        () => filteredHosts.map((v) => v.id),
-        [filteredHosts],
+        () => paginatedHosts.map((v) => v.id),
+        [paginatedHosts],
     );
 
     const [selection, handlers] = useSelection({
@@ -59,6 +69,10 @@ export function HostTable({
     useEffect(() => {
         setSelectedIds(selection);
     }, [selection.join()]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [filteredHosts.length]);
 
     return (
         <Stack gap='md'>
@@ -82,7 +96,7 @@ export function HostTable({
                     {/* Table */}
 
                     <Card p={0} withBorder>
-                        <Table.ScrollContainer minWidth='100%' maxHeight={520}>
+                        <Table.ScrollContainer minWidth='100%'>
                             <Table highlightOnHover withRowBorders stickyHeader>
                                 <Table.Thead>
                                     <Table.Tr>
@@ -114,7 +128,7 @@ export function HostTable({
                                 </Table.Thead>
 
                                 <Table.Tbody>
-                                    {filteredHosts.length === 0 ? (
+                                    {paginatedHosts.length === 0 ? (
                                         <Table.Tr>
                                             <Table.Td
                                                 colSpan={7}
@@ -128,7 +142,7 @@ export function HostTable({
                                             </Table.Td>
                                         </Table.Tr>
                                     ) : (
-                                        filteredHosts.map((host) => (
+                                        paginatedHosts.map((host) => (
                                             <Table.Tr
                                                 key={host.id}
                                                 bg={
@@ -272,6 +286,21 @@ export function HostTable({
                             </Table>
                         </Table.ScrollContainer>
                     </Card>
+
+                    {totalPages > 1 && (
+                        <Group justify='space-between' align='center'>
+                            <Text size='sm' c='dimmed'>
+                                {(page - 1) * PAGE_SIZE + 1}–
+                                {Math.min(page * PAGE_SIZE, filteredHosts.length)}{' '}
+                                of {filteredHosts.length} hosts
+                            </Text>
+                            <Pagination
+                                total={totalPages}
+                                value={page}
+                                onChange={setPage}
+                            />
+                        </Group>
+                    )}
                 </Stack>
             </Card>
         </Stack>
