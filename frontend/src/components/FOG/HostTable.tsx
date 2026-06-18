@@ -2,18 +2,26 @@ import type { FogHost, ListFogHosts } from '@/api/fog';
 import {
     ActionIcon,
     Badge,
+    Box,
     Card,
     Checkbox,
     Group,
     HoverCard,
+    Menu,
+    Modal,
     Pagination,
     Stack,
     Table,
     Text,
     Tooltip,
 } from '@mantine/core';
-import { useSelection } from '@mantine/hooks';
-import { IconPlayerPlay, IconTrash } from '@tabler/icons-react';
+import { useDisclosure, useSelection } from '@mantine/hooks';
+import {
+    IconDotsVertical,
+    IconInfoCircle,
+    IconPlayerPlay,
+    IconTrash,
+} from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 import { HostFilterPanel, useHostFilters } from './HostFilterPanel';
 
@@ -65,6 +73,10 @@ export function HostTable({
         data: hostIds,
         resetSelectionOnDataChange: true,
     });
+
+    const [inventoryHost, setInventoryHost] = useState<FogHost | null>(null);
+    const [inventoryOpened, { open: openInventory, close: closeInventory }] =
+        useDisclosure(false);
 
     useEffect(() => {
         setSelectedIds(selection);
@@ -234,6 +246,7 @@ export function HostTable({
                                                         onClick={(e) =>
                                                             e.stopPropagation()
                                                         }
+                                                        visibleFrom='sm'
                                                     >
                                                         <Tooltip label='Deploy'>
                                                             <ActionIcon
@@ -278,6 +291,87 @@ export function HostTable({
                                                             </ActionIcon>
                                                         </Tooltip>
                                                     </Group>
+                                                    <Box hiddenFrom='sm'>
+                                                        <Menu position='bottom-end'>
+                                                            <Menu.Target>
+                                                                <ActionIcon
+                                                                    variant='subtle'
+                                                                    onClick={(
+                                                                        e,
+                                                                    ) =>
+                                                                        e.stopPropagation()
+                                                                    }
+                                                                >
+                                                                    <IconDotsVertical
+                                                                        size={16}
+                                                                    />
+                                                                </ActionIcon>
+                                                            </Menu.Target>
+                                                            <Menu.Dropdown>
+                                                                <Menu.Item
+                                                                    leftSection={
+                                                                        <IconInfoCircle
+                                                                            size={16}
+                                                                        />
+                                                                    }
+                                                                    onClick={() => {
+                                                                        setInventoryHost(
+                                                                            host,
+                                                                        );
+                                                                        openInventory();
+                                                                    }}
+                                                                >
+                                                                    Inventory
+                                                                </Menu.Item>
+                                                                <Menu.Item
+                                                                    leftSection={
+                                                                        <IconPlayerPlay
+                                                                            size={16}
+                                                                            color='green'
+                                                                        />
+                                                                    }
+                                                                    onClick={() =>
+                                                                        onDeploy?.(
+                                                                            host,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Deploy
+                                                                </Menu.Item>
+                                                                <Menu.Item
+                                                                    leftSection={
+                                                                        <IconPlayerPlay
+                                                                            size={16}
+                                                                            color='blue'
+                                                                        />
+                                                                    }
+                                                                    onClick={() =>
+                                                                        onSnapin?.(
+                                                                            host,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Send Snapin
+                                                                </Menu.Item>
+                                                                <Menu.Item
+                                                                    leftSection={
+                                                                        <IconTrash
+                                                                            size={16}
+                                                                            color='red'
+                                                                        />
+                                                                    }
+                                                                    color='red'
+                                                                    onClick={() =>
+                                                                        onDelete?.(
+                                                                            host,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Delete
+                                                                </Menu.Item>
+                                                            </Menu.Dropdown>
+                                                        </Menu>
+                                                    </Box>
                                                 </Table.Td>
                                             </Table.Tr>
                                         ))
@@ -286,6 +380,17 @@ export function HostTable({
                             </Table>
                         </Table.ScrollContainer>
                     </Card>
+
+                    <Modal
+                        opened={inventoryOpened}
+                        onClose={closeInventory}
+                        title={`Inventory: ${inventoryHost?.name || 'Host'}`}
+                        size='sm'
+                    >
+                        {inventoryHost ? (
+                            <InventoryDetails host={inventoryHost} />
+                        ) : null}
+                    </Modal>
 
                     {totalPages > 1 && (
                         <Group justify='space-between' align='center'>
@@ -323,55 +428,69 @@ function InventoryCard({ host }: { host: FogHost }) {
                 </Badge>
             </HoverCard.Target>
             <HoverCard.Dropdown>
-                <Stack gap='xs'>
-                    <Text size='sm' fw={600}>
-                        Inventory
-                    </Text>
-                    {inventory?.sysman && (
-                        <Text size='xs'>
-                            <strong>Manufacturer:</strong> {inventory?.sysman}
-                        </Text>
-                    )}
-                    {inventory?.sysproduct && (
-                        <Text size='xs'>
-                            <strong>Model:</strong> {inventory?.sysproduct}
-                        </Text>
-                    )}
-                    {inventory?.sysversion && (
-                        <Text size='xs'>
-                            <strong>Version:</strong> {inventory?.sysversion}
-                        </Text>
-                    )}
-                    {inventory?.sysserial && (
-                        <Text size='xs'>
-                            <strong>Serial:</strong> {inventory?.sysserial}
-                        </Text>
-                    )}
-                    {inventory?.biosvendor && (
-                        <Text size='xs'>
-                            <strong>BIOS:</strong> {inventory?.biosvendor}{' '}
-                            {inventory?.biosversion}
-                        </Text>
-                    )}
-                    {inventory?.cpuman && (
-                        <Text size='xs'>
-                            <strong>CPU:</strong> {inventory?.cpuman}{' '}
-                            {inventory?.cpuversion}
-                        </Text>
-                    )}
-                    {inventory?.mem && (
-                        <Text size='xs'>
-                            <strong>Memory:</strong> {inventory?.mem}
-                        </Text>
-                    )}
-                    {inventory?.hdmodel && (
-                        <Text size='xs'>
-                            <strong>HDD:</strong> {inventory?.hdmodel}{' '}
-                            {inventory?.hdserial}
-                        </Text>
-                    )}
-                </Stack>
+                <InventoryDetails host={host} />
             </HoverCard.Dropdown>
         </HoverCard>
+    );
+}
+
+function InventoryDetails({ host }: { host: FogHost }) {
+    const inventory = host?.inventory;
+    if (!inventory) {
+        return (
+            <Text c='dimmed' size='sm'>
+                No inventory
+            </Text>
+        );
+    }
+    return (
+        <Stack gap='xs'>
+            <Text size='sm' fw={600}>
+                Inventory
+            </Text>
+            {inventory?.sysman && (
+                <Text size='xs'>
+                    <strong>Manufacturer:</strong> {inventory?.sysman}
+                </Text>
+            )}
+            {inventory?.sysproduct && (
+                <Text size='xs'>
+                    <strong>Model:</strong> {inventory?.sysproduct}
+                </Text>
+            )}
+            {inventory?.sysversion && (
+                <Text size='xs'>
+                    <strong>Version:</strong> {inventory?.sysversion}
+                </Text>
+            )}
+            {inventory?.sysserial && (
+                <Text size='xs'>
+                    <strong>Serial:</strong> {inventory?.sysserial}
+                </Text>
+            )}
+            {inventory?.biosvendor && (
+                <Text size='xs'>
+                    <strong>BIOS:</strong> {inventory?.biosvendor}{' '}
+                    {inventory?.biosversion}
+                </Text>
+            )}
+            {inventory?.cpuman && (
+                <Text size='xs'>
+                    <strong>CPU:</strong> {inventory?.cpuman}{' '}
+                    {inventory?.cpuversion}
+                </Text>
+            )}
+            {inventory?.mem && (
+                <Text size='xs'>
+                    <strong>Memory:</strong> {inventory?.mem}
+                </Text>
+            )}
+            {inventory?.hdmodel && (
+                <Text size='xs'>
+                    <strong>HDD:</strong> {inventory?.hdmodel}{' '}
+                    {inventory?.hdserial}
+                </Text>
+            )}
+        </Stack>
     );
 }
