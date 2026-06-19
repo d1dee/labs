@@ -125,19 +125,23 @@ function ManagementTab() {
         loadAll();
     }, []);
 
-    // Memoised stat counts — single pass
-    const { onlineCount, offlineCount } = useMemo(
+    const modelCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const host of allHosts) {
+            const model = host.inventory?.sysproduct?.trim();
+            if (!model) continue;
+            counts.set(model, (counts.get(model) ?? 0) + 1);
+        }
+        return counts;
+    }, [allHosts]);
+
+    const topModels = useMemo(
         () =>
-            allHosts.reduce(
-                (acc, h) => {
-                    if (h.pingstatuscode === 0) acc.onlineCount++;
-                    else if (h.pingstatuscode === 1) acc.offlineCount++;
-                    return acc;
-                },
-                { onlineCount: 0, offlineCount: 0 },
-            ),
-        [allHosts],
+            [...modelCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
+        [modelCounts],
     );
+
+    const snapinCount = snapins.length;
 
     // When hosts are deleted, remove them from allHosts and clear selection
     const handleHostsDeleted = useCallback((deletedIds: number[]) => {
@@ -308,26 +312,28 @@ function ManagementTab() {
                     </Card>
                     <Card withBorder>
                         <Text size='sm' c='dimmed'>
-                            Online
+                            Models
                         </Text>
-                        <Text size='xl' fw={700} c='green'>
-                            {onlineCount}
-                        </Text>
-                    </Card>
-                    <Card withBorder>
-                        <Text size='sm' c='dimmed'>
-                            Offline
-                        </Text>
-                        <Text size='xl' fw={700} c='red'>
-                            {offlineCount}
-                        </Text>
+                        <Stack gap={2} mt={4}>
+                            <Text size='xl' fw={700}>
+                                {topModels.length}
+                            </Text>
+                        </Stack>
                     </Card>
                     <Card withBorder>
                         <Text size='sm' c='dimmed'>
                             Images
                         </Text>
-                        <Text size='xl' fw={700}>
+                        <Text size='xl' fw={700} c='teal'>
                             {images.length}
+                        </Text>
+                    </Card>
+                    <Card withBorder>
+                        <Text size='sm' c='dimmed'>
+                            Snapins
+                        </Text>
+                        <Text size='xl' fw={700}>
+                            {snapinCount}
                         </Text>
                     </Card>
                 </SimpleGrid>
