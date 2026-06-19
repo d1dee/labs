@@ -7,9 +7,12 @@ import {
     Checkbox,
     Group,
     HoverCard,
+    Loader,
     Menu,
     Modal,
+    Overlay,
     Pagination,
+    Skeleton,
     Stack,
     Table,
     Text,
@@ -41,6 +44,7 @@ export function HostTable({
     onSnapin,
     onDelete,
     setSelectedIds,
+    loading,
 }: HostTableProps) {
     const {
         filters,
@@ -107,7 +111,17 @@ export function HostTable({
 
                     {/* Table */}
 
-                    <Card p={0} withBorder>
+                    <Card p={0} withBorder style={{ position: 'relative' }}>
+                        {loading && (
+                            <Overlay
+                                color='var(--mantine-color-body)'
+                                backgroundOpacity={0.6}
+                                center
+                                radius='sm'
+                            >
+                                <Loader />
+                            </Overlay>
+                        )}
                         <Table.ScrollContainer minWidth='100%'>
                             <Table highlightOnHover withRowBorders stickyHeader>
                                 <Table.Thead>
@@ -140,7 +154,64 @@ export function HostTable({
                                 </Table.Thead>
 
                                 <Table.Tbody>
-                                    {paginatedHosts.length === 0 ? (
+                                    {isPending || loading ? (
+                                        Array.from({ length: PAGE_SIZE }).map(
+                                            (_, i) => (
+                                                <Table.Tr key={i}>
+                                                    <Table.Td>
+                                                        <Skeleton
+                                                            height={16}
+                                                            width={16}
+                                                        />
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Skeleton
+                                                            height={16}
+                                                            width={32}
+                                                        />
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Stack gap={4}>
+                                                            <Skeleton
+                                                                height={16}
+                                                                width='60%'
+                                                            />
+                                                            <Skeleton
+                                                                height={12}
+                                                                width='40%'
+                                                            />
+                                                        </Stack>
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Skeleton
+                                                            height={16}
+                                                            width='50%'
+                                                        />
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Skeleton
+                                                            height={20}
+                                                            width='70%'
+                                                            radius='md'
+                                                        />
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Skeleton
+                                                            height={20}
+                                                            width={64}
+                                                            radius='xl'
+                                                        />
+                                                    </Table.Td>
+                                                    <Table.Td>
+                                                        <Skeleton
+                                                            height={24}
+                                                            width={80}
+                                                        />
+                                                    </Table.Td>
+                                                </Table.Tr>
+                                            ),
+                                        )
+                                    ) : paginatedHosts.length === 0 ? (
                                         <Table.Tr>
                                             <Table.Td
                                                 colSpan={7}
