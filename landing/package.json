@@ -1,0 +1,9 @@
+{
+  "name": "labs-fcd-landing",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --hot server.ts",
+    "start": "bun run server.ts"
+  }
+}

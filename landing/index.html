@@ -1,0 +1,2079 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Labs FCD — Computer Lab Management for Kenyan Schools</title>
+        <meta
+            name="description"
+            content="Labs FCD helps Kenyan schools manage and control learners in computer labs. Internet control, firewall & domain blocking, and lab management — all from one dashboard."
+        />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            *,
+            *::before,
+            *::after {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            :root {
+                --bg: #0a0c0f;
+                --bg-elevated: #111419;
+                --bg-card: #161920;
+                --bg-card-hover: #1c2029;
+                --fg: #e8eaed;
+                --fg-muted: #8b90a0;
+                --fg-dim: #555a6e;
+                --accent: #00e5a0;
+                --accent-dim: #00c98c;
+                --accent-glow: rgba(0, 229, 160, 0.15);
+                --accent-glow-strong: rgba(0, 229, 160, 0.3);
+                --accent-secondary: #00b4d8;
+                --border: rgba(255, 255, 255, 0.06);
+                --border-accent: rgba(0, 229, 160, 0.2);
+                --radius: 12px;
+                --radius-lg: 20px;
+                --radius-xl: 28px;
+                --font-display: 'Instrument Serif', serif;
+                --font-body: 'DM Sans', sans-serif;
+                --font-mono: 'JetBrains Mono', monospace;
+                --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                --transition-slow: 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            html {
+                scroll-behavior: smooth;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            body {
+                font-family: var(--font-body);
+                background: var(--bg);
+                color: var(--fg);
+                line-height: 1.6;
+                overflow-x: hidden;
+            }
+
+            ::selection {
+                background: var(--accent);
+                color: var(--bg);
+            }
+
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 0 24px;
+            }
+
+            .noise-overlay {
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 9999;
+                opacity: 0.025;
+                background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+                background-size: 180px;
+            }
+
+            /* ===== NAVIGATION ===== */
+            nav {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 100;
+                padding: 16px 0;
+                transition: var(--transition);
+                backdrop-filter: blur(0px);
+            }
+            nav.scrolled {
+                background: rgba(10, 12, 15, 0.85);
+                backdrop-filter: blur(20px);
+                border-bottom: 1px solid var(--border);
+            }
+            nav .container {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .nav-brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: var(--fg);
+            }
+            .nav-brand-icon {
+                width: 36px;
+                height: 36px;
+                background: var(--accent);
+                border-radius: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+                overflow: hidden;
+            }
+            .nav-brand-icon::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(
+                    135deg,
+                    rgba(255, 255, 255, 0.2) 0%,
+                    transparent 50%
+                );
+            }
+            .nav-brand-icon svg {
+                position: relative;
+                z-index: 1;
+            }
+            .nav-brand-text {
+                font-family: var(--font-mono);
+                font-size: 15px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+            .nav-brand-text span {
+                color: var(--accent);
+            }
+            .nav-links {
+                display: flex;
+                align-items: center;
+                gap: 32px;
+                list-style: none;
+            }
+            .nav-links a {
+                color: var(--fg-muted);
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 500;
+                transition: var(--transition);
+                position: relative;
+            }
+            .nav-links a:hover {
+                color: var(--fg);
+            }
+            .nav-links a::after {
+                content: '';
+                position: absolute;
+                bottom: -4px;
+                left: 0;
+                width: 0;
+                height: 1px;
+                background: var(--accent);
+                transition: var(--transition);
+            }
+            .nav-links a:hover::after {
+                width: 100%;
+            }
+            .nav-cta {
+                padding: 8px 20px;
+                background: transparent;
+                border: 1px solid var(--border-accent);
+                border-radius: 8px;
+                color: var(--accent) !important;
+                font-size: 14px;
+                font-weight: 600;
+                text-decoration: none;
+                transition: var(--transition);
+            }
+            .nav-cta:hover {
+                background: var(--accent-glow);
+                border-color: var(--accent);
+            }
+            .nav-cta::after {
+                display: none !important;
+            }
+
+            /* ===== HERO ===== */
+            .hero {
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                position: relative;
+                overflow: hidden;
+                padding: 120px 0 80px;
+            }
+            .hero-bg {
+                position: absolute;
+                inset: 0;
+                z-index: 0;
+            }
+            .hero-bg-grid {
+                position: absolute;
+                inset: 0;
+                background-image:
+                    linear-gradient(
+                        rgba(255, 255, 255, 0.02) 1px,
+                        transparent 1px
+                    ),
+                    linear-gradient(
+                        90deg,
+                        rgba(255, 255, 255, 0.02) 1px,
+                        transparent 1px
+                    );
+                background-size: 60px 60px;
+                mask-image: radial-gradient(
+                    ellipse 70% 60% at 50% 40%,
+                    black 30%,
+                    transparent 70%
+                );
+                -webkit-mask-image: radial-gradient(
+                    ellipse 70% 60% at 50% 40%,
+                    black 30%,
+                    transparent 70%
+                );
+            }
+            .hero-bg-orb {
+                position: absolute;
+                border-radius: 50%;
+                filter: blur(100px);
+                opacity: 0.4;
+            }
+            .hero-bg-orb-1 {
+                width: 600px;
+                height: 600px;
+                background: radial-gradient(
+                    circle,
+                    rgba(0, 229, 160, 0.2),
+                    transparent 70%
+                );
+                top: -15%;
+                right: -10%;
+                animation: float-orb 12s ease-in-out infinite;
+            }
+            .hero-bg-orb-2 {
+                width: 400px;
+                height: 400px;
+                background: radial-gradient(
+                    circle,
+                    rgba(0, 180, 216, 0.15),
+                    transparent 70%
+                );
+                bottom: 10%;
+                left: -5%;
+                animation: float-orb 15s ease-in-out infinite reverse;
+            }
+            @keyframes float-orb {
+                0%,
+                100% {
+                    transform: translate(0, 0) scale(1);
+                }
+                33% {
+                    transform: translate(30px, -20px) scale(1.05);
+                }
+                66% {
+                    transform: translate(-20px, 15px) scale(0.95);
+                }
+            }
+            .hero-content {
+                position: relative;
+                z-index: 1;
+                max-width: 780px;
+            }
+            .hero-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 16px;
+                background: var(--accent-glow);
+                border: 1px solid var(--border-accent);
+                border-radius: 100px;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--accent);
+                margin-bottom: 28px;
+                animation: fade-up 0.8s ease-out both;
+            }
+            .hero-badge-dot {
+                width: 6px;
+                height: 6px;
+                background: var(--accent);
+                border-radius: 50%;
+                animation: pulse-dot 2s ease-in-out infinite;
+            }
+            @keyframes pulse-dot {
+                0%,
+                100% {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+                50% {
+                    opacity: 0.5;
+                    transform: scale(0.8);
+                }
+            }
+            .hero h1 {
+                font-family: var(--font-display);
+                font-size: clamp(48px, 7vw, 88px);
+                font-weight: 400;
+                line-height: 1.05;
+                letter-spacing: -0.02em;
+                margin-bottom: 24px;
+                animation: fade-up 0.8s ease-out 0.1s both;
+            }
+            .hero h1 em {
+                font-style: italic;
+                color: var(--accent);
+            }
+            .hero-description {
+                font-size: 18px;
+                color: var(--fg-muted);
+                line-height: 1.7;
+                max-width: 560px;
+                margin-bottom: 40px;
+                animation: fade-up 0.8s ease-out 0.2s both;
+            }
+            .hero-actions {
+                display: flex;
+                gap: 16px;
+                flex-wrap: wrap;
+                animation: fade-up 0.8s ease-out 0.3s both;
+            }
+            .btn-primary {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 14px 28px;
+                background: var(--accent);
+                color: var(--bg);
+                border: none;
+                border-radius: 10px;
+                font-family: var(--font-body);
+                font-size: 15px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: var(--transition);
+                text-decoration: none;
+                position: relative;
+                overflow: hidden;
+            }
+            .btn-primary::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(
+                    135deg,
+                    rgba(255, 255, 255, 0.15) 0%,
+                    transparent 50%
+                );
+            }
+            .btn-primary:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 30px rgba(0, 229, 160, 0.3);
+            }
+            .btn-primary:active {
+                transform: translateY(0);
+            }
+            .btn-secondary {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 14px 28px;
+                background: transparent;
+                color: var(--fg);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                font-family: var(--font-body);
+                font-size: 15px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: var(--transition);
+                text-decoration: none;
+            }
+            .btn-secondary:hover {
+                border-color: var(--fg-dim);
+                background: var(--bg-elevated);
+            }
+            .hero-visual {
+                position: absolute;
+                right: -40px;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 480px;
+                height: 480px;
+                z-index: 0;
+                opacity: 0.15;
+                pointer-events: none;
+            }
+            .hero-visual svg {
+                width: 100%;
+                height: 100%;
+            }
+            @keyframes fade-up {
+                from {
+                    opacity: 0;
+                    transform: translateY(24px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            /* ===== FEATURES INTRO ===== */
+            .features-intro {
+                padding: 60px 0;
+                text-align: center;
+                position: relative;
+            }
+            .features-intro .label {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                font-family: var(--font-mono);
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--accent);
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                margin-bottom: 20px;
+            }
+            .features-intro .label::before,
+            .features-intro .label::after {
+                content: '';
+                width: 30px;
+                height: 1px;
+                background: var(--border-accent);
+            }
+            .features-intro h2 {
+                font-family: var(--font-display);
+                font-size: clamp(36px, 5vw, 56px);
+                font-weight: 400;
+                line-height: 1.1;
+                letter-spacing: -0.01em;
+                margin-bottom: 16px;
+            }
+            .features-intro p {
+                font-size: 17px;
+                color: var(--fg-muted);
+                max-width: 540px;
+                margin: 0 auto;
+            }
+
+            /* ===== FEATURE SECTIONS ===== */
+            .feature-section {
+                padding: 80px 0;
+                position: relative;
+            }
+            .feature-section + .feature-section {
+                border-top: 1px solid var(--border);
+            }
+            .feature-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 64px;
+                align-items: center;
+            }
+            .feature-section:nth-child(even) .feature-grid {
+                direction: rtl;
+            }
+            .feature-section:nth-child(even) .feature-grid > * {
+                direction: ltr;
+            }
+            .feature-label {
+                font-family: var(--font-mono);
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--accent);
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                margin-bottom: 16px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .feature-label-num {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 24px;
+                height: 24px;
+                background: var(--accent-glow);
+                border: 1px solid var(--border-accent);
+                border-radius: 6px;
+                font-size: 11px;
+                color: var(--accent);
+            }
+            .feature-title {
+                font-family: var(--font-display);
+                font-size: clamp(32px, 4vw, 48px);
+                font-weight: 400;
+                line-height: 1.15;
+                margin-bottom: 20px;
+            }
+            .feature-description {
+                font-size: 16px;
+                color: var(--fg-muted);
+                line-height: 1.7;
+                margin-bottom: 28px;
+            }
+            .feature-points {
+                list-style: none;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                margin-bottom: 32px;
+            }
+            .feature-points li {
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+                font-size: 15px;
+                color: var(--fg);
+                line-height: 1.5;
+            }
+            .feature-points li .check-icon {
+                flex-shrink: 0;
+                width: 20px;
+                height: 20px;
+                margin-top: 2px;
+                color: var(--accent);
+            }
+            .feature-cta {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 15px;
+                font-weight: 500;
+                color: var(--accent);
+                text-decoration: none;
+                transition: var(--transition);
+            }
+            .feature-cta:hover {
+                gap: 12px;
+            }
+            .feature-cta svg {
+                transition: var(--transition);
+            }
+
+            /* ===== MOCK UI CARDS ===== */
+            .mock-ui {
+                background: var(--bg-card);
+                border: 1px solid var(--border);
+                border-radius: var(--radius-lg);
+                overflow: hidden;
+                position: relative;
+                transition: var(--transition-slow);
+            }
+            .mock-ui:hover {
+                border-color: var(--border-accent);
+                box-shadow: 0 0 60px rgba(0, 229, 160, 0.05);
+            }
+            .mock-ui-header {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 14px 18px;
+                border-bottom: 1px solid var(--border);
+                background: var(--bg-elevated);
+            }
+            .mock-ui-dot {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+            }
+            .mock-ui-dot-r {
+                background: #ff5f57;
+            }
+            .mock-ui-dot-y {
+                background: #febc2e;
+            }
+            .mock-ui-dot-g {
+                background: #28c840;
+            }
+            .mock-ui-header-title {
+                font-family: var(--font-mono);
+                font-size: 12px;
+                color: var(--fg-dim);
+                margin-left: 8px;
+            }
+            .mock-ui-body {
+                padding: 24px;
+            }
+
+            /* --- Internet Control Mock --- */
+            .mock-internet-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+            .mock-device {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;
+                padding: 14px 8px;
+                background: var(--bg);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                transition: var(--transition);
+            }
+            .mock-device.online {
+                border-color: rgba(0, 229, 160, 0.3);
+            }
+            .mock-device.offline {
+                border-color: rgba(255, 95, 87, 0.2);
+                opacity: 0.6;
+            }
+            .mock-device-icon {
+                width: 32px;
+                height: 32px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .mock-device.online .mock-device-icon {
+                background: var(--accent-glow);
+                color: var(--accent);
+            }
+            .mock-device.offline .mock-device-icon {
+                background: rgba(255, 95, 87, 0.1);
+                color: #ff5f57;
+            }
+            .mock-device-name {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                color: var(--fg-dim);
+            }
+            .mock-device-status {
+                font-family: var(--font-mono);
+                font-size: 9px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+            .mock-device.online .mock-device-status {
+                color: var(--accent);
+            }
+            .mock-device.offline .mock-device-status {
+                color: #ff5f57;
+            }
+            .mock-lab-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 16px;
+                background: var(--accent-glow);
+                border: 1px solid var(--border-accent);
+                border-radius: 10px;
+            }
+            .mock-lab-toggle-label {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--fg);
+            }
+            .mock-lab-toggle-sub {
+                font-size: 11px;
+                color: var(--fg-muted);
+                margin-top: 2px;
+            }
+            .mock-toggle-switch {
+                width: 44px;
+                height: 24px;
+                background: var(--accent);
+                border-radius: 12px;
+                position: relative;
+                cursor: pointer;
+                transition: var(--transition);
+            }
+            .mock-toggle-switch::after {
+                content: '';
+                position: absolute;
+                right: 3px;
+                top: 3px;
+                width: 18px;
+                height: 18px;
+                background: white;
+                border-radius: 50%;
+                transition: var(--transition);
+            }
+            .mock-toggle-switch.off {
+                background: #555a6e;
+            }
+            .mock-toggle-switch.off::after {
+                right: auto;
+                left: 3px;
+            }
+
+            /* --- Firewall Mock --- */
+            .mock-firewall-stats {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+                margin-bottom: 16px;
+            }
+            .mock-stat {
+                padding: 12px;
+                background: var(--bg);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                text-align: center;
+            }
+            .mock-stat-value {
+                font-family: var(--font-mono);
+                font-size: 22px;
+                font-weight: 600;
+                color: var(--accent);
+                line-height: 1.2;
+            }
+            .mock-stat-label {
+                font-size: 10px;
+                color: var(--fg-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-top: 4px;
+            }
+            .mock-domain-list {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .mock-domain-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 8px 12px;
+                background: var(--bg);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                font-family: var(--font-mono);
+                font-size: 11px;
+            }
+            .mock-domain-name {
+                color: var(--fg-muted);
+            }
+            .mock-domain-badge {
+                padding: 2px 8px;
+                background: rgba(255, 95, 87, 0.1);
+                color: #ff5f57;
+                border-radius: 4px;
+                font-size: 9px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+            .mock-domain-badge.regex {
+                background: rgba(0, 180, 216, 0.1);
+                color: var(--accent-secondary);
+            }
+
+            /* --- Lab Management Mock --- */
+            .mock-mgmt-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin-bottom: 14px;
+            }
+            .mock-mgmt-action {
+                padding: 14px;
+                background: var(--bg);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                transition: var(--transition);
+            }
+            .mock-mgmt-action:hover {
+                border-color: var(--border-accent);
+            }
+            .mock-mgmt-action-icon {
+                width: 28px;
+                height: 28px;
+                border-radius: 7px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .mock-mgmt-action-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--fg);
+            }
+            .mock-mgmt-action-desc {
+                font-size: 11px;
+                color: var(--fg-dim);
+                line-height: 1.4;
+            }
+            .mock-exam-mode {
+                padding: 14px 16px;
+                background: linear-gradient(
+                    135deg,
+                    rgba(0, 229, 160, 0.1),
+                    rgba(0, 180, 216, 0.05)
+                );
+                border: 1px solid var(--border-accent);
+                border-radius: 10px;
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }
+            .mock-exam-icon {
+                width: 40px;
+                height: 40px;
+                background: var(--accent);
+                border-radius: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+            .mock-exam-info {
+                flex: 1;
+            }
+            .mock-exam-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--fg);
+            }
+            .mock-exam-sub {
+                font-size: 11px;
+                color: var(--accent);
+                font-weight: 500;
+            }
+            .mock-exam-badge {
+                padding: 4px 10px;
+                background: var(--accent);
+                color: var(--bg);
+                border-radius: 6px;
+                font-family: var(--font-mono);
+                font-size: 10px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+
+            /* ===== SOCIAL PROOF / STATS ===== */
+            .stats-strip {
+                padding: 60px 0;
+                border-top: 1px solid var(--border);
+                border-bottom: 1px solid var(--border);
+            }
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 32px;
+            }
+            .stat-item {
+                text-align: center;
+            }
+            .stat-number {
+                font-family: var(--font-display);
+                font-size: 42px;
+                line-height: 1.1;
+                color: var(--fg);
+                margin-bottom: 4px;
+            }
+            .stat-number span {
+                color: var(--accent);
+            }
+            .stat-label {
+                font-size: 14px;
+                color: var(--fg-dim);
+            }
+
+            /* ===== CTA SECTION ===== */
+            .cta-section {
+                padding: 120px 0;
+                text-align: center;
+                position: relative;
+                overflow: hidden;
+            }
+            .cta-section::before {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 800px;
+                height: 400px;
+                background: radial-gradient(
+                    circle,
+                    rgba(0, 229, 160, 0.08),
+                    transparent 70%
+                );
+                pointer-events: none;
+            }
+            .cta-section h2 {
+                font-family: var(--font-display);
+                font-size: clamp(36px, 5vw, 56px);
+                font-weight: 400;
+                margin-bottom: 20px;
+                position: relative;
+            }
+            .cta-section p {
+                font-size: 17px;
+                color: var(--fg-muted);
+                max-width: 500px;
+                margin: 0 auto 36px;
+                position: relative;
+            }
+            .cta-section .btn-primary {
+                position: relative;
+            }
+
+            /* ===== FOOTER ===== */
+            footer {
+                padding: 40px 0;
+                border-top: 1px solid var(--border);
+            }
+            .footer-inner {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .footer-brand {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-family: var(--font-mono);
+                font-size: 13px;
+                color: var(--fg-dim);
+            }
+            .footer-links {
+                display: flex;
+                gap: 24px;
+                list-style: none;
+            }
+            .footer-links a {
+                font-size: 13px;
+                color: var(--fg-dim);
+                text-decoration: none;
+                transition: var(--transition);
+            }
+            .footer-links a:hover {
+                color: var(--fg);
+            }
+
+            /* ===== SCROLL ANIMATIONS ===== */
+            .reveal {
+                opacity: 0;
+                transform: translateY(32px);
+                transition:
+                    opacity 0.8s ease-out,
+                    transform 0.8s ease-out;
+            }
+            .reveal.visible {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            .reveal-delay-1 {
+                transition-delay: 0.1s;
+            }
+            .reveal-delay-2 {
+                transition-delay: 0.2s;
+            }
+            .reveal-delay-3 {
+                transition-delay: 0.3s;
+            }
+
+            /* ===== RESPONSIVE ===== */
+            @media (max-width: 900px) {
+                .feature-grid {
+                    grid-template-columns: 1fr;
+                    gap: 40px;
+                }
+                .feature-section:nth-child(even) .feature-grid {
+                    direction: ltr;
+                }
+                .hero-visual {
+                    display: none;
+                }
+                .nav-links {
+                    display: none;
+                }
+                .stats-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 24px;
+                }
+                .mock-internet-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .mock-firewall-stats {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .mock-mgmt-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            @media (max-width: 600px) {
+                .hero {
+                    padding: 100px 0 60px;
+                }
+                .hero h1 {
+                    font-size: 40px;
+                }
+                .hero-actions {
+                    flex-direction: column;
+                }
+                .hero-actions .btn-primary,
+                .hero-actions .btn-secondary {
+                    width: 100%;
+                    justify-content: center;
+                }
+                .stats-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .stat-number {
+                    font-size: 32px;
+                }
+                .footer-inner {
+                    flex-direction: column;
+                    gap: 16px;
+                }
+                .feature-section {
+                    padding: 60px 0;
+                }
+                .cta-section {
+                    padding: 80px 0;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="noise-overlay"></div>
+
+        <nav id="navbar">
+            <div class="container">
+                <a href="#" class="nav-brand">
+                    <span class="nav-brand-text">labs<span>.fcd</span></span>
+                </a>
+                <ul class="nav-links">
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#internet-control">Internet Control</a></li>
+                    <li><a href="#firewall">Firewall</a></li>
+                    <li><a href="#lab-management">Lab Management</a></li>
+                    <li><a href="#cta" class="nav-cta">Get Started</a></li>
+                </ul>
+            </div>
+        </nav>
+
+        <section class="hero">
+            <div class="hero-bg">
+                <div class="hero-bg-grid"></div>
+                <div class="hero-bg-orb hero-bg-orb-1"></div>
+                <div class="hero-bg-orb hero-bg-orb-2"></div>
+            </div>
+            <div class="container">
+                <div class="hero-content">
+                    <div class="hero-badge">
+                        <span class="hero-badge-dot"></span>🇰🇪 Built
+                        specifically for CBC and Digital Literacy needs in
+                        Kenyan Schools.
+                    </div>
+                    <h1>
+                        The <em>Ultimate </em>Command Centre for
+                        <em>Kenyan </em>Computer Labs
+                    </h1>
+                    <p class="hero-description">
+                        Labs FCD is a web-based dashboard that puts the computer
+                        teacher or IT technician in full control of every
+                        machine, every connection, and every session in the lab.
+                    </p>
+                    <div class="hero-actions">
+                        <a href="#cta" class="btn-primary">
+                            Get started
+                            <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                                <polyline points="12 5 19 12 12 19" />
+                            </svg>
+                        </a>
+                        <a href="#features" class="btn-secondary">
+                            Explore features
+                            <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="features-intro" id="features">
+            <div class="container">
+                <div class="label reveal">Core features</div>
+                <h2 class="reveal reveal-delay-1">
+                    Three pillars of
+                    <em
+                        style="
+                            font-family: var(--font-display);
+                            font-style: italic;
+                            color: var(--accent);
+                        "
+                        >lab control</em
+                    >
+                </h2>
+                <p class="reveal reveal-delay-2">
+                    Everything a school IT administrator needs to manage,
+                    protect, and lock down a computer lab — from a single
+                    dashboard.
+                </p>
+            </div>
+        </section>
+
+        <!-- FEATURE 1: Internet Control -->
+        <section class="feature-section" id="internet-control">
+            <div class="container">
+                <div class="feature-grid">
+                    <div class="feature-info reveal">
+                        <div class="feature-label">
+                            <span class="feature-label-num">01</span>
+                            Internet Control
+                        </div>
+                        <h2 class="feature-title">
+                            One click.<br />Whole lab online or offline.
+                        </h2>
+                        <p class="feature-description">
+                            Toggle internet access per-device or per-lab. No
+                            more students browsing during the wrong hours — one
+                            click cuts or restores access for an entire room.
+                        </p>
+                        <ul class="feature-points">
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Per-device and per-lab internet toggling
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Instant firewall rule activation via Mikrotik
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Visual status for every machine in the lab
+                            </li>
+                        </ul>
+                        <a href="#cta" class="feature-cta">
+                            Learn more
+                            <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                                <polyline points="12 5 19 12 12 19" />
+                            </svg>
+                        </a>
+                    </div>
+                    <div class="reveal reveal-delay-2">
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-ui-dot mock-ui-dot-r"></div>
+                                <div class="mock-ui-dot mock-ui-dot-y"></div>
+                                <div class="mock-ui-dot mock-ui-dot-g"></div>
+                                <span class="mock-ui-header-title"
+                                    >lab-a.internet-control</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="mock-internet-grid">
+                                    <div class="mock-device online">
+                                        <div class="mock-device-icon">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="3"
+                                                    width="20"
+                                                    height="14"
+                                                    rx="2"
+                                                />
+                                                <line
+                                                    x1="12"
+                                                    y1="17"
+                                                    x2="12"
+                                                    y2="21"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-device-name"
+                                            >PC-01</span
+                                        >
+                                        <span class="mock-device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="mock-device online">
+                                        <div class="mock-device-icon">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="3"
+                                                    width="20"
+                                                    height="14"
+                                                    rx="2"
+                                                />
+                                                <line
+                                                    x1="12"
+                                                    y1="17"
+                                                    x2="12"
+                                                    y2="21"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-device-name"
+                                            >PC-02</span
+                                        >
+                                        <span class="mock-device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="mock-device offline">
+                                        <div class="mock-device-icon">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="3"
+                                                    width="20"
+                                                    height="14"
+                                                    rx="2"
+                                                />
+                                                <line
+                                                    x1="12"
+                                                    y1="17"
+                                                    x2="12"
+                                                    y2="21"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-device-name"
+                                            >PC-03</span
+                                        >
+                                        <span class="mock-device-status"
+                                            >Offline</span
+                                        >
+                                    </div>
+                                    <div class="mock-device online">
+                                        <div class="mock-device-icon">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="3"
+                                                    width="20"
+                                                    height="14"
+                                                    rx="2"
+                                                />
+                                                <line
+                                                    x1="12"
+                                                    y1="17"
+                                                    x2="12"
+                                                    y2="21"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-device-name"
+                                            >PC-04</span
+                                        >
+                                        <span class="mock-device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="mock-device offline">
+                                        <div class="mock-device-icon">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="3"
+                                                    width="20"
+                                                    height="14"
+                                                    rx="2"
+                                                />
+                                                <line
+                                                    x1="12"
+                                                    y1="17"
+                                                    x2="12"
+                                                    y2="21"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-device-name"
+                                            >PC-05</span
+                                        >
+                                        <span class="mock-device-status"
+                                            >Offline</span
+                                        >
+                                    </div>
+                                    <div class="mock-device online">
+                                        <div class="mock-device-icon">
+                                            <svg
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="2"
+                                                    y="3"
+                                                    width="20"
+                                                    height="14"
+                                                    rx="2"
+                                                />
+                                                <line
+                                                    x1="12"
+                                                    y1="17"
+                                                    x2="12"
+                                                    y2="21"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-device-name"
+                                            >PC-06</span
+                                        >
+                                        <span class="mock-device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                </div>
+                                <div class="mock-lab-toggle">
+                                    <div>
+                                        <div class="mock-lab-toggle-label">
+                                            Lab A — Internet Access
+                                        </div>
+                                        <div class="mock-lab-toggle-sub">
+                                            6 devices · 4 online · 2 offline
+                                        </div>
+                                    </div>
+                                    <div class="mock-toggle-switch"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FEATURE 2: Firewall & Domain Blocking -->
+        <section class="feature-section" id="firewall">
+            <div class="container">
+                <div class="feature-grid">
+                    <div class="feature-info reveal">
+                        <div class="feature-label">
+                            <span class="feature-label-num">02</span>
+                            Firewall & Domain Blocking
+                        </div>
+                        <h2 class="feature-title">
+                            See what's blocked.<br />Adjust in real time.
+                        </h2>
+                        <p class="feature-description">
+                            A firewall tab powered by Pi-hole with individual
+                            block lists. Supports exact domain blocking and
+                            regex patterns. See what's being blocked and adjust
+                            — instantly.
+                        </p>
+                        <ul class="feature-points">
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Exact domain blocking (e.g. login.live.com)
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Regex pattern support for wildcard blocking
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Pi-hole integration for DNS-level blocking
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Live stats: total domains blocked, query counts,
+                                top blocked
+                            </li>
+                        </ul>
+                        <a href="#cta" class="feature-cta">
+                            Learn more
+                            <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                                <polyline points="12 5 19 12 12 19" />
+                            </svg>
+                        </a>
+                    </div>
+                    <div class="reveal reveal-delay-2">
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-ui-dot mock-ui-dot-r"></div>
+                                <div class="mock-ui-dot mock-ui-dot-y"></div>
+                                <div class="mock-ui-dot mock-ui-dot-g"></div>
+                                <span class="mock-ui-header-title"
+                                    >firewall.pihole — blocked domains</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="mock-firewall-stats">
+                                    <div class="mock-stat">
+                                        <div class="mock-stat-value">12.4K</div>
+                                        <div class="mock-stat-label">
+                                            Domains blocked
+                                        </div>
+                                    </div>
+                                    <div class="mock-stat">
+                                        <div class="mock-stat-value">847</div>
+                                        <div class="mock-stat-label">
+                                            Queries today
+                                        </div>
+                                    </div>
+                                    <div class="mock-stat">
+                                        <div class="mock-stat-value">34%</div>
+                                        <div class="mock-stat-label">
+                                            Block rate
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mock-domain-list">
+                                    <div class="mock-domain-item">
+                                        <span class="mock-domain-name"
+                                            >login.live.com</span
+                                        >
+                                        <span class="mock-domain-badge"
+                                            >exact</span
+                                        >
+                                    </div>
+                                    <div class="mock-domain-item">
+                                        <span class="mock-domain-name"
+                                            >.*\.tiktok\.com</span
+                                        >
+                                        <span class="mock-domain-badge regex"
+                                            >regex</span
+                                        >
+                                    </div>
+                                    <div class="mock-domain-item">
+                                        <span class="mock-domain-name"
+                                            >.*\.youtube\.com</span
+                                        >
+                                        <span class="mock-domain-badge regex"
+                                            >regex</span
+                                        >
+                                    </div>
+                                    <div class="mock-domain-item">
+                                        <span class="mock-domain-name"
+                                            >accounts.google.com</span
+                                        >
+                                        <span class="mock-domain-badge"
+                                            >exact</span
+                                        >
+                                    </div>
+                                    <div class="mock-domain-item">
+                                        <span class="mock-domain-name"
+                                            >.*\.discord\.gg</span
+                                        >
+                                        <span class="mock-domain-badge regex"
+                                            >regex</span
+                                        >
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FEATURE 3: Lab Management -->
+        <section class="feature-section" id="lab-management">
+            <div class="container">
+                <div class="feature-grid">
+                    <div class="feature-info reveal">
+                        <div class="feature-label">
+                            <span class="feature-label-num">03</span>
+                            Lab Management
+                        </div>
+                        <h2 class="feature-title">
+                            Reimage, restrict,<br />lock down — remotely.
+                        </h2>
+                        <p class="feature-description">
+                            Format or reimage machines to a KNEC compliant clean
+                            state. Clear user data. Add OS-level restrictions.
+                            Or put the entire lab into Exam Mode — locked down
+                            to only what's needed for a test.
+                        </p>
+                        <ul class="feature-points">
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Instantly KNEC compliance no expensive
+                                contractors required.
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Clear all user data from machines
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                OS-level restrictions: block unauthorized
+                                softwares, freeze system settings, etc.
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Exam Mode: format all computers to a KNEC
+                                compliant state
+                            </li>
+                        </ul>
+                        <a href="#cta" class="feature-cta">
+                            Learn more
+                            <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                                <polyline points="12 5 19 12 12 19" />
+                            </svg>
+                        </a>
+                    </div>
+                    <div class="reveal reveal-delay-2">
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-ui-dot mock-ui-dot-r"></div>
+                                <div class="mock-ui-dot mock-ui-dot-y"></div>
+                                <div class="mock-ui-dot mock-ui-dot-g"></div>
+                                <span class="mock-ui-header-title"
+                                    >lab.management — FOG integration</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="mock-mgmt-grid">
+                                    <div class="mock-mgmt-action">
+                                        <div
+                                            class="mock-mgmt-action-icon"
+                                            style="
+                                                background: rgba(
+                                                    0,
+                                                    229,
+                                                    160,
+                                                    0.1
+                                                );
+                                                color: var(--accent);
+                                            "
+                                        >
+                                            <svg
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <polyline
+                                                    points="1 4 1 10 7 10"
+                                                />
+                                                <path
+                                                    d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-mgmt-action-title"
+                                            >Reimage</span
+                                        >
+                                        <span class="mock-mgmt-action-desc"
+                                            >Restore to clean OS image</span
+                                        >
+                                    </div>
+                                    <div class="mock-mgmt-action">
+                                        <div
+                                            class="mock-mgmt-action-icon"
+                                            style="
+                                                background: rgba(
+                                                    0,
+                                                    180,
+                                                    216,
+                                                    0.1
+                                                );
+                                                color: var(--accent-secondary);
+                                            "
+                                        >
+                                            <svg
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <path d="M3 6h18" />
+                                                <path
+                                                    d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"
+                                                />
+                                                <path
+                                                    d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-mgmt-action-title"
+                                            >Clear Data</span
+                                        >
+                                        <span class="mock-mgmt-action-desc"
+                                            >Wipe all user data</span
+                                        >
+                                    </div>
+                                    <div class="mock-mgmt-action">
+                                        <div
+                                            class="mock-mgmt-action-icon"
+                                            style="
+                                                background: rgba(
+                                                    255,
+                                                    186,
+                                                    73,
+                                                    0.1
+                                                );
+                                                color: #ffba49;
+                                            "
+                                        >
+                                            <svg
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <rect
+                                                    x="3"
+                                                    y="11"
+                                                    width="18"
+                                                    height="11"
+                                                    rx="2"
+                                                    ry="2"
+                                                />
+                                                <path
+                                                    d="M7 11V7a5 5 0 0 1 10 0v4"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-mgmt-action-title"
+                                            >Restrict OS</span
+                                        >
+                                        <span class="mock-mgmt-action-desc"
+                                            >USB, Control Panel, etc.</span
+                                        >
+                                    </div>
+                                    <div class="mock-mgmt-action">
+                                        <div
+                                            class="mock-mgmt-action-icon"
+                                            style="
+                                                background: rgba(
+                                                    255,
+                                                    95,
+                                                    87,
+                                                    0.1
+                                                );
+                                                color: #ff5f57;
+                                            "
+                                        >
+                                            <svg
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                            >
+                                                <circle
+                                                    cx="12"
+                                                    cy="12"
+                                                    r="10"
+                                                />
+                                                <line
+                                                    x1="4.93"
+                                                    y1="4.93"
+                                                    x2="19.07"
+                                                    y2="19.07"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <span class="mock-mgmt-action-title"
+                                            >Block Apps</span
+                                        >
+                                        <span class="mock-mgmt-action-desc"
+                                            >Restrict specific software</span
+                                        >
+                                    </div>
+                                </div>
+                                <div class="mock-exam-mode">
+                                    <div class="mock-exam-icon">
+                                        <svg
+                                            width="20"
+                                            height="20"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="#0a0c0f"
+                                            stroke-width="2.5"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path
+                                                d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+                                            />
+                                        </svg>
+                                    </div>
+                                    <div class="mock-exam-info">
+                                        <div class="mock-exam-title">
+                                            Exam Mode
+                                        </div>
+                                        <div class="mock-exam-sub">
+                                            Lab A · Active · All restrictions
+                                            enforced
+                                        </div>
+                                    </div>
+                                    <span class="mock-exam-badge">LIVE</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- STATS STRIP -->
+        <section class="stats-strip">
+            <div class="container">
+                <div class="stats-grid">
+                    <div class="stat-item reveal">
+                        <div class="stat-number">3</div>
+                        <div class="stat-label">Core modules</div>
+                    </div>
+                    <div class="stat-item reveal reveal-delay-1">
+                        <div class="stat-number"><span><</span>1s</div>
+                        <div class="stat-label">Toggle latency</div>
+                    </div>
+                    <div class="stat-item reveal reveal-delay-2">
+                        <div class="stat-number">100<span>%</span></div>
+                        <div class="stat-label">Browser-based</div>
+                    </div>
+                    <div class="stat-item reveal reveal-delay-3">
+                        <div class="stat-number">Ksh</div>
+                        <div class="stat-label">School-friendly pricing</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA SECTION -->
+        <section class="cta-section" id="cta">
+            <div class="container">
+                <h2 class="reveal">
+                    Take back control<br /><em
+                        style="
+                            font-family: var(--font-display);
+                            font-style: italic;
+                            color: var(--accent);
+                        "
+                        >of your lab</em
+                    >
+                </h2>
+                <p class="reveal reveal-delay-1">
+                    Labs FCD runs on your school's network. No cloud
+                    dependencies. No per-seat licenses. One dashboard, full
+                    control.
+                </p>
+                <a
+                    href="mailto:hello@labsfcd.dev"
+                    class="btn-primary reveal reveal-delay-2"
+                >
+                    Request access
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                        <polyline points="12 5 19 12 12 19" />
+                    </svg>
+                </a>
+            </div>
+        </section>
+
+        <!-- FOOTER -->
+        <footer>
+            <div class="container">
+                <div class="footer-inner">
+                    <div class="footer-brand">
+                        <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <rect
+                                x="2"
+                                y="3"
+                                width="20"
+                                height="14"
+                                rx="2"
+                                ry="2"
+                            />
+                            <line x1="8" y1="21" x2="16" y2="21" />
+                            <line x1="12" y1="17" x2="12" y2="21" />
+                        </svg>
+                        labs.fcd — &copy; 2026
+                    </div>
+                    <ul class="footer-links">
+                        <li><a href="#features">Features</a></li>
+                        <li>
+                            <a href="#internet-control">Internet Control</a>
+                        </li>
+                        <li><a href="#firewall">Firewall</a></li>
+                        <li><a href="#lab-management">Management</a></li>
+                    </ul>
+                </div>
+            </div>
+        </footer>
+
+        <script>
+            // Nav scroll effect
+            const nav = document.getElementById('navbar');
+            window.addEventListener(
+                'scroll',
+                () => {
+                    nav.classList.toggle('scrolled', window.scrollY > 40);
+                },
+                { passive: true },
+            );
+
+            // Scroll reveal
+            const revealElements = document.querySelectorAll('.reveal');
+            const observer = new IntersectionObserver(
+                (entries) => {
+                    entries.forEach((entry) => {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('visible');
+                            observer.unobserve(entry.target);
+                        }
+                    });
+                },
+                { threshold: 0.12, rootMargin: '0px 0px -40px 0px' },
+            );
+            revealElements.forEach((el) => observer.observe(el));
+
+            // Toggle switch interactivity
+            document
+                .querySelectorAll('.mock-toggle-switch')
+                .forEach((toggle) => {
+                    toggle.addEventListener('click', function () {
+                        this.classList.toggle('off');
+                    });
+                });
+        </script>
+    </body>
+</html>
