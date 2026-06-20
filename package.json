@@ -9,6 +9,8 @@
         "build:all": "bun run build && tsc --noEmit",
         "serve": "bun run backend/server.ts",
         "start": "bun run build && bun run backend/server.ts",
+        "dev:landing": "bun run --hot src/landing/server.ts",
+        "serve:landing": "bun run src/landing/server.ts",
         "dev:frontend": "cd frontend && bun run dev"
     },
     "dependencies": {
