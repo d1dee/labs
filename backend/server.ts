@@ -11,6 +11,27 @@ import { activationHistory, dataUsageHistory } from '../db/schema';
 import { auth } from './auth';
 import { seedTestTeachers } from './database';
 import {
+    addDemoPiholeDomain,
+    applyDemoFogHost,
+    applyDemoFogHosts,
+    applyDemoPiholeDomains,
+    buildDemoPiholeDomainsResponse,
+    createDemoFogHost,
+    deleteDemoFogHost,
+    deleteDemoPiholeDomain,
+    generateDemoFogHostId,
+    getDemoFogHostOverrides,
+    getDemoLabEnabled,
+    getDemoLabHistory,
+    getDemoPiholeBlocking,
+    getDemoPiholeDomainOverrides,
+    isDemoUser,
+    setDemoLabState,
+    setDemoPiholeBlocking,
+    updateDemoFogHost,
+    updateDemoPiholeDomain,
+} from './demo';
+import {
     createFogHost,
     createFogSnapinTask,
     createFogTask,
@@ -40,28 +61,6 @@ import {
     setPiholeBlocking,
     updatePiholeDomain,
 } from './pihole';
-import {
-    addDemoPiholeDomain,
-    applyDemoFogHost,
-    applyDemoFogHosts,
-    applyDemoPiholeDomains,
-    buildDemoFogHostsResponse,
-    buildDemoPiholeDomainsResponse,
-    createDemoFogHost,
-    deleteDemoFogHost,
-    deleteDemoPiholeDomain,
-    generateDemoFogHostId,
-    getDemoFogHostOverrides,
-    getDemoLabEnabled,
-    getDemoLabHistory,
-    getDemoPiholeBlocking,
-    getDemoPiholeDomainOverrides,
-    isDemoUser,
-    setDemoLabState,
-    setDemoPiholeBlocking,
-    updateDemoFogHost,
-    updateDemoPiholeDomain,
-} from './demo';
 
 // Create Better Auth tables (drizzle-kit doesn't support bun:sqlite)
 createAuthTables();
@@ -497,7 +496,10 @@ app.post('/api/pihole/domains', async (c) => {
                 body.enabled !== false,
             );
             // Return merged domain list
-            const merged = await buildDemoPiholeDomainsResponse(user.id, getPiholeDomains);
+            const merged = await buildDemoPiholeDomainsResponse(
+                user.id,
+                getPiholeDomains,
+            );
             return c.json(merged);
         }
 
@@ -583,7 +585,10 @@ app.put('/api/pihole/domains', async (c) => {
                 newKind: body.newKind,
             });
             // Return merged domain list
-            const merged = await buildDemoPiholeDomainsResponse(user.id, getPiholeDomains);
+            const merged = await buildDemoPiholeDomainsResponse(
+                user.id,
+                getPiholeDomains,
+            );
             return c.json(merged);
         }
 
