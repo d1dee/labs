@@ -83,6 +83,26 @@
                 background-size: 180px;
             }
 
+            .paper-grid-overlay {
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 9998;
+                opacity: 0.04;
+                background-image:
+                    linear-gradient(
+                        rgba(255, 255, 255, 0.5) 1px,
+                        transparent 1px
+                    ),
+                    linear-gradient(
+                        90deg,
+                        rgba(255, 255, 255, 0.5) 1px,
+                        transparent 1px
+                    );
+                background-size: 24px 24px;
+                background-position: -1px -1px;
+            }
+
             /* ===== NAVIGATION ===== */
             nav {
                 position: fixed;
@@ -213,12 +233,12 @@
                 inset: 0;
                 background-image:
                     linear-gradient(
-                        rgba(255, 255, 255, 0.02) 1px,
+                        rgba(255, 255, 255, 0.035) 1px,
                         transparent 1px
                     ),
                     linear-gradient(
                         90deg,
-                        rgba(255, 255, 255, 0.02) 1px,
+                        rgba(255, 255, 255, 0.035) 1px,
                         transparent 1px
                     );
                 background-size: 60px 60px;
@@ -232,36 +252,51 @@
                     black 30%,
                     transparent 70%
                 );
+                animation: grid-pulse 8s ease-in-out infinite;
+            }
+            @keyframes grid-pulse {
+                0%,
+                100% {
+                    opacity: 0.6;
+                }
+                50% {
+                    opacity: 1;
+                }
             }
             .hero-bg-orb {
                 position: absolute;
                 border-radius: 50%;
-                filter: blur(100px);
-                opacity: 0.4;
+                filter: blur(80px);
             }
             .hero-bg-orb-1 {
-                width: 600px;
-                height: 600px;
+                width: 700px;
+                height: 700px;
                 background: radial-gradient(
                     circle,
-                    rgba(0, 229, 160, 0.2),
+                    rgba(0, 229, 160, 0.35),
+                    rgba(0, 229, 160, 0.1) 40%,
                     transparent 70%
                 );
                 top: -15%;
                 right: -10%;
-                animation: float-orb 12s ease-in-out infinite;
+                animation:
+                    float-orb 12s ease-in-out infinite,
+                    pulse-glow-1 6s ease-in-out infinite;
             }
             .hero-bg-orb-2 {
-                width: 400px;
-                height: 400px;
+                width: 500px;
+                height: 500px;
                 background: radial-gradient(
                     circle,
-                    rgba(0, 180, 216, 0.15),
+                    rgba(0, 180, 216, 0.3),
+                    rgba(0, 180, 216, 0.08) 40%,
                     transparent 70%
                 );
                 bottom: 10%;
                 left: -5%;
-                animation: float-orb 15s ease-in-out infinite reverse;
+                animation:
+                    float-orb 15s ease-in-out infinite reverse,
+                    pulse-glow-2 8s ease-in-out infinite;
             }
             @keyframes float-orb {
                 0%,
@@ -273,6 +308,28 @@
                 }
                 66% {
                     transform: translate(-20px, 15px) scale(0.95);
+                }
+            }
+            @keyframes pulse-glow-1 {
+                0%,
+                100% {
+                    opacity: 0.6;
+                    filter: blur(80px) brightness(1);
+                }
+                50% {
+                    opacity: 1;
+                    filter: blur(90px) brightness(1.3);
+                }
+            }
+            @keyframes pulse-glow-2 {
+                0%,
+                100% {
+                    opacity: 0.5;
+                    filter: blur(80px) brightness(1);
+                }
+                50% {
+                    opacity: 0.9;
+                    filter: blur(90px) brightness(1.2);
                 }
             }
             .hero-content {
@@ -894,17 +951,30 @@
             .cta-section::before {
                 content: '';
                 position: absolute;
-                bottom: 0;
+                bottom: -20%;
                 left: 50%;
                 transform: translateX(-50%);
-                width: 800px;
-                height: 400px;
+                width: 900px;
+                height: 500px;
                 background: radial-gradient(
                     circle,
-                    rgba(0, 229, 160, 0.08),
+                    rgba(0, 229, 160, 0.15),
+                    rgba(0, 229, 160, 0.05) 40%,
                     transparent 70%
                 );
                 pointer-events: none;
+                animation: cta-glow 5s ease-in-out infinite;
+            }
+            @keyframes cta-glow {
+                0%,
+                100% {
+                    opacity: 0.6;
+                    transform: translateX(-50%) scale(1);
+                }
+                50% {
+                    opacity: 1;
+                    transform: translateX(-50%) scale(1.15);
+                }
             }
             .cta-section h2 {
                 font-family: var(--font-display);
@@ -1056,6 +1126,7 @@
     </head>
     <body>
         <div class="noise-overlay"></div>
+        <div class="paper-grid-overlay"></div>
 
         <nav id="navbar">
             <div class="container">
