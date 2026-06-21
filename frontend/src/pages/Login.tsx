@@ -36,7 +36,7 @@ const Login: FC<LoginProps> = ({ onLoginSuccess }) => {
 
     useEffect(() => {
         // Auto-fill demo credentials on demo subdomain
-        if (window.location.hostname === 'demo.labs.fcd.co.ke') {
+        if (window.location.hostname === 'demo.fcd.co.ke') {
             setUsername('demo');
             setEmail('demo@local.lan');
             setPassword('demo123');
