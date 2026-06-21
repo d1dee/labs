@@ -37,6 +37,11 @@ export async function seedTestTeachers() {
             username: 'dr_williams',
             password: 'password123',
         },
+        {
+            name: 'Demo User',
+            username: 'demo',
+            password: 'demo123',
+        },
     ];
 
     for (const teacher of testTeachers) {

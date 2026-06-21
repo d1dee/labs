@@ -77,3 +77,14 @@ export const dataUsageHistory = sqliteTable('dataUsageHistory', {
     usageMB: integer('usageMB', { mode: 'number' }).notNull(),
     createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
 });
+
+// Demo state table — stores simulated state changes for demo users
+export const demoState = sqliteTable('demoState', {
+    id: text('id').primaryKey(),
+    userId: text('userId').notNull(),
+    category: text('category').notNull(),
+    resourceId: text('resourceId'),
+    action: text('action').notNull(),
+    data: text('data').notNull(),
+    createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+});

@@ -40,6 +40,28 @@ import {
     setPiholeBlocking,
     updatePiholeDomain,
 } from './pihole';
+import {
+    addDemoPiholeDomain,
+    applyDemoFogHost,
+    applyDemoFogHosts,
+    applyDemoPiholeDomains,
+    buildDemoFogHostsResponse,
+    buildDemoPiholeDomainsResponse,
+    createDemoFogHost,
+    deleteDemoFogHost,
+    deleteDemoPiholeDomain,
+    generateDemoFogHostId,
+    getDemoFogHostOverrides,
+    getDemoLabEnabled,
+    getDemoLabHistory,
+    getDemoPiholeBlocking,
+    getDemoPiholeDomainOverrides,
+    isDemoUser,
+    setDemoLabState,
+    setDemoPiholeBlocking,
+    updateDemoFogHost,
+    updateDemoPiholeDomain,
+} from './demo';
 
 // Create Better Auth tables (drizzle-kit doesn't support bun:sqlite)
 createAuthTables();
@@ -165,6 +187,15 @@ app.get('/api/labs/:labId/stats', async (c) => {
             timestamp: new Date().toISOString(),
         };
 
+        // Demo mode: apply lab state override
+        if (isDemoUser(user)) {
+            const demoEnabled = await getDemoLabEnabled(user.id, labId);
+            if (demoEnabled !== null) {
+                stats.firewall.disabled = !demoEnabled;
+                stats.firewall.status = demoEnabled ? 'active' : 'blocked';
+            }
+        }
+
         return c.json(stats);
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -186,6 +217,17 @@ app.post('/api/labs/:labId/toggle', async (c) => {
 
         if (!lab) {
             return c.json({ error: 'Lab not found' }, 404);
+        }
+
+        // Demo mode: persist toggle in demo state instead of real systems
+        if (isDemoUser(user)) {
+            await setDemoLabState(user.id, labId, enable);
+            return c.json({
+                success: true,
+                lab: labId,
+                enabled: enable,
+                message: `Lab ${labId} access has been ${enable ? 'enabled' : 'disabled'}`,
+            });
         }
 
         // Toggle the rule (if enable=true, set disabled=false)
@@ -222,11 +264,18 @@ app.get('/api/labs/:labId/history', async (c) => {
     }
 
     const labId = c.req.param('labId');
-    const { eq, desc, gte, and } = await import('drizzle-orm');
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
     try {
+        // Demo mode: return demo history
+        if (isDemoUser(user)) {
+            const demoHistory = await getDemoLabHistory(user.id, labId);
+            return c.json({ history: demoHistory });
+        }
+
+        const { eq, desc, gte, and } = await import('drizzle-orm');
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
         const history = await db
             .select()
             .from(activationHistory)
@@ -412,6 +461,13 @@ app.get('/api/pihole/domains', async (c) => {
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
+
+    // Demo mode: apply domain overrides
+    if (isDemoUser(user)) {
+        const overrides = await getDemoPiholeDomainOverrides(user.id);
+        return c.json(applyDemoPiholeDomains(result.data!, overrides));
+    }
+
     return c.json(result.data);
 });
 
@@ -429,6 +485,22 @@ app.post('/api/pihole/domains', async (c) => {
             comment?: string;
             enabled?: boolean;
         }>();
+
+        // Demo mode: persist domain addition in demo state
+        if (isDemoUser(user)) {
+            await addDemoPiholeDomain(
+                user.id,
+                body.domain,
+                body.type || 'deny',
+                body.kind || 'exact',
+                body.comment || '',
+                body.enabled !== false,
+            );
+            // Return merged domain list
+            const merged = await buildDemoPiholeDomainsResponse(user.id, getPiholeDomains);
+            return c.json(merged);
+        }
+
         const result = await addPiholeDomain(
             body.domain,
             body.type || 'deny',
@@ -457,6 +529,18 @@ app.delete('/api/pihole/domains', async (c) => {
             type: 'allow' | 'deny';
             kind: 'exact' | 'regex';
         }>();
+
+        // Demo mode: persist domain deletion in demo state
+        if (isDemoUser(user)) {
+            await deleteDemoPiholeDomain(
+                user.id,
+                body.domain,
+                body.type,
+                body.kind,
+            );
+            return c.json({ success: true });
+        }
+
         const result = await deletePiholeDomain(
             body.type,
             body.kind,
@@ -488,6 +572,21 @@ app.put('/api/pihole/domains', async (c) => {
             newType?: 'allow' | 'deny';
             newKind?: 'exact' | 'regex';
         }>();
+
+        // Demo mode: persist domain update in demo state
+        if (isDemoUser(user)) {
+            await updateDemoPiholeDomain(user.id, body.domain, {
+                enabled: body.enabled,
+                comment: body.comment,
+                groups: body.groups,
+                newType: body.newType,
+                newKind: body.newKind,
+            });
+            // Return merged domain list
+            const merged = await buildDemoPiholeDomainsResponse(user.id, getPiholeDomains);
+            return c.json(merged);
+        }
+
         const result = await updatePiholeDomain(
             body.type,
             body.kind,
@@ -519,6 +618,15 @@ app.get('/api/pihole/blocking', async (c) => {
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
+
+    // Demo mode: apply blocking state override
+    if (isDemoUser(user)) {
+        const demoBlocking = await getDemoPiholeBlocking(user.id);
+        if (demoBlocking) {
+            return c.json(demoBlocking);
+        }
+    }
+
     return c.json(result.data);
 });
 
@@ -533,6 +641,17 @@ app.post('/api/pihole/blocking', async (c) => {
             blocking: boolean;
             timer?: number | null;
         }>();
+
+        // Demo mode: persist blocking state in demo state
+        if (isDemoUser(user)) {
+            await setDemoPiholeBlocking(user.id, body.blocking, body.timer);
+            return c.json({
+                blocking: body.blocking ? 'enabled' : 'disabled',
+                timer: body.timer ?? null,
+                took: 0,
+            });
+        }
+
         const result = await setPiholeBlocking(body.blocking, body.timer);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
@@ -580,6 +699,13 @@ app.get('/api/fog/hosts', async (c) => {
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
+
+    // Demo mode: apply host overrides
+    if (isDemoUser(user)) {
+        const overrides = await getDemoFogHostOverrides(user.id);
+        return c.json(applyDemoFogHosts(result.data!, overrides));
+    }
+
     return c.json(result.data);
 });
 
@@ -594,10 +720,27 @@ app.get('/api/fog/hosts/:id', async (c) => {
         return c.json({ error: 'Invalid host ID' }, 400);
     }
 
+    // Demo mode: check for demo-created host first
+    if (isDemoUser(user)) {
+        const overrides = await getDemoFogHostOverrides(user.id);
+        const demoCreation = overrides.creations.find((c) => c.id === id);
+        if (demoCreation) {
+            return c.json(demoCreation);
+        }
+    }
+
     const result = await getFogHost(id);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
+
+    // Demo mode: apply update overrides
+    if (isDemoUser(user)) {
+        const overrides = await getDemoFogHostOverrides(user.id);
+        const updatedHost = applyDemoFogHost(result.data!, overrides, id);
+        return c.json(updatedHost);
+    }
+
     return c.json(result.data);
 });
 
@@ -609,6 +752,20 @@ app.post('/api/fog/hosts', async (c) => {
 
     try {
         const body = await c.req.json<Record<string, unknown>>();
+
+        // Demo mode: persist host creation in demo state
+        if (isDemoUser(user)) {
+            const demoId = generateDemoFogHostId();
+            await createDemoFogHost(user.id, demoId, body);
+            return c.json({
+                id: demoId,
+                name: (body.name as string) || 'Demo Host',
+                description: (body.description as string) || '',
+                macs: (body.macs as string[]) || [],
+                ...body,
+            });
+        }
+
         const result = await createFogHost(body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
@@ -632,6 +789,19 @@ app.put('/api/fog/hosts/:id', async (c) => {
 
     try {
         const body = await c.req.json<Record<string, unknown>>();
+
+        // Demo mode: persist host update in demo state
+        if (isDemoUser(user)) {
+            await updateDemoFogHost(user.id, id, body);
+            // Return updated host by merging with real data if available
+            const result = await getFogHost(id);
+            if (result.success && result.data) {
+                const overrides = await getDemoFogHostOverrides(user.id);
+                return c.json(applyDemoFogHost(result.data, overrides, id));
+            }
+            return c.json({ id, ...body });
+        }
+
         const result = await updateFogHost(id, body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
@@ -651,6 +821,12 @@ app.delete('/api/fog/hosts/:id', async (c) => {
     const id = parseInt(c.req.param('id'), 10);
     if (isNaN(id)) {
         return c.json({ error: 'Invalid host ID' }, 400);
+    }
+
+    // Demo mode: persist host deletion in demo state
+    if (isDemoUser(user)) {
+        await deleteDemoFogHost(user.id, id);
+        return c.json({ success: true });
     }
 
     const result = await deleteFogHost(id);
@@ -741,6 +917,12 @@ app.post('/api/fog/hosts/:id/task', async (c) => {
             taskType: string;
             [key: string]: unknown;
         }>();
+
+        // Demo mode: return success without creating real task
+        if (isDemoUser(user)) {
+            return c.json({ success: true, id: 0, name: 'Demo Task' });
+        }
+
         const { taskType, ...options } = body;
         const result = await createFogTask(
             hostId,
@@ -772,6 +954,12 @@ app.post('/api/fog/hosts/:id/snapin-task', async (c) => {
             snapinID: number;
             [key: string]: unknown;
         }>();
+
+        // Demo mode: return success without creating real snapin task
+        if (isDemoUser(user)) {
+            return c.json({ success: true, id: 0, name: 'Demo Snapin Task' });
+        }
+
         const result = await createFogSnapinTask(hostId, body.snapinID, body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);

@@ -35,6 +35,15 @@ const Login: FC<LoginProps> = ({ onLoginSuccess }) => {
     const [allowSignup, setAllowSignup] = useState<boolean>(false);
 
     useEffect(() => {
+        // Auto-fill demo credentials on demo subdomain
+        if (window.location.hostname === 'demo.labs.fcd.co.ke') {
+            setUsername('demo');
+            setEmail('demo@local.lan');
+            setPassword('demo123');
+        }
+    }, []);
+
+    useEffect(() => {
         fetch('/api/config')
             .then((res) => res.json())
             .then((config: AppConfig) => setAllowSignup(config.allowSignup))

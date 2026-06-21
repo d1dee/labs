@@ -80,6 +80,16 @@ export function createAuthTables() {
             createdAt INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS "demoState" (
+            id TEXT PRIMARY KEY NOT NULL,
+            userId TEXT NOT NULL,
+            category TEXT NOT NULL,
+            resourceId TEXT,
+            action TEXT NOT NULL,
+            data TEXT NOT NULL,
+            createdAt INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS "user_email_idx" ON "user"(email);
         CREATE INDEX IF NOT EXISTS "user_username_idx" ON "user"(username);
         CREATE INDEX IF NOT EXISTS "account_userId_idx" ON "account"(userId);
@@ -91,6 +101,8 @@ export function createAuthTables() {
         CREATE INDEX IF NOT EXISTS "activationHistory_createdAt_idx" ON "activationHistory"(createdAt);
         CREATE INDEX IF NOT EXISTS "dataUsageHistory_labId_idx" ON "dataUsageHistory"(labId);
         CREATE INDEX IF NOT EXISTS "dataUsageHistory_createdAt_idx" ON "dataUsageHistory"(createdAt);
+        CREATE INDEX IF NOT EXISTS "demoState_userId_idx" ON "demoState"(userId);
+        CREATE INDEX IF NOT EXISTS "demoState_category_idx" ON "demoState"(category, userId);
     `;
 
     db.exec(createTables);
