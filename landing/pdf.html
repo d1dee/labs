@@ -427,6 +427,7 @@
                 background: #fff;
                 border: 1px solid var(--border);
                 border-radius: 6px;
+                max-width:;
             }
 
             .action-icon {
@@ -460,6 +461,7 @@
                 display: flex;
                 align-items: center;
                 gap: 10px;
+                grid-column: span 2;
             }
 
             .action-row-icon {
@@ -698,6 +700,10 @@
                 grid-template-columns: 1fr 1fr;
                 gap: 14px;
                 margin-top: 36px;
+            }
+
+            .cover-visual > :nth-child(3) {
+                grid-column: 1 / -1;
             }
 
             .btn-primary {
@@ -1059,7 +1065,8 @@
             }
 
             @media print {
-                html, body {
+                html,
+                body {
                     width: 210mm;
                     height: 100%;
                     background: white;
@@ -1109,6 +1116,35 @@
                 .cover-visual {
                     margin-top: 24px;
                     gap: 10px;
+                }
+                .cover-visual > :nth-child(3) .mock-ui-body {
+                    padding: 8px;
+                }
+                .cover-visual > :nth-child(3) .action-grid {
+                    grid-template-columns: 1fr 1fr;
+                    margin-bottom: 4px;
+                }
+                .cover-visual > :nth-child(3) .action-card {
+                    padding: 6px;
+                }
+                .cover-visual > :nth-child(3) .action-title {
+                    font-size: 9px;
+                }
+                .cover-visual > :nth-child(3) .action-desc {
+                    font-size: 7px;
+                }
+                .cover-visual > :nth-child(3) .action-row {
+                    padding: 6px 10px;
+                }
+                .cover-visual > :nth-child(3) .action-row-title {
+                    font-size: 10px;
+                }
+                .cover-visual > :nth-child(3) .action-row-sub {
+                    font-size: 7px;
+                }
+                .mock-ui-body {
+                    padding: 10px;
+                    width: 100%;
                 }
                 .label {
                     margin-bottom: 6px;
@@ -1279,9 +1315,6 @@
                 }
                 .stat-row {
                     grid-template-columns: repeat(2, 1fr);
-                }
-                .action-grid {
-                    grid-template-columns: 1fr;
                 }
                 .trust-row {
                     flex-direction: column;
@@ -1486,6 +1519,104 @@
                                         <span class="domain-badge regex"
                                             >Regex</span
                                         >
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-dot mock-dot-r"></div>
+                                <div class="mock-dot mock-dot-y"></div>
+                                <div class="mock-dot mock-dot-g"></div>
+                                <span class="mock-ui-title"
+                                    >lab-a.management</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="action-grid">
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: var(--red-light);
+                                                color: var(--red);
+                                            "
+                                        >
+                                            <i class="fas fa-power-off"></i>
+                                        </div>
+                                        <div class="action-title">
+                                            Shutdown All
+                                        </div>
+                                        <div class="action-desc">
+                                            Power off every machine
+                                        </div>
+                                    </div>
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: var(--accent-light);
+                                                color: var(--accent);
+                                            "
+                                        >
+                                            <i class="fas fa-lock"></i>
+                                        </div>
+                                        <div class="action-title">
+                                            Lock Screens
+                                        </div>
+                                        <div class="action-desc">
+                                            Lock all screens instantly
+                                        </div>
+                                    </div>
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: #e0f2fe;
+                                                color: var(--accent-secondary);
+                                            "
+                                        >
+                                            <i class="fas fa-rotate"></i>
+                                        </div>
+                                        <div class="action-title">
+                                            Restart All
+                                        </div>
+                                        <div class="action-desc">
+                                            Reboot every machine remotely
+                                        </div>
+                                    </div>
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: var(--yellow-light);
+                                                color: var(--yellow);
+                                            "
+                                        >
+                                            <i class="fas fa-clock"></i>
+                                        </div>
+                                        <div class="action-title">Schedule</div>
+                                        <div class="action-desc">
+                                            Auto-actions for lesson periods
+                                        </div>
+                                    </div>
+                                    <div class="action-row">
+                                        <div class="action-row-icon">
+                                            <i class="fas fa-eraser"></i>
+                                        </div>
+                                        <div>
+                                            <div class="action-row-title">
+                                                Format All Computers
+                                            </div>
+                                            <div class="action-row-sub">
+                                                Wipes all drives · Reinstalls OS ·
+                                                Applies lab image
+                                            </div>
+                                        </div>
+                                        <div class="action-row-badge">
+                                            Destructive
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1868,22 +1999,22 @@
                                             Auto-actions for lesson periods
                                         </div>
                                     </div>
-                                </div>
-                                <div class="action-row">
-                                    <div class="action-row-icon">
-                                        <i class="fas fa-eraser"></i>
-                                    </div>
-                                    <div>
-                                        <div class="action-row-title">
-                                            Format All Computers
+                                    <div class="action-row">
+                                        <div class="action-row-icon">
+                                            <i class="fas fa-eraser"></i>
                                         </div>
-                                        <div class="action-row-sub">
-                                            Wipes all drives · Reinstalls OS ·
-                                            Applies lab image
+                                        <div>
+                                            <div class="action-row-title">
+                                                Format All Computers
+                                            </div>
+                                            <div class="action-row-sub">
+                                                Wipes all drives · Reinstalls OS ·
+                                                Applies lab image
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div class="action-row-badge">
-                                        Destructive
+                                        <div class="action-row-badge">
+                                            Destructive
+                                        </div>
                                     </div>
                                 </div>
                             </div>
