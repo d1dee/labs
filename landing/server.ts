@@ -11,6 +11,7 @@ const app = new Hono();
 app.use(compress());
 
 const html = readFileSync(path.join(__dirname, 'index.html'), 'utf-8');
+const pdf = readFileSync(path.join(__dirname, 'pdf.html'), 'utf-8');
 const robots = readFileSync(path.join(__dirname, 'robots.txt'), 'utf-8');
 const sitemap = readFileSync(path.join(__dirname, 'sitemap.xml'), 'utf-8');
 const favicon = readFileSync(path.join(__dirname, 'favicon.ico'));
@@ -18,6 +19,10 @@ const favicon = readFileSync(path.join(__dirname, 'favicon.ico'));
 app.get('/', (c) => {
     c.header('Cache-Control', 'public, max-age=300');
     return c.html(html);
+});
+app.get('/pdf', (c) => {
+    c.header('Cache-Control', 'public, max-age=300');
+    return c.html(pdf);
 });
 app.get('/robots.txt', (c) => {
     c.header('Cache-Control', 'public, max-age=300');
@@ -35,6 +40,7 @@ app.get('/favicon.ico', (c) => {
 });
 
 app.get('/index.html', (c) => c.redirect('/'));
+app.get('/pdf.html', (c) => c.redirect('/pdf'));
 
 const port = process.env.PORT || 4000;
 
