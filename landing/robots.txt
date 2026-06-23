@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# Backend domains (labs.fcd.co.ke and demo.fcd.co.ke) should serve their own robots.txt
+# to disallow auth paths, API endpoints, and dashboard internals.
+
+Sitemap: https://fcd.co.ke/sitemap.xml

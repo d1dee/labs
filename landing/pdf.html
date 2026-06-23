@@ -1,0 +1,2207 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Labs FCD — Computer Lab Management for Kenyan Schools</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap"
+            rel="stylesheet"
+        />
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+        />
+        <style>
+            *,
+            *::before,
+            *::after {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            :root {
+                --bg: #ffffff;
+                --bg-elevated: #f7f8fa;
+                --bg-card: #f2f3f5;
+                --fg: #1a1c20;
+                --fg-muted: #5a5e6e;
+                --fg-dim: #9a9eae;
+                --accent: #00875a;
+                --accent-light: #e6f5ef;
+                --accent-glow: rgba(0, 135, 90, 0.08);
+                --accent-glow-strong: rgba(0, 135, 90, 0.15);
+                --accent-secondary: #0077a3;
+                --border: #e2e4e8;
+                --border-accent: rgba(0, 135, 90, 0.25);
+                --red: #d93025;
+                --red-light: #fce8e6;
+                --yellow: #c27800;
+                --yellow-light: #fef3e0;
+                --green-dot: #1e8e3e;
+                --font-display: 'Instrument Serif', serif;
+                --font-body: 'DM Sans', sans-serif;
+                --font-mono: 'JetBrains Mono', monospace;
+            }
+
+            body {
+                font-family: var(--font-body);
+                background: #e0e0e0;
+                color: var(--fg);
+                line-height: 1.6;
+                -webkit-font-smoothing: antialiased;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            ::selection {
+                background: var(--accent);
+                color: #fff;
+            }
+
+            .page {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 20px auto;
+                background: var(--bg);
+                box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+                overflow: hidden;
+                position: relative;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .page > * {
+                position: relative;
+                z-index: 1;
+            }
+
+            .page-inner {
+                padding: 32px 40px;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .top-bar {
+                height: 3px;
+                background: var(--accent);
+            }
+
+            .page-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 16px 40px;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .brand {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                text-decoration: none;
+                color: var(--fg);
+            }
+
+            .brand-icon {
+                width: 28px;
+                height: 28px;
+                background: var(--accent);
+                border-radius: 7px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .brand-icon i {
+                font-size: 12px;
+                color: #fff;
+            }
+
+            .brand-text {
+                font-family: var(--font-mono);
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+
+            .brand-text span {
+                color: var(--accent);
+            }
+
+            .page-num {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                color: var(--fg-dim);
+                letter-spacing: 0.05em;
+            }
+
+            .label {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                font-family: var(--font-mono);
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--accent);
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                margin-bottom: 10px;
+            }
+
+            .label::before,
+            .label::after {
+                content: '';
+                width: 20px;
+                height: 1px;
+                background: var(--border-accent);
+            }
+
+            h1,
+            h2,
+            h3 {
+                font-family: var(--font-display);
+                font-weight: 400;
+                line-height: 1.1;
+                letter-spacing: -0.01em;
+                color: var(--fg);
+            }
+
+            h1 em,
+            h2 em,
+            h3 em {
+                font-style: italic;
+                color: var(--accent);
+            }
+
+            .body-text {
+                font-size: 13.5px;
+                color: var(--fg-muted);
+                line-height: 1.7;
+            }
+
+            .body-text-sm {
+                font-size: 12px;
+                color: var(--fg-muted);
+                line-height: 1.7;
+            }
+
+            .mock-ui {
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                overflow: hidden;
+            }
+
+            .mock-ui-header {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 9px 12px;
+                border-bottom: 1px solid var(--border);
+                background: var(--bg-card);
+            }
+
+            .mock-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+            }
+            .mock-dot-r {
+                background: var(--red);
+            }
+            .mock-dot-y {
+                background: #e6a200;
+            }
+            .mock-dot-g {
+                background: var(--green-dot);
+            }
+
+            .mock-ui-title {
+                font-family: var(--font-mono);
+                font-size: 9px;
+                color: var(--fg-dim);
+                margin-left: 6px;
+            }
+
+            .mock-ui-body {
+                padding: 14px;
+            }
+
+            .device-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+                margin-bottom: 10px;
+            }
+
+            .device {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 4px;
+                padding: 8px 4px;
+                background: #fff;
+                border: 1px solid var(--border);
+                border-radius: 6px;
+            }
+
+            .device.on {
+                border-color: rgba(0, 135, 90, 0.3);
+            }
+            .device.off {
+                border-color: rgba(217, 48, 37, 0.25);
+                opacity: 0.5;
+            }
+
+            .device-icon {
+                width: 24px;
+                height: 24px;
+                border-radius: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+            }
+
+            .device.on .device-icon {
+                background: var(--accent-light);
+                color: var(--accent);
+            }
+            .device.off .device-icon {
+                background: var(--red-light);
+                color: var(--red);
+            }
+
+            .device-name {
+                font-family: var(--font-mono);
+                font-size: 8px;
+                color: var(--fg-dim);
+            }
+
+            .device-status {
+                font-family: var(--font-mono);
+                font-size: 7px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+
+            .device.on .device-status {
+                color: var(--accent);
+            }
+            .device.off .device-status {
+                color: var(--red);
+            }
+
+            .toggle-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 9px 12px;
+                background: var(--accent-light);
+                border: 1px solid var(--border-accent);
+                border-radius: 7px;
+            }
+
+            .toggle-label {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--fg);
+            }
+            .toggle-sub {
+                font-size: 9px;
+                color: var(--fg-muted);
+                margin-top: 1px;
+            }
+
+            .toggle-switch {
+                width: 34px;
+                height: 18px;
+                background: var(--accent);
+                border-radius: 9px;
+                position: relative;
+                flex-shrink: 0;
+            }
+
+            .toggle-switch::after {
+                content: '';
+                position: absolute;
+                right: 2px;
+                top: 2px;
+                width: 14px;
+                height: 14px;
+                background: white;
+                border-radius: 50%;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+            }
+
+            .domain-list {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+
+            .domain-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 6px 9px;
+                background: #fff;
+                border: 1px solid var(--border);
+                border-radius: 5px;
+                font-family: var(--font-mono);
+                font-size: 9px;
+            }
+
+            .domain-name {
+                color: var(--fg-muted);
+            }
+
+            .domain-badge {
+                padding: 1px 6px;
+                border-radius: 3px;
+                font-size: 7px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+
+            .domain-badge.blocked {
+                background: var(--red-light);
+                color: var(--red);
+            }
+            .domain-badge.regex {
+                background: #e0f2fe;
+                color: var(--accent-secondary);
+            }
+            .domain-badge.allowed {
+                background: var(--accent-light);
+                color: var(--accent);
+            }
+
+            .stat-row {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+                margin-bottom: 10px;
+            }
+
+            .stat-box {
+                padding: 9px;
+                background: #fff;
+                border: 1px solid var(--border);
+                border-radius: 6px;
+                text-align: center;
+            }
+
+            .stat-val {
+                font-family: var(--font-mono);
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--accent);
+                line-height: 1.2;
+            }
+
+            .stat-lbl {
+                font-size: 8px;
+                color: var(--fg-dim);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-top: 2px;
+            }
+
+            .action-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 6px;
+                margin-bottom: 8px;
+            }
+
+            .action-card {
+                padding: 10px;
+                background: #fff;
+                border: 1px solid var(--border);
+                border-radius: 6px;
+            }
+
+            .action-icon {
+                width: 22px;
+                height: 22px;
+                border-radius: 5px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 5px;
+                font-size: 10px;
+            }
+
+            .action-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--fg);
+                margin-bottom: 2px;
+            }
+            .action-desc {
+                font-size: 9px;
+                color: var(--fg-dim);
+                line-height: 1.4;
+            }
+
+            .action-row {
+                padding: 10px 12px;
+                background: var(--red-light);
+                border: 1px solid rgba(217, 48, 37, 0.2);
+                border-radius: 7px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .action-row-icon {
+                width: 32px;
+                height: 32px;
+                background: var(--red);
+                border-radius: 7px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                color: #fff;
+                font-size: 12px;
+            }
+
+            .action-row-title {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--fg);
+            }
+            .action-row-sub {
+                font-size: 9px;
+                color: var(--red);
+                font-weight: 500;
+            }
+
+            .action-row-badge {
+                padding: 2px 7px;
+                background: var(--red);
+                color: #fff;
+                border-radius: 4px;
+                font-family: var(--font-mono);
+                font-size: 8px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-left: auto;
+                white-space: nowrap;
+            }
+
+            .feat-label {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--accent);
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                margin-bottom: 8px;
+                display: flex;
+                align-items: center;
+                gap: 7px;
+            }
+
+            .feat-num {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 20px;
+                height: 20px;
+                background: var(--accent-light);
+                border: 1px solid var(--border-accent);
+                border-radius: 4px;
+                font-size: 9px;
+                color: var(--accent);
+            }
+
+            .check-list {
+                list-style: none;
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+            }
+
+            .check-list li {
+                display: flex;
+                align-items: flex-start;
+                gap: 9px;
+                font-size: 12px;
+                color: var(--fg);
+                line-height: 1.5;
+            }
+
+            .check-icon {
+                flex-shrink: 0;
+                width: 15px;
+                height: 15px;
+                margin-top: 1px;
+                color: var(--accent);
+            }
+
+            .page-footer {
+                margin-top: auto;
+                padding: 12px 40px;
+                border-top: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            .page-footer-left {
+                font-family: var(--font-mono);
+                font-size: 8px;
+                color: var(--fg-dim);
+                letter-spacing: 0.03em;
+            }
+
+            .page-footer-right {
+                display: flex;
+                gap: 16px;
+            }
+
+            .page-footer-right a {
+                font-family: var(--font-mono);
+                font-size: 8px;
+                color: var(--fg-dim);
+                text-decoration: none;
+            }
+
+            .cover-page {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                padding: 0;
+            }
+
+            .cover-main {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                padding: 48px 48px 32px;
+            }
+
+            .cover-top {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 48px;
+            }
+
+            .cover-brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .cover-brand-icon {
+                width: 36px;
+                height: 36px;
+                background: var(--accent);
+                border-radius: 9px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .cover-brand-icon i {
+                font-size: 16px;
+                color: #fff;
+            }
+
+            .cover-brand-name {
+                font-family: var(--font-mono);
+                font-size: 18px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+                color: var(--fg);
+            }
+
+            .cover-brand-name span {
+                color: var(--accent);
+            }
+
+            .cover-tagline {
+                font-family: var(--font-mono);
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: var(--fg-dim);
+            }
+
+            .cover-headline {
+                margin-bottom: 12px;
+            }
+
+            .cover-headline h1 {
+                font-size: 38px;
+                line-height: 1.05;
+                margin-bottom: 0;
+            }
+
+            .cover-headline h1 {
+                font-size: 48px;
+                line-height: 1.05;
+                margin-bottom: 0;
+            }
+
+            .cover-subtitle {
+                font-size: 13.5px;
+                color: var(--fg-muted);
+                line-height: 1.6;
+                max-width: 520px;
+                margin-bottom: 20px;
+            }
+
+            .cover-meta {
+                display: flex;
+                gap: 24px;
+                margin-bottom: 32px;
+            }
+
+            .cover-meta-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 11px;
+                color: var(--fg-muted);
+                font-weight: 500;
+            }
+
+            .cover-meta-item i {
+                color: var(--accent);
+                font-size: 13px;
+            }
+
+            .cover-link {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--accent);
+                font-family: var(--font-mono);
+                letter-spacing: 0.02em;
+            }
+
+            .cover-visual {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 14px;
+                margin-top: 36px;
+            }
+
+            .btn-primary {
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                padding: 10px 20px;
+                background: var(--accent);
+                color: #fff;
+                border: none;
+                border-radius: 7px;
+                font-family: var(--font-body);
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                text-decoration: none;
+            }
+
+            .btn-secondary {
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                padding: 10px 20px;
+                background: transparent;
+                color: var(--fg);
+                border: 1px solid var(--border);
+                border-radius: 7px;
+                font-family: var(--font-body);
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+                text-decoration: none;
+            }
+
+            .cover-right {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .two-col {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 32px;
+                align-items: start;
+            }
+
+            .problem-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin-bottom: 22px;
+            }
+
+            .problem-card {
+                padding: 14px;
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                display: flex;
+                gap: 10px;
+                align-items: flex-start;
+            }
+
+            .problem-icon {
+                width: 30px;
+                height: 30px;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                font-size: 12px;
+            }
+
+            .problem-icon.red {
+                background: var(--red-light);
+                color: var(--red);
+            }
+            .problem-icon.yellow {
+                background: var(--yellow-light);
+                color: var(--yellow);
+            }
+
+            .problem-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--fg);
+                margin-bottom: 2px;
+            }
+            .problem-desc {
+                font-size: 10px;
+                color: var(--fg-muted);
+                line-height: 1.55;
+            }
+
+            .pillar-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+                margin-bottom: 22px;
+            }
+
+            .pillar-card {
+                padding: 16px;
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                text-align: center;
+            }
+
+            .pillar-icon {
+                width: 36px;
+                height: 36px;
+                background: var(--accent-light);
+                border: 1px solid var(--border-accent);
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 10px;
+                font-size: 14px;
+                color: var(--accent);
+            }
+
+            .pillar-title {
+                font-size: 12px;
+                font-weight: 700;
+                color: var(--fg);
+                margin-bottom: 4px;
+            }
+            .pillar-desc {
+                font-size: 10px;
+                color: var(--fg-muted);
+                line-height: 1.55;
+            }
+
+            .steps-row {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 0;
+                margin-bottom: 22px;
+                position: relative;
+            }
+
+            .steps-row::before {
+                content: '';
+                position: absolute;
+                top: 24px;
+                left: 50px;
+                right: 50px;
+                height: 1px;
+                background: var(--border);
+            }
+
+            .step {
+                text-align: center;
+                position: relative;
+                z-index: 1;
+                padding: 0 8px;
+            }
+
+            .step-circle {
+                width: 48px;
+                height: 48px;
+                border-radius: 50%;
+                background: #fff;
+                border: 2px solid var(--border-accent);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 10px;
+                font-family: var(--font-mono);
+                font-size: 16px;
+                font-weight: 600;
+                color: var(--accent);
+            }
+
+            .step-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--fg);
+                margin-bottom: 3px;
+            }
+            .step-desc {
+                font-size: 9px;
+                color: var(--fg-dim);
+                line-height: 1.5;
+            }
+
+            .result-strip {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+                margin-bottom: 22px;
+            }
+
+            .result-card {
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 14px;
+                text-align: center;
+            }
+
+            .result-num {
+                font-family: var(--font-display);
+                font-size: 28px;
+                color: var(--fg);
+                line-height: 1.1;
+                margin-bottom: 3px;
+            }
+
+            .result-num span {
+                color: var(--accent);
+            }
+
+            .result-lbl {
+                font-size: 10px;
+                color: var(--fg-dim);
+            }
+
+            .final-cta {
+                background: var(--bg-elevated);
+                border: 1px solid var(--border-accent);
+                border-radius: 12px;
+                padding: 30px;
+                text-align: center;
+                margin-bottom: 16px;
+            }
+
+            .final-cta h2 {
+                font-size: 26px;
+                margin-bottom: 8px;
+            }
+            .final-cta .body-text {
+                max-width: 400px;
+                margin: 0 auto 20px;
+            }
+
+            .cta-actions {
+                display: flex;
+                gap: 10px;
+                justify-content: center;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+
+            .cta-contact {
+                font-size: 11px;
+                color: var(--fg-dim);
+            }
+            .cta-contact strong {
+                color: var(--fg);
+            }
+
+            .trust-row {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 24px;
+                padding: 12px;
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                margin-bottom: 20px;
+            }
+
+            .trust-item {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 10px;
+                color: var(--fg-dim);
+                font-weight: 500;
+            }
+
+            .trust-item i {
+                color: var(--accent);
+                font-size: 11px;
+            }
+
+            .divider {
+                border: none;
+                border-top: 1px solid var(--border);
+                margin: 20px 0;
+            }
+
+            .compare-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 11px;
+                margin-bottom: 0;
+            }
+
+            .compare-table thead th {
+                text-align: left;
+                padding: 8px 10px;
+                background: var(--bg-card);
+                border: 1px solid var(--border);
+                font-weight: 600;
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: var(--fg-muted);
+            }
+
+            .compare-table thead th:first-child {
+                border-radius: 6px 0 0 0;
+            }
+            .compare-table thead th:last-child {
+                border-radius: 0 6px 0 0;
+            }
+
+            .compare-table tbody td {
+                padding: 7px 10px;
+                border: 1px solid var(--border);
+            }
+
+            .compare-table tbody td:first-child {
+                font-weight: 500;
+                color: var(--fg);
+            }
+            .compare-table tbody td:nth-child(2) {
+                color: var(--fg-dim);
+            }
+            .compare-table tbody td:nth-child(3) {
+                color: var(--accent);
+                font-weight: 500;
+            }
+
+            .info-box {
+                flex: 1;
+                padding: 12px;
+                background: var(--bg-elevated);
+                border: 1px solid var(--border);
+                border-radius: 7px;
+            }
+
+            .info-box-title {
+                font-size: 9px;
+                font-weight: 600;
+                color: var(--accent);
+                font-family: var(--font-mono);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 5px;
+            }
+
+            .info-box-text {
+                font-size: 10px;
+                color: var(--fg-muted);
+                line-height: 1.7;
+            }
+
+            @media print {
+                body {
+                    background: white;
+                }
+                .page {
+                    margin: 0;
+                    box-shadow: none;
+                    page-break-after: always;
+                    min-height: auto;
+                }
+                .page:last-child {
+                    page-break-after: auto;
+                }
+            }
+
+            @media screen and (max-width: 820px) {
+                .page {
+                    width: 100%;
+                    min-height: auto;
+                    margin: 10px;
+                }
+                .page-inner {
+                    padding: 20px;
+                }
+                .page-header {
+                    padding: 12px 20px;
+                }
+                .page-footer {
+                    padding: 10px 20px;
+                }
+                .cover-grid {
+                    grid-template-columns: 1fr;
+                    padding: 20px;
+                    gap: 20px;
+                }
+                .cover-headline h1 {
+                    font-size: 32px;
+                }
+                .cover-visual {
+                    grid-template-columns: 1fr;
+                }
+                .two-col,
+                .problem-grid,
+                .pillar-grid {
+                    grid-template-columns: 1fr;
+                }
+                .steps-row {
+                    grid-template-columns: 1fr 1fr;
+                    gap: 14px;
+                }
+                .steps-row::before {
+                    display: none;
+                }
+                .result-strip {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .device-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .stat-row {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .action-grid {
+                    grid-template-columns: 1fr;
+                }
+                .trust-row {
+                    flex-direction: column;
+                    gap: 8px;
+                }
+                .cta-actions {
+                    flex-direction: column;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <div class="top-bar"></div>
+            <div class="page-header">
+                <div class="brand">
+                    <div class="brand-icon"><i class="fas fa-desktop"></i></div>
+                    <div class="brand-text">labs<span>.fcd</span></div>
+                </div>
+                <div class="page-num">labs.fcd.co.ke</div>
+            </div>
+
+            <div class="cover-page">
+                <div class="cover-main">
+                    <div class="cover-top">
+                        <div class="cover-brand">
+                            <div class="cover-brand-name">
+                                labs<span>.fcd</span>
+                            </div>
+                        </div>
+                        <div class="cover-tagline">
+                            Computer Lab Management for Kenyan Schools
+                        </div>
+                    </div>
+
+                    <div class="cover-headline">
+                        <h1>
+                            The <em>command centre</em> for your<br />computer
+                            lab
+                        </h1>
+                    </div>
+
+                    <p class="cover-subtitle">
+                        A web-based dashboard that gives your computer teacher
+                        or IT technician full control of every machine, every
+                        connection, and every session in the lab &mdash; from
+                        one screen.
+                    </p>
+
+                    <div class="cover-meta">
+                        <div class="cover-meta-item">
+                            <i class="fas fa-wifi"></i> Internet Control
+                        </div>
+                        <div class="cover-meta-item">
+                            <i class="fas fa-shield-halved"></i> Firewall &
+                            Blocking
+                        </div>
+                        <div class="cover-meta-item">
+                            <i class="fas fa-sliders"></i> Lab Management
+                        </div>
+                    </div>
+
+                    <div class="cover-meta-item">
+                        <span
+                            style="
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: var(--accent);
+                            "
+                        >
+                            See it in action:</span
+                        >
+                        <i class="fas fa-globe"></i> demo.fcd.co.ke
+                    </div>
+
+                    <div class="cover-visual">
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-dot mock-dot-r"></div>
+                                <div class="mock-dot mock-dot-y"></div>
+                                <div class="mock-dot mock-dot-g"></div>
+                                <span class="mock-ui-title"
+                                    >lab-a — dashboard</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="device-grid">
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-01</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-02</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device off">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-03</span>
+                                        <span class="device-status"
+                                            >Offline</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-04</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-05</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device off">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-06</span>
+                                        <span class="device-status"
+                                            >Offline</span
+                                        >
+                                    </div>
+                                </div>
+                                <div class="toggle-row">
+                                    <div>
+                                        <div class="toggle-label">
+                                            Lab Internet
+                                        </div>
+                                        <div class="toggle-sub">
+                                            All 40 devices connected
+                                        </div>
+                                    </div>
+                                    <div class="toggle-switch"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-dot mock-dot-r"></div>
+                                <div class="mock-dot mock-dot-y"></div>
+                                <div class="mock-dot mock-dot-g"></div>
+                                <span class="mock-ui-title"
+                                    >lab-a.firewall</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="stat-row">
+                                    <div class="stat-box">
+                                        <div class="stat-val">47</div>
+                                        <div class="stat-lbl">Blocked</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-val">12</div>
+                                        <div class="stat-lbl">Allowed</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-val">1.2k</div>
+                                        <div class="stat-lbl">Today</div>
+                                    </div>
+                                </div>
+                                <div class="domain-list">
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >youtube.com</span
+                                        >
+                                        <span class="domain-badge blocked"
+                                            >Blocked</span
+                                        >
+                                    </div>
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >tiktok.com</span
+                                        >
+                                        <span class="domain-badge blocked"
+                                            >Blocked</span
+                                        >
+                                    </div>
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >*.social.*</span
+                                        >
+                                        <span class="domain-badge regex"
+                                            >Regex</span
+                                        >
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="page-footer">
+                <div class="page-footer-left">
+                    Labs FCD — Computer Lab Management for Kenyan Schools
+                </div>
+                <div class="page-footer-right">
+                    <a href="#">labs.fcd.co.ke</a>
+                    <a href="#">info@fcd.co.ke</a>
+                    <a href="#">+254 752 302 021</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="page">
+            <div class="top-bar"></div>
+            <div class="page-header">
+                <div class="brand">
+                    <div class="brand-icon"><i class="fas fa-desktop"></i></div>
+                    <div class="brand-text">labs<span>.fcd</span></div>
+                </div>
+                <div class="page-num">PAGE 02</div>
+            </div>
+
+            <div class="page-inner">
+                <div class="label">The problem</div>
+                <h2 style="font-size: 26px; margin-bottom: 8px">
+                    Your computer lab is <em>unmanaged</em>
+                </h2>
+                <p class="body-text-sm" style="margin-bottom: 16px">
+                    Most school computer labs in Kenya operate without any
+                    central control. The teacher walks around the room to check
+                    what students are doing, manually shuts down machines one by
+                    one, and has no way to block access to distracting sites
+                    during lessons. During exams, there is no mechanism to lock
+                    down machines or prevent cheating via USB or internet.
+                </p>
+
+                <div class="problem-grid">
+                    <div class="problem-card">
+                        <div class="problem-icon red">
+                            <i class="fas fa-eye-slash"></i>
+                        </div>
+                        <div>
+                            <div class="problem-title">No visibility</div>
+                            <div class="problem-desc">
+                                You cannot see what each student is doing
+                                without physically walking to every desk.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="problem-card">
+                        <div class="problem-icon red">
+                            <i class="fas fa-globe"></i>
+                        </div>
+                        <div>
+                            <div class="problem-title">
+                                Uncontrolled internet
+                            </div>
+                            <div class="problem-desc">
+                                Students browse YouTube, social media, and
+                                gaming sites during computer lessons.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="problem-card">
+                        <div class="problem-icon yellow">
+                            <i class="fas fa-shield-halved"></i>
+                        </div>
+                        <div>
+                            <div class="problem-title">
+                                No content filtering
+                            </div>
+                            <div class="problem-desc">
+                                No firewall or domain blocking. Any site is
+                                accessible, including inappropriate content.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="problem-card">
+                        <div class="problem-icon yellow">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div>
+                            <div class="problem-title">Wasted time</div>
+                            <div class="problem-desc">
+                                Booting up, shutting down, and managing 30–50
+                                machines individually eats into lesson time.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="divider" />
+
+                <div class="label">The solution</div>
+                <h2 style="font-size: 26px; margin-bottom: 6px">
+                    Three pillars of <em>lab control</em>
+                </h2>
+                <p class="body-text-sm" style="margin-bottom: 16px">
+                    Everything a school needs to manage, protect, and lock down
+                    a computer lab — from a single browser dashboard. No
+                    software to install on student machines. Works with your
+                    existing network.
+                </p>
+
+                <div class="pillar-grid">
+                    <div class="pillar-card">
+                        <div class="pillar-icon">
+                            <i class="fas fa-sliders"></i>
+                        </div>
+                        <div class="pillar-title">Lab Management</div>
+                        <div class="pillar-desc">
+                            One click KNEC exam formatting, remote shutdown,
+                            bulk file copying, and bulk actions across all
+                            machines.
+                        </div>
+                    </div>
+                    <div class="pillar-card">
+                        <div class="pillar-icon">
+                            <i class="fas fa-wifi"></i>
+                        </div>
+                        <div class="pillar-title">Internet Control</div>
+                        <div class="pillar-desc">
+                            Toggle internet access for the whole lab or
+                            individual machines with one click.
+                        </div>
+                    </div>
+                    <div class="pillar-card">
+                        <div class="pillar-icon">
+                            <i class="fas fa-shield-halved"></i>
+                        </div>
+                        <div class="pillar-title">Firewall & Blocking</div>
+                        <div class="pillar-desc">
+                            Block specific domains, wildcard patterns, or entire
+                            categories of content.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="label" style="margin-top: 2px">Before vs after</div>
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th style="color: var(--red)">Without Labs FCD</th>
+                            <th style="color: var(--accent)">With Labs FCD</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>KNEC Exam Preparation</td>
+                            <td>Expensive contractors</td>
+                            <td>
+                                One-click KNEC exam preparation at no extra cost
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Distraction-Free Lessons</td>
+                            <td>
+                                Unplugging the router, monitoring screen by
+                                screen, or buying expensive enterprise firewalls
+                            </td>
+                            <td>
+                                One toggle on the dashboard blocks the internet
+                                entirely, or typing a domain blocks a specific
+                                website
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                Fair Bandwidth Allocation & Network Management
+                            </td>
+                            <td>
+                                One student downloading heavy files slows down
+                                the internet for the entire lab
+                            </td>
+                            <td>
+                                Smart traffic queues dynamically distribute
+                                bandwidth, ensuring every computer gets a fast,
+                                reliable connection for research
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Instant Lab Recovery & Virus Elimination</td>
+                            <td>
+                                Manually formatting and fixing virus-infected
+                                computers
+                            </td>
+                            <td>
+                                One click remotely wipes and restores the entire
+                                lab to a pristine, working state over the
+                                network without USBs or CDs
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td>Mass Software Deployment & Files copying</td>
+                            <td>
+                                Walking from machine to machine with a flash
+                                drive to install apps or or copy files.
+                            </td>
+                            <td>
+                                Automatically copy files and push software and
+                                scripts to all machines simultaneously using
+                                network.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="page-footer">
+                <div class="page-footer-left">
+                    Labs FCD — Computer Lab Management for Kenyan Schools
+                </div>
+                <div class="page-footer-right">
+                    <a href="#">labs.fcd.co.ke</a>
+                    <a href="#">info@fcd.co.ke</a>
+                    <a href="#">+254 752 302 021</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="page">
+            <div class="top-bar"></div>
+            <div class="page-header">
+                <div class="brand">
+                    <div class="brand-icon"><i class="fas fa-desktop"></i></div>
+                    <div class="brand-text">labs<span>.fcd</span></div>
+                </div>
+                <div class="page-num">PAGE 03</div>
+            </div>
+
+            <div class="page-inner">
+                <div class="label">Features in detail</div>
+                <h2 style="font-size: 26px; margin-bottom: 20px">
+                    What the <em>dashboard</em> actually does
+                </h2>
+                <div class="two-col" style="margin-bottom: 22px">
+                    <div>
+                        <div class="feat-label">
+                            <span class="feat-num">01</span> Lab Management
+                        </div>
+                        <h3 style="font-size: 22px; margin-bottom: 8px">
+                            Remote actions. <em>Exam mode.</em> Full control.
+                        </h3>
+                        <p class="body-text-sm" style="margin-bottom: 12px">
+                            Shut down all machines at the end of the day with
+                            one click. Lock screens to get attention. Activate
+                            exam mode to disable USB ports, block internet, and
+                            lock devices to a single application.
+                        </p>
+                        <ul class="check-list">
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Bulk shutdown, restart, and screen lock
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Exam mode: USB lock, internet off, screen
+                                restricted
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Session scheduling for lesson periods
+                            </li>
+                        </ul>
+                    </div>
+                    <div>
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-dot mock-dot-r"></div>
+                                <div class="mock-dot mock-dot-y"></div>
+                                <div class="mock-dot mock-dot-g"></div>
+                                <span class="mock-ui-title"
+                                    >lab-a.management</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="action-grid">
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: var(--red-light);
+                                                color: var(--red);
+                                            "
+                                        >
+                                            <i class="fas fa-power-off"></i>
+                                        </div>
+                                        <div class="action-title">
+                                            Shutdown All
+                                        </div>
+                                        <div class="action-desc">
+                                            Power off every machine
+                                        </div>
+                                    </div>
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: var(--accent-light);
+                                                color: var(--accent);
+                                            "
+                                        >
+                                            <i class="fas fa-lock"></i>
+                                        </div>
+                                        <div class="action-title">
+                                            Lock Screens
+                                        </div>
+                                        <div class="action-desc">
+                                            Lock all screens instantly
+                                        </div>
+                                    </div>
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: #e0f2fe;
+                                                color: var(--accent-secondary);
+                                            "
+                                        >
+                                            <i class="fas fa-rotate"></i>
+                                        </div>
+                                        <div class="action-title">
+                                            Restart All
+                                        </div>
+                                        <div class="action-desc">
+                                            Reboot every machine remotely
+                                        </div>
+                                    </div>
+                                    <div class="action-card">
+                                        <div
+                                            class="action-icon"
+                                            style="
+                                                background: var(--yellow-light);
+                                                color: var(--yellow);
+                                            "
+                                        >
+                                            <i class="fas fa-clock"></i>
+                                        </div>
+                                        <div class="action-title">Schedule</div>
+                                        <div class="action-desc">
+                                            Auto-actions for lesson periods
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="action-row">
+                                    <div class="action-row-icon">
+                                        <i class="fas fa-eraser"></i>
+                                    </div>
+                                    <div>
+                                        <div class="action-row-title">
+                                            Format All Computers
+                                        </div>
+                                        <div class="action-row-sub">
+                                            Wipes all drives · Reinstalls OS ·
+                                            Applies lab image
+                                        </div>
+                                    </div>
+                                    <div class="action-row-badge">
+                                        Destructive
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="two-col" style="margin-bottom: 22px">
+                    <div>
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-dot mock-dot-r"></div>
+                                <div class="mock-dot mock-dot-y"></div>
+                                <div class="mock-dot mock-dot-g"></div>
+                                <span class="mock-ui-title"
+                                    >lab-a.internet-control</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="device-grid">
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-01</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-02</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device off">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-03</span>
+                                        <span class="device-status"
+                                            >Offline</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-04</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-05</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                    <div class="device on">
+                                        <div class="device-icon">
+                                            <i class="fas fa-desktop"></i>
+                                        </div>
+                                        <span class="device-name">PC-06</span>
+                                        <span class="device-status"
+                                            >Online</span
+                                        >
+                                    </div>
+                                </div>
+                                <div class="toggle-row">
+                                    <div>
+                                        <div class="toggle-label">
+                                            Lab Internet
+                                        </div>
+                                        <div class="toggle-sub">
+                                            5 of 6 devices connected
+                                        </div>
+                                    </div>
+                                    <div class="toggle-switch"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="feat-label">
+                            <span class="feat-num">02</span> Internet Control
+                        </div>
+                        <h3 style="font-size: 22px; margin-bottom: 8px">
+                            One click. Whole lab <em>online or offline</em>.
+                        </h3>
+                        <p class="body-text-sm" style="margin-bottom: 12px">
+                            Toggle internet access per-device or per-lab. No
+                            more students browsing during the wrong part of the
+                            lesson — one click cuts or restores access for an
+                            entire room.
+                        </p>
+                        <ul class="check-list">
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Per-device and per-lab internet toggling
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Instant firewall rule activation
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Visual status for every machine in the lab
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="two-col">
+                    <div>
+                        <div class="feat-label">
+                            <span class="feat-num">03</span> Firewall & Domain
+                            Blocking
+                        </div>
+                        <h3 style="font-size: 22px; margin-bottom: 8px">
+                            Block what matters. <em>Allow what does.</em>
+                        </h3>
+                        <p class="body-text-sm" style="margin-bottom: 12px">
+                            Define block lists and whitelist rules at the domain
+                            level. Use wildcard patterns to block entire
+                            categories. Every blocked request is logged with
+                            timestamps and device information.
+                        </p>
+                        <ul class="check-list">
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Domain-level block and whitelist rules
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Wildcard and regex pattern matching
+                            </li>
+                            <li>
+                                <svg
+                                    class="check-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2.5"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                Request logs with timestamps and device info
+                            </li>
+                        </ul>
+                    </div>
+                    <div>
+                        <div class="mock-ui">
+                            <div class="mock-ui-header">
+                                <div class="mock-dot mock-dot-r"></div>
+                                <div class="mock-dot mock-dot-y"></div>
+                                <div class="mock-dot mock-dot-g"></div>
+                                <span class="mock-ui-title"
+                                    >lab-a.firewall</span
+                                >
+                            </div>
+                            <div class="mock-ui-body">
+                                <div class="stat-row">
+                                    <div class="stat-box">
+                                        <div class="stat-val">47</div>
+                                        <div class="stat-lbl">Blocked</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-val">12</div>
+                                        <div class="stat-lbl">Whitelisted</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-val">1.2k</div>
+                                        <div class="stat-lbl">
+                                            Blocked today
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="domain-list">
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >youtube.com</span
+                                        >
+                                        <span class="domain-badge blocked"
+                                            >Blocked</span
+                                        >
+                                    </div>
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >tiktok.com</span
+                                        >
+                                        <span class="domain-badge blocked"
+                                            >Blocked</span
+                                        >
+                                    </div>
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >*.social.media.*</span
+                                        >
+                                        <span class="domain-badge regex"
+                                            >Regex</span
+                                        >
+                                    </div>
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >facebook.com</span
+                                        >
+                                        <span class="domain-badge blocked"
+                                            >Blocked</span
+                                        >
+                                    </div>
+                                    <div class="domain-item">
+                                        <span class="domain-name"
+                                            >kbc.co.ke</span
+                                        >
+                                        <span class="domain-badge allowed"
+                                            >Allowed</span
+                                        >
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page-footer">
+                <div class="page-footer-left">
+                    Labs FCD — Computer Lab Management for Kenyan Schools
+                </div>
+                <div class="page-footer-right">
+                    <a href="#">labs.fcd.co.ke</a>
+                    <a href="#">info@fcd.co.ke</a>
+                    <a href="#">+254 752 302 021</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="page">
+            <div class="top-bar"></div>
+            <div class="page-header">
+                <div class="brand">
+                    <div class="brand-icon"><i class="fas fa-desktop"></i></div>
+                    <div class="brand-text">labs<span>.fcd</span></div>
+                </div>
+                <div class="page-num">PAGE 04</div>
+            </div>
+
+            <div class="page-inner">
+                <div class="label">Context</div>
+                <h2 style="font-size: 26px; margin-bottom: 8px">
+                    Why this matters <em>now</em>
+                </h2>
+                <p class="body-text-sm" style="margin-bottom: 14px">
+                    The CBC curriculum mandates Digital Literacy from Grade 1
+                    onwards. Every school is expected to have a functional
+                    computer lab with supervised, structured access. The
+                    government is auditing ICT infrastructure. Schools without
+                    proper lab management will not meet compliance requirements
+                    — and learners are not getting the intended value from
+                    computer sessions.
+                </p>
+                <p class="body-text-sm" style="margin-bottom: 20px">
+                    Labs FCD was built to solve this specific gap. It does not
+                    require expensive hardware, dedicated IT staff, or
+                    enterprise-grade networking equipment. It works with the
+                    computers and network you already have.
+                </p>
+
+                <hr class="divider" />
+
+                <div class="label">How it works</div>
+                <h2 style="font-size: 26px; margin-bottom: 16px">
+                    Setup in <em>under an hour</em>
+                </h2>
+
+                <div class="steps-row">
+                    <div class="step">
+                        <div class="step-circle">1</div>
+                        <div class="step-title">Install agent</div>
+                        <div class="step-desc">
+                            A lightweight agent on each lab machine. About 2
+                            minutes per PC.
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-circle">2</div>
+                        <div class="step-title">Connect</div>
+                        <div class="step-desc">
+                            Machines appear on your web dashboard. No server
+                            required.
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-circle">3</div>
+                        <div class="step-title">Configure</div>
+                        <div class="step-desc">
+                            Set blocked domains, internet schedules, exam mode
+                            preferences.
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-circle">4</div>
+                        <div class="step-title">Manage</div>
+                        <div class="step-desc">
+                            Control your lab from any device with a browser.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="result-strip">
+                    <div class="result-card">
+                        <div class="result-num"><span>&lt;1</span>hr</div>
+                        <div class="result-lbl">Full setup time</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="result-num"><span>Any</span></div>
+                        <div class="result-lbl">Device with a browser</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="result-num"><span>No</span></div>
+                        <div class="result-lbl">
+                            Dedicated IT staff required
+                        </div>
+                    </div>
+                </div>
+
+                <div class="trust-row">
+                    <div class="trust-item">
+                        <i class="fas fa-lock"></i> Kenya-hosted servers
+                    </div>
+                    <div class="trust-item">
+                        <i class="fas fa-shield-halved"></i> Data stays on-site
+                    </div>
+                    <div class="trust-item">
+                        <i class="fas fa-wifi"></i> Works offline for basic
+                        control
+                    </div>
+                    <div class="trust-item">
+                        <i class="fas fa-headset"></i> WhatsApp & phone support
+                    </div>
+                </div>
+
+                <div class="final-cta">
+                    <h2>See it in action</h2>
+                    <p class="body-text">
+                        We do a 20-minute remote demo tailored to your lab
+                        setup. No commitment, no cost. You'll see exactly how it
+                        works on machines like yours.
+                    </p>
+                    <div class="cta-actions">
+                        <span
+                            style="
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: var(--accent);
+                            "
+                        >
+                            Book a Free Demo:
+                        </span>
+                        <span class="cta-contact">
+                            Email <strong>info@fcd.co.ke</strong> or call
+                            <strong>+254 752 302 021</strong> &middot; WhatsApp
+                            available
+                        </span>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-top: 12px">
+                    <div class="info-box">
+                        <div class="info-box-title">Technical requirements</div>
+                        <div class="info-box-text">
+                            Windows 7+ on lab machines<br />
+                            Any modern browser for the dashboard<br />
+                            Local network (LAN) — internet not required for
+                            control
+                        </div>
+                    </div>
+                    <div class="info-box">
+                        <div class="info-box-title">Pricing</div>
+                        <div class="info-box-text">
+                            Annual subscription per lab<br />
+                            Based on number of machines<br />
+                            Contact us for a quote for your school
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page-footer">
+                <div class="page-footer-left">
+                    Labs FCD &copy; <span class="js-year"></span> —
+                    labs.fcd.co.ke
+                </div>
+                <div class="page-footer-right">
+                    <a href="#">labs.fcd.co.ke</a>
+                    <a href="#">info@fcd.co.ke</a>
+                    <a href="#">+254 752 302 021</a>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            document.querySelectorAll('.js-year').forEach((el) => {
+                el.textContent = new Date().getFullYear();
+            });
+            document.querySelectorAll('a[href="#"]').forEach((link) => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const toast = document.createElement('div');
+                    toast.textContent = 'This is a print-ready PDF mockup.';
+                    toast.style.cssText = `
+        position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+        background:#1a1c20; color:#00875a; padding:10px 20px; border-radius:6px;
+        font-size:11px; font-family:'DM Sans',sans-serif; font-weight:500;
+        box-shadow:0 4px 16px rgba(0,0,0,0.2); z-index:9999;
+        opacity:0; transition:opacity 0.3s;
+      `;
+                    document.body.appendChild(toast);
+                    requestAnimationFrame(() => (toast.style.opacity = '1'));
+                    setTimeout(() => {
+                        toast.style.opacity = '0';
+                        setTimeout(() => toast.remove(), 300);
+                    }, 2000);
+                });
+            });
+        </script>
+    </body>
+</html>
