@@ -13,6 +13,7 @@ app.use(compress());
 const html = readFileSync(path.join(__dirname, 'index.html'), 'utf-8');
 const robots = readFileSync(path.join(__dirname, 'robots.txt'), 'utf-8');
 const sitemap = readFileSync(path.join(__dirname, 'sitemap.xml'), 'utf-8');
+const favicon = readFileSync(path.join(__dirname, 'favicon.ico'));
 
 app.get('/', (c) => {
     c.header('Cache-Control', 'public, max-age=300');
@@ -26,6 +27,11 @@ app.get('/sitemap.xml', (c) => {
     c.header('Cache-Control', 'public, max-age=300');
     c.header('Content-Type', 'application/xml');
     return c.text(sitemap);
+});
+app.get('/favicon.ico', (c) => {
+    c.header('Cache-Control', 'public, max-age=86400');
+    c.header('Content-Type', 'image/x-icon');
+    return c.body(favicon);
 });
 
 app.get('/index.html', (c) => c.redirect('/'));
