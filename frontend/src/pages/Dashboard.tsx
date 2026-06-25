@@ -1,5 +1,5 @@
+import ActiveTasksTab from '@/components/FOG/ActiveTasksTab';
 import ManagementTab from '@/components/FOG/ManagementTab';
-import FormattingTab from '@/components/pihole/FormattingTab';
 import PiholeTab from '@/components/pihole/PiholeTab';
 import {
     ActionIcon,
@@ -112,10 +112,10 @@ const Dashboard: FC<DashboardProps> = ({
                                 Management
                             </Tabs.Tab>
                             <Tabs.Tab
-                                value='formatting'
+                                value='active-tasks'
                                 leftSection={<IconTools size={16} />}
                             >
-                                Formatting
+                                Active Tasks
                             </Tabs.Tab>
                         </Tabs.List>
 
@@ -131,8 +131,8 @@ const Dashboard: FC<DashboardProps> = ({
                             <ManagementTab />
                         </Tabs.Panel>
 
-                        <Tabs.Panel value='formatting' pt='md'>
-                            <FormattingTab />
+                        <Tabs.Panel value='active-tasks' pt='md'>
+                            <ActiveTasksTab />
                         </Tabs.Panel>
                     </Tabs>
                 </Container>

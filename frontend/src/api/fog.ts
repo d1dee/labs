@@ -144,9 +144,48 @@ export type ListFogSnapins = {
     snapins: FogSnapin[];
 };
 
+export interface FogActiveTask {
+    id: number;
+    name?: string;
+    hostID?: number;
+    hostName?: string;
+    host?: FogHost;
+    typeID?: number;
+    typeName?: string;
+    type?: FogTaskType;
+    stateID?: number;
+    state?: FogTaskState;
+    percent?: number | string;
+    createdTime?: string;
+    checkInTime?: string;
+    completed?: string | number;
+    createdBy?: string;
+    isForced?: string;
+    scheduledStartTime?: string;
+    pct?: string;
+    bpm?: string;
+    timeElapsed?: string;
+    timeRemaining?: string;
+    dataCopied?: string;
+    dataTotal?: string;
+    storagegroupID?: number;
+    storagenodeID?: number;
+    NFSFailures?: string;
+    NFSLastMemberID?: number;
+    shutdown?: string;
+    passreset?: string;
+    isDebug?: number;
+    imageID?: number;
+    wol?: string;
+    image?: FogImageDetails;
+    storagenode?: FogStorageNode;
+    storagegroup?: FogStorageGroup;
+    [key: string]: unknown;
+}
+
 export type ListActiveFogTasks = {
     count: number;
-    tasks: unknown[];
+    tasks: FogActiveTask[];
 };
 
 export type ListActiveFogMulticastSessions = {
@@ -168,7 +207,54 @@ export interface FogTaskType {
     name: string;
     description?: string;
     icon?: string;
+    kernel?: string;
+    kernelArgs?: string;
     type?: string;
+    isAdvanced?: string;
+    access?: string;
+    initrd?: string;
+    [key: string]: unknown;
+}
+
+export interface FogTaskState {
+    id: number;
+    name: string;
+    description?: string;
+    order?: number;
+    icon?: string;
+    [key: string]: unknown;
+}
+
+export interface FogStorageNode {
+    id: number;
+    name: string;
+    description?: string;
+    isMaster?: string;
+    storagegroupID?: number;
+    isEnabled?: string;
+    isGraphEnabled?: string;
+    path?: string;
+    ftppath?: string;
+    bitrate?: string;
+    helloInterval?: string;
+    snapinpath?: string;
+    sslpath?: string;
+    ip?: string;
+    maxClients?: number;
+    user?: string;
+    pass?: string;
+    key?: string;
+    interface?: string;
+    bandwidth?: number;
+    webroot?: string;
+    storagegroup?: Record<string, unknown>;
+    [key: string]: unknown;
+}
+
+export interface FogStorageGroup {
+    id: number;
+    name: string;
+    description?: string;
     [key: string]: unknown;
 }
 
