@@ -153,6 +153,31 @@ export async function getFogHost(
     }
 }
 
+export async function getFogTask(
+    taskId: number,
+): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
+    if (!isFogConfigured()) {
+        return { success: false, error: 'FOG not configured' };
+    }
+    try {
+        const res = await fogRequest('GET', `/fog/task/${taskId}`);
+        if (!res.ok) {
+            const json = (await res.json()) as {
+                error?: string;
+                message?: string;
+            };
+            return {
+                success: false,
+                error: json.error || json.message || `HTTP ${res.status}`,
+            };
+        }
+        const data = (await res.json()) as Record<string, unknown>;
+        return { success: true, data };
+    } catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+
 export async function createFogHost(
     hostData: Record<string, unknown>,
 ): Promise<{ success: boolean; data?: FogHost; error?: string }> {
@@ -330,7 +355,7 @@ export async function createFogSnapinTask(
         // Single Snapin task type is 13 - based on actual API response
         // Reference: https://github.com/FOGProject/fogproject/blob/620b8cee/packages/web/lib/fog/tasktype.class.php
         const res = await fogRequest('POST', `/fog/host/${hostId}/task`, {
-            taskTypeID: 13,  // Single Snapin task type
+            taskTypeID: 13, // Single Snapin task type
             snapinID: snapinId,
             ...options,
         });
@@ -410,6 +435,146 @@ export async function listActiveTasks(): Promise<{
             tasks: unknown[];
         };
         return { success: true, data };
+    } catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+
+export async function cancelFogTask(
+    taskId: number,
+): Promise<{ success: boolean; error?: string }> {
+    if (!isFogConfigured()) {
+        return { success: false, error: 'FOG not configured' };
+    }
+    try {
+        const res = await fogRequest('DELETE', `/fog/task/${taskId}/cancel`);
+        if (!res.ok) {
+            const json = (await res.json()) as {
+                error?: string;
+                message?: string;
+            };
+            return {
+                success: false,
+                error: json.error || json.message || `HTTP ${res.status}`,
+            };
+        }
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+
+export async function forceFogTask(
+    taskId: number,
+): Promise<{ success: boolean; error?: string }> {
+    if (!isFogConfigured()) {
+        return { success: false, error: 'FOG not configured' };
+    }
+    try {
+        const res = await fogRequest('PUT', `/fog/task/${taskId}/update`, {
+            isForced: 1,
+        });
+        if (!res.ok) {
+            const json = (await res.json()) as {
+                error?: string;
+                message?: string;
+            };
+            return {
+                success: false,
+                error: json.error || json.message || `HTTP ${res.status}`,
+            };
+        }
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+
+export async function updateFogTask(
+    taskId: number,
+    updates: Record<string, unknown>,
+): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
+    if (!isFogConfigured()) {
+        return { success: false, error: 'FOG not configured' };
+    }
+    try {
+        const res = await fogRequest('PUT', `/fog/task/${taskId}/update`, updates);
+        if (!res.ok) {
+            const json = (await res.json()) as {
+                error?: string;
+                message?: string;
+            };
+            return {
+                success: false,
+                error: json.error || json.message || `HTTP ${res.status}`,
+            };
+        }
+        const data = (await res.json()) as Record<string, unknown> | null;
+        return { success: true, data: data ?? {} };
+    } catch (err) {
+        return { success: false, error: String(err) };
+    }
+}
+
+export async function restartFogTask(
+    taskId: number,
+    hostId?: number,
+    taskTypeId?: number,
+): Promise<{ success: boolean; error?: string }> {
+    if (!isFogConfigured()) {
+        return { success: false, error: 'FOG not configured' };
+    }
+    try {
+        let actualHostId = hostId;
+        let actualTaskTypeId = taskTypeId;
+        if (!actualHostId || !actualTaskTypeId) {
+            const taskResult = await getFogTask(taskId);
+            if (!taskResult.success || !taskResult.data) {
+                return { success: false, error: taskResult.error || 'Failed to get task details' };
+            }
+            const task = taskResult.data as { hostID?: number; typeID?: number };
+            actualHostId = task.hostID;
+            actualTaskTypeId = task.typeID;
+        }
+        if (!actualHostId || !actualTaskTypeId) {
+            return { success: false, error: 'Missing host ID or task type ID' };
+        }
+        // 1. Cancel existing task
+        const cancelResult = await cancelFogTask(taskId);
+        if (!cancelResult.success) {
+            return { success: false, error: cancelResult.error || 'Failed to cancel task' };
+        }
+        // 2. Create new task on same host with same type
+        const createResult = await createFogTask(actualHostId, actualTaskTypeId);
+        if (!createResult.success) {
+            return { success: false, error: createResult.error || 'Failed to create new task' };
+        }
+        // 3. Find and force the newly created task
+        const activeResult = await listActiveTasks();
+        if (!activeResult.success || !activeResult.data) {
+            return { success: false, error: activeResult.error || 'Failed to list active tasks' };
+        }
+        const tasks = activeResult.data.tasks as Array<{
+            id: number;
+            hostID?: number;
+            typeID?: number;
+            stateID?: number;
+        }>;
+        const newTask = tasks
+            .filter(
+                (t) =>
+                    t.hostID === actualHostId &&
+                    t.typeID === actualTaskTypeId &&
+                    (t.stateID === 1 || t.stateID === 2),
+            )
+            .sort((a, b) => b.id - a.id)[0];
+        if (newTask) {
+            const forceResult = await forceFogTask(newTask.id);
+            if (!forceResult.success) {
+                return { success: false, error: forceResult.error || 'Failed to force new task' };
+            }
+        }
+        return { success: true };
     } catch (err) {
         return { success: false, error: String(err) };
     }

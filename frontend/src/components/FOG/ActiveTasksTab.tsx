@@ -1,56 +1,32 @@
 import {
+    cancelFogTask,
+    forceFogTask,
     listActiveFogTasks,
+    pauseFogTask,
+    restartFogTask,
     type FogActiveTask,
-    type FogTaskState,
 } from '@/api/fog';
 import {
     Badge,
     Card,
     Group,
-    Progress,
+    Select,
     SimpleGrid,
-    Skeleton,
     Stack,
-    Table,
     Text,
+    TextInput,
     Title,
 } from '@mantine/core';
 import { useInterval } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import {
-    IconCheck,
-    IconClock,
-    IconPlayerPlay,
     IconRefresh,
+    IconSearch,
     IconServer,
     IconTools,
 } from '@tabler/icons-react';
-import { useEffect, useMemo, useState, type FC } from 'react';
-
-const getStateColor = (state?: FogTaskState): string => {
-    if (!state?.name) return 'gray';
-    const s = state.name.toLowerCase();
-    if (s.includes('run') || s.includes('in progress') || s.includes('in prog'))
-        return 'blue';
-    if (s.includes('pend') || s.includes('queue')) return 'yellow';
-    if (s.includes('complete') || s.includes('done') || s.includes('success'))
-        return 'green';
-    if (s.includes('fail') || s.includes('error') || s.includes('cancel'))
-        return 'red';
-    return 'gray';
-};
-
-const getStateIcon = (state?: FogTaskState) => {
-    if (!state?.name) return IconClock;
-    const s = state.name.toLowerCase();
-    if (s.includes('run') || s.includes('in progress') || s.includes('in prog'))
-        return IconPlayerPlay;
-    if (s.includes('pend') || s.includes('queue')) return IconClock;
-    if (s.includes('complete') || s.includes('done') || s.includes('success'))
-        return IconCheck;
-    if (s.includes('fail') || s.includes('error') || s.includes('cancel'))
-        return IconRefresh;
-    return IconClock;
-};
+import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
+import ActiveTasksTable from './ActiveTasksTable';
 
 interface TaskStats {
     total: number;
@@ -71,22 +47,14 @@ const computeStats = (tasks: FogActiveTask[]): TaskStats => {
         other: 0,
     };
     for (const task of tasks) {
-        const state = task.state?.name?.toLowerCase() || '';
-        if (state.includes('run') || state.includes('in progress') || state.includes('in prog')) {
+        const id = task.stateID ?? task.state?.id ?? 0;
+        if (id === 3) {
             stats.running++;
-        } else if (state.includes('pend') || state.includes('queue')) {
+        } else if (id === 1 || id === 2) {
             stats.pending++;
-        } else if (
-            state.includes('complete') ||
-            state.includes('done') ||
-            state.includes('success')
-        ) {
+        } else if (id === 4) {
             stats.completed++;
-        } else if (
-            state.includes('fail') ||
-            state.includes('error') ||
-            state.includes('cancel')
-        ) {
+        } else if (id >= 5) {
             stats.failed++;
         } else {
             stats.other++;
@@ -95,45 +63,18 @@ const computeStats = (tasks: FogActiveTask[]): TaskStats => {
     return stats;
 };
 
-const TaskTypeDistribution: FC<{ tasks: FogActiveTask[] }> = ({ tasks }) => {
-    const counts = useMemo(() => {
-        const map = new Map<string, number>();
-        for (const task of tasks) {
-            const key =
-                task.typeName ||
-                task.type?.name ||
-                `Type ${task.typeID || '?'}`;
-            map.set(key, (map.get(key) || 0) + 1);
-        }
-        return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-    }, [tasks]);
-
-    if (counts.length === 0) return null;
-
-    return (
-        <Card withBorder p='md'>
-            <Stack gap='sm'>
-                <Title order={5}>Task Types</Title>
-                {counts.map(([type, count]) => (
-                    <Group key={type} justify='space-between'>
-                        <Text size='sm'>{type}</Text>
-                        <Badge variant='light'>{count}</Badge>
-                    </Group>
-                ))}
-            </Stack>
-        </Card>
-    );
-};
-
 const ActiveTasksTab: FC = () => {
     const [tasks, setTasks] = useState<FogActiveTask[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [configured, setConfigured] = useState(true);
 
-    const fetchTasks = async () => {
+    const [searchQuery, setSearchQuery] = useState('');
+    const [stateFilter, setStateFilter] = useState<string | null>(null);
+    const [typeFilter, setTypeFilter] = useState<string | null>(null);
+
+    const fetchTasks = useCallback(async () => {
         try {
-            setLoading(true);
             setError(null);
             const data = await listActiveFogTasks();
 
@@ -150,20 +91,141 @@ const ActiveTasksTab: FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
+        setLoading(true);
         fetchTasks();
     }, []);
 
     // Auto-refresh every 10 seconds
-    const interval = useInterval(fetchTasks, 10000);
+    const interval = useInterval(() => {
+        fetchTasks();
+    }, 10000);
+
     useEffect(() => {
         interval.start();
         return interval.stop;
     }, [interval]);
 
     const stats = useMemo(() => computeStats(tasks), [tasks]);
+
+    const stateOptions = useMemo(() => {
+        const states = new Map<string, string>();
+        for (const t of tasks) {
+            const id = String(t.stateID ?? t.state?.id ?? 0);
+            const name = t.state?.name || 'Unknown';
+            if (!states.has(id)) states.set(id, name);
+        }
+        return [...states.entries()].map(([value, label]) => ({
+            value,
+            label,
+        }));
+    }, [tasks]);
+
+    const typeOptions = useMemo(() => {
+        const types = new Map<string, string>();
+        for (const t of tasks) {
+            const id = String(t.typeID ?? t.type?.id ?? 0);
+            const name = t.typeName || t.type?.name || `Type ${id}`;
+            if (!types.has(id)) types.set(id, name);
+        }
+        return [...types.entries()].map(([value, label]) => ({ value, label }));
+    }, [tasks]);
+
+    const filteredTasks = useMemo(() => {
+        let result = tasks;
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            result = result.filter(
+                (t) =>
+                    (t.name || '').toLowerCase().includes(q) ||
+                    (t.hostName || t.host?.name || '')
+                        .toLowerCase()
+                        .includes(q) ||
+                    (t.typeName || t.type?.name || '')
+                        .toLowerCase()
+                        .includes(q),
+            );
+        }
+        if (stateFilter) {
+            result = result.filter(
+                (t) => String(t.stateID ?? t.state?.id) === stateFilter,
+            );
+        }
+        if (typeFilter) {
+            result = result.filter(
+                (t) => String(t.typeID ?? t.type?.id) === typeFilter,
+            );
+        }
+        return result;
+    }, [tasks, searchQuery, stateFilter, typeFilter]);
+
+    const [actioningTasks, setActioningTasks] = useState<Set<number>>(
+        new Set(),
+    );
+
+    const handleTaskAction = useCallback(
+        async (
+            taskId: number,
+            action: 'cancel' | 'pause' | 'force' | 'restart',
+            extra?: { hostId?: number; taskTypeId?: number },
+        ) => {
+            setActioningTasks((prev) => new Set(prev).add(taskId));
+            try {
+                const taskName =
+                    tasks.find((t) => t.id === taskId)?.name ||
+                    `Task #${taskId}`;
+                if (action === 'cancel') {
+                    await cancelFogTask(taskId);
+                    notifications.show({
+                        title: 'Task Cancelled',
+                        message: `${taskName} has been cancelled`,
+                        color: 'red',
+                    });
+                } else if (action === 'pause') {
+                    await pauseFogTask(taskId);
+                    notifications.show({
+                        title: 'Task Paused',
+                        message: `${taskName} has been paused`,
+                        color: 'yellow',
+                    });
+                } else if (action === 'force') {
+                    await forceFogTask(taskId);
+                    notifications.show({
+                        title: 'Task Force Started',
+                        message: `${taskName} has been forced to start immediately`,
+                        color: 'green',
+                    });
+                } else if (action === 'restart') {
+                    await restartFogTask(
+                        taskId,
+                        extra?.hostId,
+                        extra?.taskTypeId,
+                    );
+                    notifications.show({
+                        title: 'Task Restarted',
+                        message: `${taskName} has been restarted and forced`,
+                        color: 'blue',
+                    });
+                }
+                fetchTasks();
+            } catch (err) {
+                notifications.show({
+                    title: 'Action Failed',
+                    message: err instanceof Error ? err.message : String(err),
+                    color: 'red',
+                });
+            } finally {
+                setActioningTasks((prev) => {
+                    const next = new Set(prev);
+                    next.delete(taskId);
+                    return next;
+                });
+            }
+        },
+        [tasks, fetchTasks],
+    );
 
     if (!configured) {
         return (
@@ -184,10 +246,12 @@ const ActiveTasksTab: FC = () => {
                 <Title order={4}>Active FOG Tasks</Title>
                 <Badge
                     leftSection={<IconRefresh size={14} />}
-                    variant='light'
                     color='blue'
                     style={{ cursor: 'pointer' }}
-                    onClick={fetchTasks}
+                    onClick={() => {
+                        setLoading(true);
+                        fetchTasks();
+                    }}
                 >
                     Refresh
                 </Badge>
@@ -245,164 +309,93 @@ const ActiveTasksTab: FC = () => {
                 </Card>
             </SimpleGrid>
 
-            {/* Task Type Distribution */}
-            {tasks.length > 0 && <TaskTypeDistribution tasks={tasks} />}
-
             {/* Tasks Table */}
-            <Card withBorder p='md'>
-                <Stack gap='md'>
+            <Stack gap='md'>
+                <div>
                     <Title order={5}>Task Details</Title>
-                    {loading && tasks.length === 0 ? (
-                        <Stack gap='sm'>
-                            {Array.from({ length: 5 }).map((_, i) => (
-                                <Skeleton key={i} height={40} radius='sm' />
-                            ))}
+                    <Text size='sm' c='dimmed'>
+                        View and manage currently running FOG tasks.
+                    </Text>
+                </div>
+                <Stack gap='md'>
+                    <Card withBorder style={{ position: 'relative' }}>
+                        <Stack>
+                            <Card p='md' withBorder>
+                                <Stack gap='sm'>
+                                    <Group align='flex-end'>
+                                        <TextInput
+                                            label='Search'
+                                            placeholder='Search tasks...'
+                                            leftSection={
+                                                <IconSearch size={16} />
+                                            }
+                                            value={searchQuery}
+                                            onChange={(e) =>
+                                                setSearchQuery(
+                                                    e.currentTarget.value,
+                                                )
+                                            }
+                                            style={{ flex: 1 }}
+                                        />
+                                        <Select
+                                            placeholder='Filter by state'
+                                            data={stateOptions}
+                                            value={stateFilter}
+                                            onChange={setStateFilter}
+                                            clearable
+                                            style={{ width: 180 }}
+                                        />
+                                        <Select
+                                            placeholder='Filter by type'
+                                            data={typeOptions}
+                                            value={typeFilter}
+                                            onChange={setTypeFilter}
+                                            clearable
+                                            style={{ width: 180 }}
+                                        />
+                                    </Group>
+                                </Stack>
+                            </Card>
+                            <Card withBorder p='0'>
+                                <Stack gap='md'>
+                                    {error && tasks.length === 0 ? (
+                                        <Text c='red' ta='center'>
+                                            {error}
+                                        </Text>
+                                    ) : tasks.length === 0 ? (
+                                        <Stack align='center' gap='md' py='xl'>
+                                            <IconTools
+                                                size={48}
+                                                color='var(--mantine-color-gray-5)'
+                                            />
+                                            <Text c='dimmed' ta='center'>
+                                                No active tasks found.
+                                            </Text>
+                                        </Stack>
+                                    ) : filteredTasks.length === 0 ? (
+                                        <Stack align='center' gap='md' py='xl'>
+                                            <IconSearch
+                                                size={48}
+                                                color='var(--mantine-color-gray-5)'
+                                            />
+                                            <Text c='dimmed' ta='center'>
+                                                No tasks match your filters.
+                                            </Text>
+                                        </Stack>
+                                    ) : (
+                                        <ActiveTasksTable
+                                            loading={loading}
+                                            tasks={filteredTasks}
+                                            actioningTasks={actioningTasks}
+                                            onTaskAction={handleTaskAction}
+                                        />
+                                    )}
+                                </Stack>
+                            </Card>
                         </Stack>
-                    ) : error && tasks.length === 0 ? (
-                        <Text c='red' ta='center'>
-                            {error}
-                        </Text>
-                    ) : tasks.length === 0 ? (
-                        <Stack align='center' gap='md' py='xl'>
-                            <IconTools
-                                size={48}
-                                color='var(--mantine-color-gray-5)'
-                            />
-                            <Text c='dimmed' ta='center'>
-                                No active tasks found.
-                            </Text>
-                        </Stack>
-                    ) : (
-                        <Table.ScrollContainer minWidth={600}>
-                            <Table striped highlightOnHover>
-                                <Table.Thead>
-                                    <Table.Tr>
-                                        <Table.Th>Task</Table.Th>
-                                        <Table.Th>Host</Table.Th>
-                                        <Table.Th>Type</Table.Th>
-                                        <Table.Th>State</Table.Th>
-                                        <Table.Th>Progress</Table.Th>
-                                    </Table.Tr>
-                                </Table.Thead>
-                                <Table.Tbody>
-                                    {tasks.map((task) => {
-                                        const StateIcon = getStateIcon(
-                                            task.state,
-                                        );
-                                        const progress =
-                                            typeof task.percent === 'number'
-                                                ? task.percent
-                                                : 0;
-                                        const progressLabel =
-                                            typeof task.percent === 'number'
-                                                ? `${Math.round(task.percent)}%`
-                                                : 'N/A';
-
-                                        return (
-                                            <Table.Tr key={task.id}>
-                                                <Table.Td>
-                                                    <Text size='sm' fw={500}>
-                                                        {task.name ||
-                                                            `Task #${task.id}`}
-                                                    </Text>
-                                                    <Text size='xs' c='dimmed'>
-                                                        ID: {task.id}
-                                                    </Text>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Text size='sm'>
-                                                        {task.hostName ||
-                                                            task.host?.name ||
-                                                            `Host #${task.hostID || '?'}`}
-                                                    </Text>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Badge
-                                                        variant='light'
-                                                        size='sm'
-                                                    >
-                                                        {task.typeName ||
-                                                            task.type?.name ||
-                                                            `Type ${task.typeID || '?'}`}
-                                                    </Badge>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Badge
-                                                        leftSection={
-                                                            <StateIcon
-                                                                size={12}
-                                                            />
-                                                        }
-                                                        color={getStateColor(
-                                                            task.state,
-                                                        )}
-                                                        variant='filled'
-                                                        size='sm'
-                                                    >
-                                                        {task.state?.name ||
-                                                            'Unknown'}
-                                                    </Badge>
-                                                </Table.Td>
-                                                <Table.Td>
-                                                    <Stack gap={4}>
-                                                        <Progress
-                                                            value={progress}
-                                                            size='lg'
-                                                            radius='sm'
-                                                            color={getStateColor(
-                                                                task.state,
-                                                            )}
-                                                            striped={task.state
-                                                                ?.name
-                                                                ?.toLowerCase()
-                                                                .includes(
-                                                                    'run',
-                                                                ) || task.state
-                                                                ?.name
-                                                                ?.toLowerCase()
-                                                                .includes(
-                                                                    'in progress',
-                                                                ) || task.state
-                                                                ?.name
-                                                                ?.toLowerCase()
-                                                                .includes(
-                                                                    'in prog',
-                                                                )}
-                                                            animated={task.state
-                                                                ?.name
-                                                                ?.toLowerCase()
-                                                                .includes(
-                                                                    'run',
-                                                                ) || task.state
-                                                                ?.name
-                                                                ?.toLowerCase()
-                                                                .includes(
-                                                                    'in progress',
-                                                                ) || task.state
-                                                                ?.name
-                                                                ?.toLowerCase()
-                                                                .includes(
-                                                                    'in prog',
-                                                                )}
-                                                        />
-                                                        <Text
-                                                            size='xs'
-                                                            c='dimmed'
-                                                            ta='right'
-                                                        >
-                                                            {progressLabel}
-                                                        </Text>
-                                                    </Stack>
-                                                </Table.Td>
-                                            </Table.Tr>
-                                        );
-                                    })}
-                                </Table.Tbody>
-                            </Table>
-                        </Table.ScrollContainer>
-                    )}
+                    </Card>
                 </Stack>
-            </Card>
+            </Stack>
         </Stack>
     );
 };

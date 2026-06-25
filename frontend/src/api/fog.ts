@@ -425,6 +425,56 @@ export async function listActiveFogMulticastSessions(): Promise<ListActiveFogMul
     return response.json() as Promise<ListActiveFogMulticastSessions>;
 }
 
+export async function cancelFogTask(taskId: number): Promise<{ success: boolean }> {
+    const response = await fetch(`/api/fog/tasks/${taskId}/cancel`, {
+        method: 'POST',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error || `Failed to cancel FOG task ${taskId}`);
+    }
+    return response.json() as Promise<{ success: boolean }>;
+}
+
+export async function pauseFogTask(taskId: number): Promise<{ success: boolean }> {
+    const response = await fetch(`/api/fog/tasks/${taskId}/pause`, {
+        method: 'POST',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error || `Failed to pause FOG task ${taskId}`);
+    }
+    return response.json() as Promise<{ success: boolean }>;
+}
+
+export async function forceFogTask(taskId: number): Promise<{ success: boolean }> {
+    const response = await fetch(`/api/fog/tasks/${taskId}/force`, {
+        method: 'POST',
+        credentials: 'include',
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error || `Failed to force FOG task ${taskId}`);
+    }
+    return response.json() as Promise<{ success: boolean }>;
+}
+
+export async function restartFogTask(taskId: number, hostId?: number, taskTypeId?: number): Promise<{ success: boolean }> {
+    const response = await fetch(`/api/fog/tasks/${taskId}/restart`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostId, taskTypeId }),
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error || `Failed to restart FOG task ${taskId}`);
+    }
+    return response.json() as Promise<{ success: boolean }>;
+}
+
 export async function createFogTask(
     hostId: number,
     taskTypeId: number,

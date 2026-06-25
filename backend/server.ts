@@ -32,10 +32,12 @@ import {
     updateDemoPiholeDomain,
 } from './demo';
 import {
+    cancelFogTask,
     createFogHost,
     createFogSnapinTask,
     createFogTask,
     deleteFogHost,
+    forceFogTask,
     getFogHost,
     getFogSystemInfo,
     isFogConfigured,
@@ -45,6 +47,7 @@ import {
     listFogImages,
     listFogSnapins,
     listFogTaskTypes,
+    restartFogTask,
     updateFogHost,
 } from './fog';
 import { getDHCPLeases, getRuleStatus, toggleRuleDisabled } from './mikrotik';
@@ -938,6 +941,77 @@ app.post('/api/fog/hosts/:id/task', async (c) => {
             return c.json({ error: result.error }, 500);
         }
         return c.json(result.data);
+    } catch (error) {
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+app.post('/api/fog/tasks/:id/cancel', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const taskId = parseInt(c.req.param('id'), 10);
+    if (isNaN(taskId)) {
+        return c.json({ error: 'Invalid task ID' }, 400);
+    }
+
+    if (isDemoUser(user)) {
+        return c.json({ success: true });
+    }
+
+    const result = await cancelFogTask(taskId);
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json({ success: true });
+});
+
+app.post('/api/fog/tasks/:id/force', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const taskId = parseInt(c.req.param('id'), 10);
+    if (isNaN(taskId)) {
+        return c.json({ error: 'Invalid task ID' }, 400);
+    }
+
+    if (isDemoUser(user)) {
+        return c.json({ success: true });
+    }
+
+    const result = await forceFogTask(taskId);
+    if (!result.success) {
+        return c.json({ error: result.error }, 500);
+    }
+    return c.json({ success: true });
+});
+
+app.post('/api/fog/tasks/:id/restart', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    const taskId = parseInt(c.req.param('id'), 10);
+    if (isNaN(taskId)) {
+        return c.json({ error: 'Invalid task ID' }, 400);
+    }
+
+    if (isDemoUser(user)) {
+        return c.json({ success: true });
+    }
+
+    try {
+        const body = await c.req.json<{ hostId?: number; taskTypeId?: number }>();
+        const result = await restartFogTask(taskId, body.hostId, body.taskTypeId);
+        if (!result.success) {
+            return c.json({ error: result.error }, 500);
+        }
+        return c.json({ success: true });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
     }
