@@ -11,13 +11,12 @@ export const user = sqliteTable(
         username: text('username'),
         displayUsername: text('displayUsername'),
         image: text('image'),
-        organizationId: text('organizationId')
-            .references(() => organization.id, {
+        organizationId: text('organizationId').references(
+            () => organization.id,
+            {
                 onDelete: 'set null',
-            })
-            .$defaultFn(() =>
-                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
-            ),
+            },
+        ),
         createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
         updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
     },
@@ -176,10 +175,10 @@ export const firewallConfig = sqliteTable(
         }).notNull(),
         labs: text('labs').notNull(),
         createdAt: integer('createdAt', { mode: 'timestamp' })
-            .default(new Date())
+            .$defaultFn(() => new Date())
             .notNull(),
         updatedAt: integer('updatedAt', { mode: 'timestamp' })
-            .default(new Date())
+            .$defaultFn(() => new Date())
             .notNull(),
     },
     (t) => [index('firewallConfig_organizationId_idx').on(t.organizationId)],
