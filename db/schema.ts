@@ -9,6 +9,24 @@ export const user = sqliteTable('user', {
     username: text('username'),
     displayUsername: text('displayUsername'),
     image: text('image'),
+    organizationId: text('organizationId')
+        .references(() => organization.id, {
+            onDelete: 'set null',
+        })
+        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 12)),
+    createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
+});
+
+// Organizations table — stores organization details
+export const organization = sqliteTable('organization', {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    contacts: text('contacts').notNull(),
+    email: text('email').notNull(),
+    allowSignup: integer('allowSignup', { mode: 'boolean' })
+        .notNull()
+        .default(true),
     createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
 });
@@ -87,4 +105,27 @@ export const demoState = sqliteTable('demoState', {
     action: text('action').notNull(),
     data: text('data').notNull(),
     createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+});
+
+// Firewall configuration table — stores MikroTik and labs configuration
+export const firewallConfig = sqliteTable('firewallConfig', {
+    id: text('id')
+        .primaryKey()
+        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 12)),
+    organizationId: text('organizationId')
+        .notNull()
+        .references(() => organization.id, { onDelete: 'cascade' }),
+    mikrotikBaseUrl: text('mikrotikBaseUrl').notNull(),
+    mikrotikUsername: text('mikrotikUsername').notNull(),
+    mikrotikPassword: text('mikrotikPassword').notNull(),
+    mikrotikInsecure: integer('mikrotikInsecure', {
+        mode: 'boolean',
+    }).notNull(),
+    labs: text('labs').notNull(),
+    createdAt: integer('createdAt', { mode: 'timestamp' })
+        .default(new Date())
+        .notNull(),
+    updatedAt: integer('updatedAt', { mode: 'timestamp' })
+        .default(new Date())
+        .notNull(),
 });
