@@ -3,8 +3,10 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import path from 'path';
-import config from '../config.json';
+import * as path from 'path';
+import { auth } from './auth';
+import { configRouter } from './routes/config';
+import type { AppEnv } from './routes/context';
 import { db } from '../db/database';
 import { createAuthTables } from '../db/migrate';
 import { activationHistory, dataUsageHistory } from '../db/schema';
@@ -72,12 +74,7 @@ createAuthTables();
 seedTestTeachers();
 
 // Define Hono app with typed variables for auth
-const app = new Hono<{
-    Variables: {
-        user: typeof auth.$Infer.Session.user | null;
-        session: typeof auth.$Infer.Session.session | null;
-    };
-}>({});
+const app = new Hono<AppEnv>({});
 
 // Logger middleware
 app.use(logger());
@@ -94,16 +91,29 @@ app.use(
     }),
 );
 
-// Auth middleware - populate user/session in context
+// Auth middleware - populate user/session/organization in context
 app.use('*', async (c, next) => {
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
 
     if (!session) {
         c.set('user', null);
         c.set('session', null);
+        c.set('organization', null);
     } else {
         c.set('user', session.user);
         c.set('session', session.session);
+
+        const orgId = session.user.organizationId;
+        if (orgId) {
+            const [org] = await db
+                .select()
+                .from(organization)
+                .where(eq(organization.id, orgId))
+                .limit(1);
+            c.set('organization', org ?? null);
+        } else {
+            c.set('organization', null);
+        }
     }
 
     await next();

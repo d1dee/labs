@@ -33,6 +33,16 @@ export const auth = betterAuth({
         }),
     ],
 
+    user: {
+        additionalFields: {
+            organizationId: {
+                type: 'string',
+                required: false,
+                input: false,
+            },
+        },
+    },
+
     session: {
         expiresIn: 60 * 60 * 24 * 7,
         updateAge: 60 * 60 * 24,
