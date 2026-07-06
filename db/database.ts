@@ -9,8 +9,8 @@ const DB_PATH = path.join(__dirname, '..', 'teachers.db');
 
 // Initialize Bun's built-in SQLite database
 const sqliteDb = new Database(DB_PATH);
-sqliteDb.exec('PRAGMA journal_mode = WAL');
-sqliteDb.exec('PRAGMA foreign_keys = ON');
+sqliteDb.run('PRAGMA journal_mode = WAL');
+sqliteDb.run('PRAGMA foreign_keys = ON');
 
 // Create Drizzle database instance with Better Auth schema
 export const db = drizzle({ client: sqliteDb, schema });
