@@ -29,7 +29,9 @@ export const user = sqliteTable(
 
 // Organizations table — stores organization details
 export const organization = sqliteTable('organization', {
-    id: text('id').primaryKey(),
+    id: text('id')
+        .primaryKey()
+        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 8)),
     name: text('name').notNull(),
     contacts: text('contacts').notNull(),
     email: text('email').notNull(),
