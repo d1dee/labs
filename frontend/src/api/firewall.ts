@@ -1,3 +1,5 @@
+import { $fetch, throwOnError } from './client';
+
 export interface Lab {
     id: string;
     name: string;
@@ -47,32 +49,22 @@ export interface DataUsageHistoryEntry {
  * Fetch all labs — uses cookie-based session from Better Auth
  */
 export async function getLabs(): Promise<{ labs: Lab[] }> {
-    const response = await fetch(`/api/labs`, {
-        method: 'GET',
-        credentials: 'include',
-    });
-
-    if (!response.ok) {
-        throw new Error('Failed to fetch labs');
-    }
-
-    return response.json();
+    return throwOnError(
+        await $fetch<{ labs: Lab[] }>('/api/labs', { method: 'GET' }),
+        'Failed to fetch labs',
+    );
 }
 
 /**
  * Fetch stats for a specific lab — uses cookie-based session
  */
 export async function getLabStats(labId: string): Promise<LabStats> {
-    const response = await fetch(`/api/labs/${labId}/stats`, {
-        method: 'GET',
-        credentials: 'include',
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to fetch stats for lab ${labId}`);
-    }
-
-    return response.json();
+    return throwOnError(
+        await $fetch<LabStats>(`/api/labs/${labId}/stats`, {
+            method: 'GET',
+        }),
+        `Failed to fetch stats for lab ${labId}`,
+    );
 }
 
 /**
@@ -82,20 +74,16 @@ export async function toggleLab(
     labId: string,
     enable: boolean,
 ): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`/api/labs/${labId}/toggle`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ enable }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to toggle lab ${labId}`);
-    }
-
-    return response.json();
+    return throwOnError(
+        await $fetch<{ success: boolean; message: string }>(
+            `/api/labs/${labId}/toggle`,
+            {
+                method: 'POST',
+                body: { enable },
+            },
+        ),
+        `Failed to toggle lab ${labId}`,
+    );
 }
 
 /**
@@ -104,16 +92,13 @@ export async function toggleLab(
 export async function getLabHistory(
     labId: string,
 ): Promise<{ history: ActivationHistoryEntry[] }> {
-    const response = await fetch(`/api/labs/${labId}/history`, {
-        method: 'GET',
-        credentials: 'include',
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to fetch history for lab ${labId}`);
-    }
-
-    return response.json();
+    return throwOnError(
+        await $fetch<{ history: ActivationHistoryEntry[] }>(
+            `/api/labs/${labId}/history`,
+            { method: 'GET' },
+        ),
+        `Failed to fetch history for lab ${labId}`,
+    );
 }
 
 /**
@@ -122,14 +107,11 @@ export async function getLabHistory(
 export async function getDataUsageHistory(
     labId: string,
 ): Promise<{ history: DataUsageHistoryEntry[] }> {
-    const response = await fetch(`/api/labs/${labId}/usage-history`, {
-        method: 'GET',
-        credentials: 'include',
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to fetch data usage history for lab ${labId}`);
-    }
-
-    return response.json();
+    return throwOnError(
+        await $fetch<{ history: DataUsageHistoryEntry[] }>(
+            `/api/labs/${labId}/usage-history`,
+            { method: 'GET' },
+        ),
+        `Failed to fetch data usage history for lab ${labId}`,
+    );
 }

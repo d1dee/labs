@@ -1,3 +1,5 @@
+import { $fetch, throwOnError } from './client';
+
 export interface FogHostScreen {
     id: number | null;
     hostID: number | null;
@@ -271,6 +273,7 @@ export interface FogTaskResult {
     id?: number;
     name?: string;
     message?: string;
+    success?: boolean;
     [key: string]: unknown;
 }
 
@@ -278,51 +281,37 @@ export async function getFogStatus(): Promise<{
     configured: boolean;
     url: string | null;
 }> {
-    const response = await fetch('/api/fog/status', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to fetch FOG status');
-    }
-    return response.json() as Promise<{
-        configured: boolean;
-        url: string | null;
-    }>;
+    return throwOnError(
+        await $fetch<{ configured: boolean; url: string | null }>(
+            '/api/fog/status',
+            { method: 'GET' },
+        ),
+        'Failed to fetch FOG status',
+    );
 }
 
 export async function getFogSystemInfo(): Promise<unknown> {
-    const response = await fetch('/api/fog/system-info', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to fetch FOG system info');
-    }
-    return response.json();
+    return throwOnError(
+        await $fetch<unknown>('/api/fog/system-info', { method: 'GET' }),
+        'Failed to fetch FOG system info',
+    );
 }
 
 export async function listFogHosts(search?: string): Promise<ListFogHosts> {
     const query = search ? `?search=${encodeURIComponent(search)}` : '';
-    const response = await fetch(`/api/fog/hosts${query}`, {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to list FOG hosts');
-    }
-    return response.json() as Promise<ListFogHosts>;
+    return throwOnError(
+        await $fetch<ListFogHosts>(`/api/fog/hosts${query}`, {
+            method: 'GET',
+        }),
+        'Failed to list FOG hosts',
+    );
 }
 
 export async function getFogHost(id: number): Promise<FogHost> {
-    const response = await fetch(`/api/fog/hosts/${id}`, {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to get FOG host ${id}`);
-    }
-    return response.json() as Promise<FogHost>;
+    return throwOnError(
+        await $fetch<FogHost>(`/api/fog/hosts/${id}`, { method: 'GET' }),
+        `Failed to get FOG host ${id}`,
+    );
 }
 
 export async function createFogHost(hostData: {
@@ -331,148 +320,124 @@ export async function createFogHost(hostData: {
     description?: string;
     imageID?: number;
 }): Promise<FogHost> {
-    const response = await fetch('/api/fog/hosts', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(hostData),
-    });
-    if (!response.ok) {
-        throw new Error('Failed to create FOG host');
-    }
-    return response.json() as Promise<FogHost>;
+    return throwOnError(
+        await $fetch<FogHost>('/api/fog/hosts', {
+            method: 'POST',
+            body: hostData,
+        }),
+        'Failed to create FOG host',
+    );
 }
 
 export async function updateFogHost(
     id: number,
     updates: Partial<FogHost>,
 ): Promise<FogHost> {
-    const response = await fetch(`/api/fog/hosts/${id}`, {
-        method: 'PUT',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to update FOG host ${id}`);
-    }
-    return response.json() as Promise<FogHost>;
+    return throwOnError(
+        await $fetch<FogHost>(`/api/fog/hosts/${id}`, {
+            method: 'PUT',
+            body: updates,
+        }),
+        `Failed to update FOG host ${id}`,
+    );
 }
 
 export async function deleteFogHost(id: number): Promise<{ success: boolean }> {
-    const response = await fetch(`/api/fog/hosts/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to delete FOG host ${id}`);
-    }
-    return response.json() as Promise<{ success: boolean }>;
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/fog/hosts/${id}`, {
+            method: 'DELETE',
+        }),
+        `Failed to delete FOG host ${id}`,
+    );
 }
 
 export async function listFogImages(): Promise<ListFogImages> {
-    const response = await fetch('/api/fog/images', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to list FOG images');
-    }
-    return response.json() as Promise<ListFogImages>;
+    return throwOnError(
+        await $fetch<ListFogImages>('/api/fog/images', { method: 'GET' }),
+        'Failed to list FOG images',
+    );
 }
 
 export async function listFogTaskTypes(): Promise<ListFogTaskTypes> {
-    const response = await fetch('/api/fog/tasktypes', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to list FOG task types');
-    }
-    return response.json() as Promise<ListFogTaskTypes>;
+    return throwOnError(
+        await $fetch<ListFogTaskTypes>('/api/fog/tasktypes', {
+            method: 'GET',
+        }),
+        'Failed to list FOG task types',
+    );
 }
 
 export async function listFogSnapins(): Promise<ListFogSnapins> {
-    const response = await fetch('/api/fog/snapins', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to list FOG snapins');
-    }
-    return response.json() as Promise<ListFogSnapins>;
+    return throwOnError(
+        await $fetch<ListFogSnapins>('/api/fog/snapins', { method: 'GET' }),
+        'Failed to list FOG snapins',
+    );
 }
 
 export async function listActiveFogTasks(): Promise<ListActiveFogTasks> {
-    const response = await fetch('/api/fog/tasks/active', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to list active FOG tasks');
-    }
-    return response.json() as Promise<ListActiveFogTasks>;
+    return throwOnError(
+        await $fetch<ListActiveFogTasks>('/api/fog/tasks/active', {
+            method: 'GET',
+        }),
+        'Failed to list active FOG tasks',
+    );
 }
 
 export async function listActiveFogMulticastSessions(): Promise<ListActiveFogMulticastSessions> {
-    const response = await fetch('/api/fog/multicastsessions/current', {
-        method: 'GET',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        throw new Error('Failed to list active multicast sessions');
-    }
-    return response.json() as Promise<ListActiveFogMulticastSessions>;
+    return throwOnError(
+        await $fetch<ListActiveFogMulticastSessions>(
+            '/api/fog/multicastsessions/current',
+            { method: 'GET' },
+        ),
+        'Failed to list active multicast sessions',
+    );
 }
 
-export async function cancelFogTask(taskId: number): Promise<{ success: boolean }> {
-    const response = await fetch(`/api/fog/tasks/${taskId}/cancel`, {
-        method: 'POST',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error || `Failed to cancel FOG task ${taskId}`);
-    }
-    return response.json() as Promise<{ success: boolean }>;
+export async function cancelFogTask(
+    taskId: number,
+): Promise<{ success: boolean }> {
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/fog/tasks/${taskId}/cancel`, {
+            method: 'POST',
+        }),
+        `Failed to cancel FOG task ${taskId}`,
+    );
 }
 
-export async function pauseFogTask(taskId: number): Promise<{ success: boolean }> {
-    const response = await fetch(`/api/fog/tasks/${taskId}/pause`, {
-        method: 'POST',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error || `Failed to pause FOG task ${taskId}`);
-    }
-    return response.json() as Promise<{ success: boolean }>;
+export async function pauseFogTask(
+    taskId: number,
+): Promise<{ success: boolean }> {
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/fog/tasks/${taskId}/pause`, {
+            method: 'POST',
+        }),
+        `Failed to pause FOG task ${taskId}`,
+    );
 }
 
-export async function forceFogTask(taskId: number): Promise<{ success: boolean }> {
-    const response = await fetch(`/api/fog/tasks/${taskId}/force`, {
-        method: 'POST',
-        credentials: 'include',
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error || `Failed to force FOG task ${taskId}`);
-    }
-    return response.json() as Promise<{ success: boolean }>;
+export async function forceFogTask(
+    taskId: number,
+): Promise<{ success: boolean }> {
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/fog/tasks/${taskId}/force`, {
+            method: 'POST',
+        }),
+        `Failed to force FOG task ${taskId}`,
+    );
 }
 
-export async function restartFogTask(taskId: number, hostId?: number, taskTypeId?: number): Promise<{ success: boolean }> {
-    const response = await fetch(`/api/fog/tasks/${taskId}/restart`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostId, taskTypeId }),
-    });
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({})) as { error?: string };
-        throw new Error(err.error || `Failed to restart FOG task ${taskId}`);
-    }
-    return response.json() as Promise<{ success: boolean }>;
+export async function restartFogTask(
+    taskId: number,
+    hostId?: number,
+    taskTypeId?: number,
+): Promise<{ success: boolean }> {
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/fog/tasks/${taskId}/restart`, {
+            method: 'POST',
+            body: { hostId, taskTypeId },
+        }),
+        `Failed to restart FOG task ${taskId}`,
+    );
 }
 
 export async function createFogTask(
@@ -480,22 +445,19 @@ export async function createFogTask(
     taskTypeId: number,
     options?: Record<string, unknown>,
 ): Promise<FogTaskResult> {
-    const response = await fetch(`/api/fog/hosts/${hostId}/task`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskTypeID: taskTypeId, ...options }),
-    });
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || error.message || 'Failed to create FOG task');
+    const { data, error } = await $fetch<FogTaskResult>(
+        `/api/fog/hosts/${hostId}/task`,
+        {
+            method: 'POST',
+            body: { taskTypeID: taskTypeId, ...options },
+        },
+    );
+    if (error) {
+        throw new Error(
+            (error as any).error || (error as any).message || 'Failed to create FOG task',
+        );
     }
-    // FOG returns null or "" on success
-    const text = await response.text();
-    if (text === '' || text === 'null') {
-        return { success: true };
-    }
-    return response.json() as Promise<FogTaskResult>;
+    return data ?? { success: true };
 }
 
 export async function createFogSnapinTask(
@@ -503,14 +465,11 @@ export async function createFogSnapinTask(
     snapinId: number,
     options?: Record<string, unknown>,
 ): Promise<FogTaskResult> {
-    const response = await fetch(`/api/fog/hosts/${hostId}/snapin-task`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapinID: snapinId, ...options }),
-    });
-    if (!response.ok) {
-        throw new Error('Failed to create FOG snapin task');
-    }
-    return response.json() as Promise<FogTaskResult>;
+    return throwOnError(
+        await $fetch<FogTaskResult>(`/api/fog/hosts/${hostId}/snapin-task`, {
+            method: 'POST',
+            body: { snapinID: snapinId, ...options },
+        }),
+        'Failed to create FOG snapin task',
+    );
 }
