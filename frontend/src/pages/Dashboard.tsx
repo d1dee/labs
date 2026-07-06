@@ -1,11 +1,14 @@
-import ActiveTasksTab from '@/components/FOG/ActiveTasksTab';
+import ActiveTasksTab from '@/components/ActiveTasksTab';
 import ManagementTab from '@/components/FOG/ManagementTab';
 import PiholeTab from '@/components/pihole/PiholeTab';
+import { useSessionContext } from '@/context/SessionContext';
 import {
     ActionIcon,
+    Alert,
     Anchor,
     AppShell,
     Avatar,
+    Button,
     Container,
     Group,
     Menu,
@@ -20,22 +23,25 @@ import {
     IconSettings,
     IconShieldCheck,
     IconTools,
+    IconExclamationCircle,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
 import FirewallTab from '../components/FirewallTab';
 
 interface DashboardProps {
-    userName: string;
     onLogout: () => void;
     onChangePassword: () => void;
+    onSettingsOpen: () => void;
 }
 
 const Dashboard: FC<DashboardProps> = ({
-    userName,
     onLogout,
     onChangePassword,
+    onSettingsOpen,
 }) => {
+    const { user, organization } = useSessionContext();
+    const userName = user?.name || user?.username || 'Teacher';
     const [activeTab, setActiveTab] = useState<string | null>('firewall');
 
     return (
@@ -73,6 +79,13 @@ const Dashboard: FC<DashboardProps> = ({
                                         onClick={onChangePassword}
                                     >
                                         Change Password
+                                    </Menu.Item>
+                                    <Menu.Divider />
+                                    <Menu.Item
+                                        leftSection={<IconKey size={16} />}
+                                        onClick={onSettingsOpen}
+                                    >
+                                        Settings
                                     </Menu.Item>
                                     <Menu.Divider />
                                     <Menu.Item
@@ -118,6 +131,30 @@ const Dashboard: FC<DashboardProps> = ({
                                 Active Tasks
                             </Tabs.Tab>
                         </Tabs.List>
+
+                        {!organization && (
+                            <Alert
+                                icon={<IconExclamationCircle size={18} />}
+                                color='orange'
+                                variant='light'
+                                mt='md'
+                                title='No organization'
+                            >
+                                <Group align='center' gap='sm'>
+                                    <Text size='sm'>
+                                        You must join or create an
+                                        organization to use these features.
+                                    </Text>
+                                    <Button
+                                        size='xs'
+                                        variant='light'
+                                        onClick={onSettingsOpen}
+                                    >
+                                        Open settings
+                                    </Button>
+                                </Group>
+                            </Alert>
+                        )}
 
                         <Tabs.Panel value='firewall' pt='md'>
                             <FirewallTab />

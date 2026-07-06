@@ -1,31 +1,16 @@
+import { SessionProvider, useSessionContext } from '@/context/SessionContext';
 import { authClient } from '@/lib/auth-client';
 import { LoadingOverlay } from '@mantine/core';
-import { FC, useEffect, useState } from 'react';
+import { type FC, useState } from 'react';
 import ChangePassword from './pages/ChangePassword';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
+import Settings from './pages/Settings';
 
-const App: FC = () => {
-    const [user, setUser] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+const AppContent: FC = () => {
+    const { isAuthenticated, isLoading } = useSessionContext();
     const [changePasswordOpened, setChangePasswordOpened] = useState(false);
-
-    const checkSession = async () => {
-        try {
-            const { data: session } = await authClient.getSession();
-            if (session?.user) {
-                setUser(session.user);
-            }
-        } catch (error) {
-            console.error('Session check failed:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        checkSession();
-    }, []);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     const handleLogout = async (): Promise<void> => {
         try {
@@ -33,31 +18,42 @@ const App: FC = () => {
         } catch (error) {
             console.error('Logout failed:', error);
         } finally {
-            setUser(null);
             setChangePasswordOpened(false);
         }
     };
 
-    if (loading) {
-        return <LoadingOverlay>Loading...</LoadingOverlay>;
+    if (isLoading) {
+        return <LoadingOverlay visible>Loading...</LoadingOverlay>;
     }
 
-    if (!user) {
-        return <Login onLoginSuccess={checkSession} />;
+    if (!isAuthenticated) {
+        return <Login />;
     }
 
     return (
         <>
             <Dashboard
-                userName={user.name || user.username || 'Teacher'}
                 onLogout={handleLogout}
                 onChangePassword={() => setChangePasswordOpened(true)}
+                onSettingsOpen={() => setSettingsOpen(true)}
             />
             <ChangePassword
                 opened={changePasswordOpened}
                 onClose={() => setChangePasswordOpened(false)}
             />
+            <Settings
+                opened={settingsOpen}
+                onClose={() => setSettingsOpen(false)}
+            />
         </>
+    );
+};
+
+const App: FC = () => {
+    return (
+        <SessionProvider>
+            <AppContent />
+        </SessionProvider>
     );
 };
 

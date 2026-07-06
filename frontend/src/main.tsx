@@ -10,7 +10,6 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 
 const theme = createTheme({
-    primaryColor: 'accent',
     defaultRadius: 'md',
     colors: {
         accent: [
