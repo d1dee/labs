@@ -176,9 +176,7 @@ export function OrganizationSettings() {
     const copyJoinKey = async () => {
         if (!userOrganization) return;
         try {
-            await navigator.clipboard.writeText(
-                userOrganization.joinKey,
-            );
+            await navigator.clipboard.writeText(userOrganization.joinKey);
             notifications.show({
                 title: 'Copied',
                 message: 'Join key copied to clipboard',
@@ -446,22 +444,14 @@ export function OrganizationSettings() {
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
                     <Card withBorder p='sm' radius='md'>
                         <Group gap='sm' align='center'>
-                            <ThemeIcon
-                                variant='light'
-                                color='indigo'
-                                size='lg'
-                            >
+                            <ThemeIcon variant='light' color='indigo' size='lg'>
                                 <IconMail size={16} />
                             </ThemeIcon>
                             <Stack gap={2} style={{ minWidth: 0 }}>
                                 <Text size='xs' color='dimmed'>
                                     Email
                                 </Text>
-                                <Text
-                                    size='sm'
-                                    fw={500}
-                                    lineClamp={1}
-                                >
+                                <Text size='sm' fw={500} lineClamp={1}>
                                     {userOrganization.email}
                                 </Text>
                             </Stack>
@@ -470,11 +460,7 @@ export function OrganizationSettings() {
 
                     <Card withBorder p='sm' radius='md'>
                         <Group gap='sm' align='center'>
-                            <ThemeIcon
-                                variant='light'
-                                color='teal'
-                                size='lg'
-                            >
+                            <ThemeIcon variant='light' color='teal' size='lg'>
                                 <IconPhone size={16} />
                             </ThemeIcon>
                             <Stack gap={2} style={{ minWidth: 0 }}>
@@ -493,11 +479,7 @@ export function OrganizationSettings() {
                 <Card withBorder p='sm' radius='md'>
                     <Group justify='space-between' mb='sm'>
                         <Group gap='xs'>
-                            <ThemeIcon
-                                variant='light'
-                                color='gray'
-                                size='md'
-                            >
+                            <ThemeIcon variant='light' color='gray' size='md'>
                                 <IconUsers size={16} />
                             </ThemeIcon>
                             <Text size='sm' fw={500}>
@@ -531,11 +513,7 @@ export function OrganizationSettings() {
                                         {member.name.charAt(0).toUpperCase()}
                                     </ThemeIcon>
                                     <Stack gap={2} style={{ minWidth: 0 }}>
-                                        <Text
-                                            size='sm'
-                                            fw={500}
-                                            lineClamp={1}
-                                        >
+                                        <Text size='sm' fw={500} lineClamp={1}>
                                             {member.name}
                                         </Text>
                                         <Text
