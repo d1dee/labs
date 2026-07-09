@@ -19,7 +19,9 @@ export interface OrganizationMember {
 export interface Organization {
     id: string;
     name: string;
-    contacts: string;
+    email: string;
+    phoneNumber: string;
+    joinKey: string;
     members?: OrganizationMember[];
 }
 
@@ -41,9 +43,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
     const { data: session, isPending } = useSession();
-    const [organization, setOrganization] = useState<Organization | null>(
-        null,
-    );
+    const [organization, setOrganization] = useState<Organization | null>(null);
 
     const refreshOrganization = useCallback(async () => {
         try {

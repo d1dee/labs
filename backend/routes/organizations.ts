@@ -1,7 +1,18 @@
 import { eq } from 'drizzle-orm';
+import z from 'zod';
 import { db } from '../../db/database';
 import { organization, user as userTable } from '../../db/schema';
 import { createApp } from './context';
+
+export async function regenerateOrganizationJoinKey(orgId: string) {
+    const newJoinKey = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+    const updatedOrg = await db
+        .update(organization)
+        .set({ joinKey: newJoinKey, updatedAt: new Date() })
+        .where(eq(organization.id, orgId))
+        .returning();
+    return updatedOrg[0];
+}
 
 export const organizationsRouter = createApp();
 
@@ -41,7 +52,11 @@ organizationsRouter.get('/organizations', async (c) => {
         return c.json({
             organizations: [
                 {
-                    ...orgData,
+                    id: orgData.id,
+                    name: orgData.name,
+                    email: orgData.email,
+                    phoneNumber: orgData.phoneNumber,
+                    joinKey: orgData.joinKey,
                     members: members.map((m) => ({
                         id: m.id,
                         name: m.name,
@@ -63,23 +78,34 @@ organizationsRouter.post('/organizations', async (c) => {
     }
 
     try {
-        const body = await c.req.json<{
-            name: string;
-            email: string;
-            contacts: string;
-        }>();
+        const body = await c.req.json();
 
-        const newOrgId = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
-
-        // Create organization
-        await db.insert(organization).values({
-            id: newOrgId,
-            name: body.name,
-            email: body.email,
-            contacts: body.contacts,
-            createdAt: new Date(),
-            updatedAt: new Date(),
+        const orgSchema = z.object({
+            name: z
+                .string()
+                .min(4, 'Organization name must be at least 2 characters'),
+            email: z
+                .email('Invalid email address')
+                .min(1, 'Contact information is required'),
+            phoneNumber: z.string(),
         });
+        const validatedBody = orgSchema.parse(body);
+        // Create organization
+        const result = await db
+            .insert(organization)
+            .values({
+                name: validatedBody.name,
+                email: validatedBody.email,
+                phoneNumber: validatedBody.phoneNumber,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .returning();
+
+        if (!result || result.length === 0 || !result[0]) {
+            return c.json({ error: 'Failed to create organization' }, 500);
+        }
+        const newOrgId = result[0].id;
 
         // Add user to organization
         await db
@@ -91,8 +117,10 @@ organizationsRouter.post('/organizations', async (c) => {
             success: true,
             organization: {
                 id: newOrgId,
-                name: body.name,
-                contacts: body.contacts,
+                name: result[0].name,
+                email: result[0].email,
+                phoneNumber: result[0].phoneNumber,
+                joinKey: result[0].joinKey,
             },
         });
     } catch (error) {
@@ -100,20 +128,20 @@ organizationsRouter.post('/organizations', async (c) => {
     }
 });
 
-organizationsRouter.post('/organizations/:orgId/join', async (c) => {
+organizationsRouter.post('/organizations/:joinKey/join', async (c) => {
     const user = c.get('user');
     if (!user) {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const orgId = c.req.param('orgId');
+    const joinKey = c.req.param('joinKey');
 
     try {
         // Check if organization exists
         const orgData = await db
             .select()
             .from(organization)
-            .where(eq(organization.id, orgId))
+            .where(eq(organization.joinKey, joinKey))
             .get();
 
         if (!orgData) {
@@ -123,12 +151,18 @@ organizationsRouter.post('/organizations/:orgId/join', async (c) => {
         // Add user to organization
         await db
             .update(userTable)
-            .set({ organizationId: orgId, updatedAt: new Date() })
+            .set({ organizationId: orgData.id, updatedAt: new Date() })
             .where(eq(userTable.id, user.id));
 
         return c.json({
             success: true,
-            organization: orgData,
+            organization: {
+                id: orgData.id,
+                name: orgData.name,
+                email: orgData.email,
+                phoneNumber: orgData.phoneNumber,
+                joinKey: orgData.joinKey,
+            },
         });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -155,3 +189,51 @@ organizationsRouter.post('/organizations/:orgId/leave', async (c) => {
         return c.json({ error: String(error) }, 500);
     }
 });
+
+organizationsRouter.post(
+    '/organizations/:orgId/regenerate-join-key',
+    async (c) => {
+        const user = c.get('user');
+        if (!user) {
+            return c.json({ error: 'Not authenticated' }, 401);
+        }
+
+        const orgId = c.req.param('orgId');
+
+        try {
+            // Verify user is member of this organization
+            const userData = await db
+                .select({ organizationId: userTable.organizationId })
+                .from(userTable)
+                .where(eq(userTable.id, user.id))
+                .get();
+
+            if (!userData || userData.organizationId !== orgId) {
+                return c.json(
+                    { error: 'You are not a member of this organization' },
+                    403,
+                );
+            }
+
+            // Regenerate join key
+            const updatedOrg = await regenerateOrganizationJoinKey(orgId);
+
+            if (!updatedOrg) {
+                return c.json({ error: 'Organization not found' }, 404);
+            }
+
+            return c.json({
+                success: true,
+                organization: {
+                    id: updatedOrg.id,
+                    name: updatedOrg.name,
+                    email: updatedOrg.email,
+                    phoneNumber: updatedOrg.phoneNumber,
+                    joinKey: updatedOrg.joinKey,
+                },
+            });
+        } catch (error) {
+            return c.json({ error: String(error) }, 500);
+        }
+    },
+);
