@@ -1,16 +1,16 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import console from 'console';
+import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import * as path from 'path';
+import { db } from '../db/database';
+import { organization } from '../db/schema';
 import { auth } from './auth';
 import { configRouter } from './routes/config';
 import type { AppEnv } from './routes/context';
-import { db } from '../db/database';
-import { organization } from '../db/schema';
-import { eq } from 'drizzle-orm';
 import { fogRouter } from './routes/fog';
 import { labsRouter, startDataUsageSnapshots } from './routes/labs';
 import { organizationsRouter } from './routes/organizations';
@@ -26,6 +26,25 @@ const config = require('../config.json') as {
         insecure: boolean;
     };
 };
+
+// Globally accept self-signed certificates for outbound fetch requests
+// when MikroTik is configured with insecure TLS (self-signed routers).
+if (process.env.MIKROTIK_INSECURE_FETCH === 'true') {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((
+        input: string | URL | Request,
+        init?: RequestInit & { tls?: Record<string, unknown> },
+    ) => {
+        const merged = {
+            ...init,
+            tls: {
+                rejectUnauthorized: false,
+                ...(init?.tls ?? {}),
+            },
+        };
+        return originalFetch(input, merged);
+    }) as typeof globalThis.fetch;
+}
 
 // Define Hono app with typed variables for auth
 const app = new Hono<AppEnv>({});
