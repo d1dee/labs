@@ -8,7 +8,7 @@ import {
     Title,
 } from '@mantine/core';
 import dayjs from 'dayjs';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 const Landing: FC = () => {
     return (

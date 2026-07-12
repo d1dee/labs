@@ -9,7 +9,8 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconCheck } from '@tabler/icons-react';
-import { FC, FormEvent, useState } from 'react';
+import type { FC, FormEvent } from 'react';
+import { useState } from 'react';
 
 interface ChangePasswordProps {
     opened: boolean;
