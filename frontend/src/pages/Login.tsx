@@ -20,11 +20,7 @@ interface AppConfig {
 
 type Mode = 'login' | 'signup';
 
-interface LoginProps {
-    onLoginSuccess?: () => void;
-}
-
-const Login: FC<LoginProps> = ({ onLoginSuccess }) => {
+const Login: FC = () => {
     const [mode, setMode] = useState<Mode>('login');
     const [username, setUsername] = useState<string>('');
     const [email, setEmail] = useState<string>('');
@@ -78,8 +74,6 @@ const Login: FC<LoginProps> = ({ onLoginSuccess }) => {
                         result.error.message ||
                             'Failed to create account. Please try again.',
                     );
-                } else {
-                    onLoginSuccess?.();
                 }
             } else {
                 const result = await signIn.username({
@@ -93,8 +87,6 @@ const Login: FC<LoginProps> = ({ onLoginSuccess }) => {
                         result.error.message ||
                             'Invalid credentials. Please try again.',
                     );
-                } else {
-                    onLoginSuccess?.();
                 }
             }
         } catch (err) {
