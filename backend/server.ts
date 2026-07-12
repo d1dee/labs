@@ -17,16 +17,6 @@ import { organizationsRouter } from './routes/organizations';
 import { piholeRouter } from './routes/pihole';
 import { settingsRouter } from './routes/settings';
 
-const config = require('../config.json') as {
-    server: { port: number };
-    mikrotik: {
-        baseUrl: string;
-        username: string;
-        password: string;
-        insecure: boolean;
-    };
-};
-
 // Globally accept self-signed certificates for outbound fetch requests
 // when MikroTik is configured with insecure TLS (self-signed routers).
 if (process.env.MIKROTIK_INSECURE_FETCH === 'true') {
@@ -108,8 +98,7 @@ app.route('/api', settingsRouter);
 // Start background data usage snapshots
 startDataUsageSnapshots();
 
-// Start server
-const port = config.server.port;
+const port = Number(process.env.PORT || 3000);
 
 const frontendDist = path.resolve(__dirname, '../frontend/build');
 app.use('/assets/*', serveStatic({ root: frontendDist }));

@@ -94,12 +94,18 @@ labsRouter.get('/labs/:labId/stats', async (c) => {
         }
 
         // Get rule status
-        const ruleResponse = await getRuleStatus(lab.ruleId);
+        const ruleResponse = await getRuleStatus(
+            user.organizationId,
+            lab.ruleId,
+        );
         const ruleDisabled =
             ruleResponse.success && ruleResponse.data?.action === 'drop';
 
         // Get DHCP leases to estimate connected devices
-        const leasesResponse = await getDHCPLeases(lab.dhcpServer);
+        const leasesResponse = await getDHCPLeases(
+            user.organizationId,
+            lab.dhcpServer,
+        );
 
         const stats = {
             lab: {
@@ -147,10 +153,17 @@ labsRouter.get('/labs/by-rule/:ruleId', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const ruleId = c.req.param('ruleId');
 
     try {
-        const result = await getLabDetailsByRuleId(ruleId);
+        const result = await getLabDetailsByRuleId(
+            user.organizationId,
+            ruleId,
+        );
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }
@@ -211,7 +224,12 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
         }
 
         // Toggle the rule (if enable=true, set disabled=false)
-        const result = await toggleRuleDisabled(lab.ruleId, enable, lab.subnet);
+        const result = await toggleRuleDisabled(
+            user.organizationId,
+            lab.ruleId,
+            enable,
+            lab.subnet,
+        );
 
         if (!result.success) {
             return c.json({ error: result.error }, 500);
@@ -293,7 +311,10 @@ async function saveDataUsageSnapshot() {
             const labs = JSON.parse(storedConfig.labs || '[]');
 
             for (const lab of labs) {
-                const ruleResponse = await getRuleStatus(lab.ruleId);
+                const ruleResponse = await getRuleStatus(
+                    storedConfig.organizationId,
+                    lab.ruleId,
+                );
                 if (ruleResponse.success && ruleResponse.data?.bytes) {
                     const totalBytes = ruleResponse.data.bytes;
                     const usageMB = Math.round(
