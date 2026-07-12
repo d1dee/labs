@@ -17,8 +17,12 @@ export const user = sqliteTable(
                 onDelete: 'set null',
             },
         ),
-        createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
-        updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
     },
     (t) => [
         index('user_email_idx').on(t.email),
@@ -31,15 +35,21 @@ export const user = sqliteTable(
 export const organization = sqliteTable('organization', {
     id: text('id')
         .primaryKey()
-        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 8)),
+        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 12)),
     name: text('name').notNull(),
-    contacts: text('contacts').notNull(),
+    phoneNumber: text('phoneNumber').notNull(),
     email: text('email').notNull(),
-    allowSignup: integer('allowSignup', { mode: 'boolean' })
+    joinKey: text('joinKey')
         .notNull()
-        .default(true),
-    createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
-    updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
+        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 6)),
+    createdAt: integer('createdAt', { mode: 'timestamp' })
+        .notNull()
+        .$defaultFn(() => new Date())
+        .$defaultFn(() => new Date()),
+    updatedAt: integer('updatedAt', { mode: 'timestamp' })
+        .notNull()
+        .$defaultFn(() => new Date())
+        .$defaultFn(() => new Date()),
 });
 
 // Accounts table — stores OAuth/credential provider links
@@ -61,8 +71,12 @@ export const account = sqliteTable(
         session_id: text('session_id').references(() => session.id, {
             onDelete: 'cascade',
         }),
-        createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
-        updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
     },
     (t) => [
         index('account_userId_idx').on(t.userId),
@@ -82,8 +96,12 @@ export const session = sqliteTable(
         userId: text('userId')
             .notNull()
             .references(() => user.id, { onDelete: 'cascade' }),
-        createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
-        updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
     },
     (t) => [
         index('session_token_idx').on(t.token),
@@ -115,7 +133,9 @@ export const activationHistory = sqliteTable(
         triggeredBy: text('triggeredBy')
             .notNull()
             .references(() => user.id, { onDelete: 'set null' }),
-        createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
     },
     (t) => [
         index('activationHistory_labId_idx').on(t.labId),
@@ -131,7 +151,9 @@ export const dataUsageHistory = sqliteTable(
         labId: text('labId').notNull(),
         totalBytes: integer('totalBytes', { mode: 'number' }).notNull(),
         usageMB: integer('usageMB', { mode: 'number' }).notNull(),
-        createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
     },
     (t) => [
         index('dataUsageHistory_labId_idx').on(t.labId),
@@ -149,7 +171,9 @@ export const demoState = sqliteTable(
         resourceId: text('resourceId'),
         action: text('action').notNull(),
         data: text('data').notNull(),
-        createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
     },
     (t) => [
         index('demoState_userId_idx').on(t.userId),
@@ -172,9 +196,7 @@ export const firewallConfig = sqliteTable(
         mikrotikBaseUrl: text('mikrotikBaseUrl').notNull(),
         mikrotikUsername: text('mikrotikUsername').notNull(),
         mikrotikPassword: text('mikrotikPassword').notNull(),
-        mikrotikInsecure: integer('mikrotikInsecure', {
-            mode: 'boolean',
-        }).notNull(),
+
         labs: text('labs').notNull(),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .$defaultFn(() => new Date())
