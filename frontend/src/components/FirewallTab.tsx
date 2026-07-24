@@ -1,6 +1,12 @@
-import { getLabs, getLabStats, Lab, LabStats } from '@/api/firewall';
+import {
+    ActivationHistoryEntry,
+    getLabsOverview,
+    Lab,
+    LabStats,
+} from '@/api/firewall';
 import LabCard from '@/components/LabCard';
 import {
+    Alert,
     Card,
     Center,
     Grid,
@@ -11,13 +17,18 @@ import {
     Text,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { IconInfoCircle } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useEffect, useState } from 'react';
 
 const FirewallTab: FC = () => {
     const [labs, setLabs] = useState<Lab[]>([]);
     const [labStats, setLabStats] = useState<Record<string, LabStats>>({});
+    const [labHistory, setLabHistory] = useState<
+        Record<string, ActivationHistoryEntry[]>
+    >({});
     const [loading, setLoading] = useState<boolean>(true);
+    const [configMissing, setConfigMissing] = useState<boolean>(false);
 
     useEffect(() => {
         fetchLabs();
@@ -30,38 +41,36 @@ const FirewallTab: FC = () => {
 
     const fetchLabs = async (): Promise<void> => {
         try {
-            const data = await getLabs();
+            const data = await getLabsOverview();
             setLabs(data.labs);
-
-            const stats: Record<string, LabStats> = {};
-            for (const lab of data.labs) {
-                const labStatsData = await getLabStats(lab.id);
-                stats[lab.id] = labStatsData;
+            setLabStats(data.stats);
+            setLabHistory(data.history);
+            setConfigMissing(false);
+        } catch (err: any) {
+            if (err.code === 'CONFIG_MISSING') {
+                setConfigMissing(true);
+                return;
             }
-            setLabStats(stats);
-            setLoading(false);
-        } catch (err) {
             notifications.show({
                 color: 'error',
                 message:
                     'Failed to fetch lab data. Please check your connection.',
             });
             console.error(err);
+        } finally {
             setLoading(false);
         }
     };
 
-    const handleToggle = (labId: string): void => {
-        getLabStats(labId)
-            .then((stats: LabStats) => {
-                setLabStats((prev) => ({
-                    ...prev,
-                    [labId]: stats,
-                }));
-            })
-            .catch((err: unknown) => {
-                console.error('Failed to refresh stats:', err);
-            });
+    const handleToggle = (): void => {
+        // A single lab toggled — refetch the consolidated overview so both the
+        // changed stats and history refresh in one request.
+        fetchLabs().catch((err: any) => {
+            if (err.code === 'CONFIG_MISSING') {
+                setConfigMissing(true);
+            }
+            console.error('Failed to refresh labs:', err);
+        });
     };
 
     const activeLabs = labs.filter(
@@ -78,6 +87,23 @@ const FirewallTab: FC = () => {
                     <Stack align='center' gap='md'>
                         <Loader />
                         <Text>Loading lab data...</Text>
+                    </Stack>
+                </Center>
+            ) : configMissing ? (
+                <Center py={60}>
+                    <Stack align='center' gap='md' maw={500}>
+                        <Alert
+                            variant='light'
+                            color='yellow'
+                            title='Configuration Required'
+                            icon={<IconInfoCircle size={24} />}
+                        >
+                            <Text size='sm' mb='md'>
+                                No firewall configuration found. Please
+                                configure your MikroTik settings and labs in
+                                Settings.
+                            </Text>
+                        </Alert>
                     </Stack>
                 </Center>
             ) : (
@@ -121,12 +147,13 @@ const FirewallTab: FC = () => {
                         </Card>
                     </SimpleGrid>
 
-                    <Grid>
+                    <Grid grow>
                         {labs.map((lab) => (
                             <LabCard
                                 key={lab.id}
                                 lab={lab}
                                 stats={labStats[lab.id]}
+                                history={labHistory[lab.id]}
                                 onToggle={handleToggle}
                             />
                         ))}

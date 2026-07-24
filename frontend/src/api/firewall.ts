@@ -55,6 +55,25 @@ export async function getLabs(): Promise<{ labs: Lab[] }> {
     );
 }
 
+export interface LabsOverview {
+    labs: Lab[];
+    stats: Record<string, LabStats>;
+    history: Record<string, ActivationHistoryEntry[]>;
+}
+
+/**
+ * Fetch labs, per-lab stats and per-lab activation history in a single
+ * request — avoids one stats + one history request per lab.
+ */
+export async function getLabsOverview(): Promise<LabsOverview> {
+    return throwOnError(
+        await $fetch<LabsOverview>('/api/labs/overview', {
+            method: 'GET',
+        }),
+        'Failed to fetch labs overview',
+    );
+}
+
 /**
  * Fetch stats for a specific lab — uses cookie-based session
  */

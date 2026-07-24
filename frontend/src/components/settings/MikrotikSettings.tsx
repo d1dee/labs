@@ -57,7 +57,6 @@ export function MikroTikSettings({
             });
 
             setFirewallConfig(data.data);
-            console.log('Configuration saved successfully', data.data);
         } catch (err) {
             notifications.show({
                 title: 'Error',

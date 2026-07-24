@@ -239,18 +239,34 @@ export async function getConnections(
     return callMikrotik(organizationId, '/ip/firewall/connection/print');
 }
 
-export async function getLabDetailsByRuleId(
+export async function resolveSubnetAndDhcpServer(
     organizationId: string,
-    ruleId: string,
-): Promise<MikrotikResponse> {
-    const response = await getRuleStatus(organizationId, ruleId);
-    if (!response.success || !response.data) {
-        return response;
-    }
-
-    const rule = response.data;
-    const subnet =
+    rule: any,
+): Promise<{ subnet: string; dhcpServer: string }> {
+    // Resolve the subnet from a direct address first, falling back to an
+    // address-list reference when the rule uses one instead of a literal CIDR.
+    let subnet =
         rule['src-address'] || rule['dst-address'] || rule['src-cidr'] || '';
+
+    if (!subnet) {
+        const addressList =
+            rule['src-address-list'] || rule['dst-address-list'];
+        if (addressList) {
+            const lists = await getAddressLists(organizationId);
+            if (lists.success && Array.isArray(lists.data)) {
+                const entries = lists.data.filter(
+                    (item: any) => item.list === addressList && item.address,
+                );
+                const match =
+                    entries.find((item: any) =>
+                        item.address.includes('10.0.'),
+                    ) ?? entries[0];
+                if (match) {
+                    subnet = match.address;
+                }
+            }
+        }
+    }
 
     // Extract VLAN number from subnet to determine DHCP server
     let vlan = '';
@@ -262,6 +278,24 @@ export async function getLabDetailsByRuleId(
     }
 
     const dhcpServer = vlan ? `server::labs::vlan${vlan}` : '';
+
+    return { subnet, dhcpServer };
+}
+
+export async function getLabDetailsByRuleId(
+    organizationId: string,
+    ruleId: string,
+): Promise<MikrotikResponse> {
+    const response = await getRuleStatus(organizationId, ruleId);
+    if (!response.success || !response.data) {
+        return response;
+    }
+
+    const rule = response.data;
+    const { subnet, dhcpServer } = await resolveSubnetAndDhcpServer(
+        organizationId,
+        rule,
+    );
 
     return {
         success: true,
