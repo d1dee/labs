@@ -17,13 +17,13 @@ import {
     Title,
 } from '@mantine/core';
 import {
+    IconExclamationCircle,
     IconKey,
     IconLogout,
     IconNetwork,
     IconSettings,
     IconShieldCheck,
     IconTools,
-    IconExclamationCircle,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
@@ -132,7 +132,7 @@ const Dashboard: FC<DashboardProps> = ({
                             </Tabs.Tab>
                         </Tabs.List>
 
-                        {!organization && (
+                        {!organization ? (
                             <Alert
                                 icon={<IconExclamationCircle size={18} />}
                                 color='orange'
@@ -142,8 +142,8 @@ const Dashboard: FC<DashboardProps> = ({
                             >
                                 <Group align='center' gap='sm'>
                                     <Text size='sm'>
-                                        You must join or create an
-                                        organization to use these features.
+                                        You must join or create an organization
+                                        to use these features.
                                     </Text>
                                     <Button
                                         size='xs'
@@ -154,23 +154,25 @@ const Dashboard: FC<DashboardProps> = ({
                                     </Button>
                                 </Group>
                             </Alert>
+                        ) : (
+                            <>
+                                <Tabs.Panel value='firewall' pt='md'>
+                                    <FirewallTab />
+                                </Tabs.Panel>
+
+                                <Tabs.Panel value='network-block' pt='md'>
+                                    <PiholeTab />
+                                </Tabs.Panel>
+
+                                <Tabs.Panel value='management' pt='md'>
+                                    <ManagementTab />
+                                </Tabs.Panel>
+
+                                <Tabs.Panel value='active-tasks' pt='md'>
+                                    <ActiveTasksTab />
+                                </Tabs.Panel>
+                            </>
                         )}
-
-                        <Tabs.Panel value='firewall' pt='md'>
-                            <FirewallTab />
-                        </Tabs.Panel>
-
-                        <Tabs.Panel value='network-block' pt='md'>
-                            <PiholeTab />
-                        </Tabs.Panel>
-
-                        <Tabs.Panel value='management' pt='md'>
-                            <ManagementTab />
-                        </Tabs.Panel>
-
-                        <Tabs.Panel value='active-tasks' pt='md'>
-                            <ActiveTasksTab />
-                        </Tabs.Panel>
                     </Tabs>
                 </Container>
             </AppShell.Main>

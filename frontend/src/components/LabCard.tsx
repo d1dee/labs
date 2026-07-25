@@ -2,7 +2,6 @@ import {
     ActivationHistoryEntry,
     Lab,
     LabStats,
-    getLabHistory,
     toggleLab,
 } from '@/api/firewall';
 import {
@@ -38,13 +37,12 @@ import {
 interface LabCardProps {
     lab: Lab;
     stats: LabStats;
+    history: ActivationHistoryEntry[];
     onToggle: (labId: string) => void;
 }
 
-const LabCard: FC<LabCardProps> = ({ lab, stats, onToggle }) => {
+const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
     const [toggling, setToggling] = useState<boolean>(false);
-    const [history, setHistory] = useState<ActivationHistoryEntry[]>([]);
-    const [loadingHistory, setLoadingHistory] = useState<boolean>(true);
     const [now, setNow] = useState(Date.now());
     const theme = useMantineTheme();
 
@@ -53,38 +51,13 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, onToggle }) => {
         return () => clearInterval(interval);
     }, []);
 
-    useEffect(() => {
-        const fetchHistory = async () => {
-            try {
-                const data = await getLabHistory(lab.id);
-                setHistory(data.history);
-            } catch (err) {
-                console.error('Failed to fetch history:', err);
-            } finally {
-                setLoadingHistory(false);
-            }
-        };
-
-        fetchHistory();
-    }, [lab.id, stats.firewall.disabled]);
-
-    const refreshHistory = async () => {
-        try {
-            const data = await getLabHistory(lab.id);
-            setHistory(data.history);
-        } catch (err) {
-            console.error('Failed to refresh history:', err);
-        }
-    };
-
     const handleToggle = async (): Promise<void> => {
         setToggling(true);
 
         try {
-            const willEnable = stats.firewall.disabled;
+            const willEnable = stats.firewall?.disabled;
             await toggleLab(lab.id, willEnable);
             onToggle(lab.id);
-            await refreshHistory();
             notifications.show({
                 title: 'Success',
                 message: `Lab ${lab.name} ${willEnable ? 'enabled' : 'disabled'} successfully`,
@@ -106,7 +79,7 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, onToggle }) => {
         }
     };
 
-    const isDisabled = stats.firewall.disabled;
+    const isDisabled = stats.firewall?.disabled;
     const statusIcon = isDisabled ? (
         <IconNetworkOff size={18} />
     ) : (
@@ -226,13 +199,7 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, onToggle }) => {
                         <Text size='sm' c='dimmed' mb='xs'>
                             Activation Periods
                         </Text>
-                        {loadingHistory ? (
-                            <Center h={120}>
-                                <Text size='xs' c='dimmed'>
-                                    Loading history...
-                                </Text>
-                            </Center>
-                        ) : chartData.length === 0 ? (
+                        {chartData.length === 0 ? (
                             <Center h={120}>
                                 <Text size='xs' c='dimmed'>
                                     No activation history
