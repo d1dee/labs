@@ -5,7 +5,7 @@ import { organization } from './schema';
 
 const createOrganizationSchema = z.object({
     name: z.string().min(1, 'Organization name is required'),
-    contacts: z.string().min(1, 'Contact information is required'),
+    phoneNumber: z.string().min(1, 'Contact phone number is required'),
     email: z.string().email('Invalid email address'),
 });
 
@@ -21,7 +21,7 @@ export async function createOrganization(params: CreateOrganizationInput) {
         .values({
             id,
             name: data.name,
-            contacts: data.contacts,
+            phoneNumber: data.phoneNumber,
             email: data.email,
             createdAt: now,
             updatedAt: now,
@@ -36,7 +36,7 @@ if (import.meta.main) {
     console.log('🏢 Create Organization\n');
 
     const name = prompt('Organization name:');
-    const contacts = prompt('Contact information:');
+    const phoneNumber = prompt('Contact phone number:');
     const email = prompt('Email address:');
 
     console.log('\nCreating organization...');
@@ -44,7 +44,7 @@ if (import.meta.main) {
     try {
         const org = await createOrganization({
             name: name ?? '',
-            contacts: contacts ?? '',
+            phoneNumber: phoneNumber ?? '',
             email: email ?? '',
         });
         if (!org) {
@@ -56,7 +56,7 @@ if (import.meta.main) {
         console.log(`  ID: ${org.id}`);
         console.log(`  Name: ${org.name}`);
         console.log(`  Email: ${org.email}`);
-        console.log(`  Contacts: ${org.contacts}`);
+        console.log(`  Phone: ${org.phoneNumber}`);
     } catch (error) {
         if (error instanceof z.ZodError) {
             console.error('Validation failed:');
