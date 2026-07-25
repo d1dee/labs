@@ -1,3 +1,4 @@
+import { relations } from 'drizzle-orm';
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 // Users table — stores auth users with username support
@@ -181,7 +182,7 @@ export const demoState = sqliteTable(
     ],
 );
 
-// Firewall configuration table — stores MikroTik and labs configuration
+// Firewall configuration table — stores MikroTik connection configuration
 export const firewallConfig = sqliteTable(
     'firewallConfig',
     {
@@ -197,7 +198,6 @@ export const firewallConfig = sqliteTable(
         mikrotikUsername: text('mikrotikUsername').notNull(),
         mikrotikPassword: text('mikrotikPassword').notNull(),
 
-        labs: text('labs').notNull(),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .$defaultFn(() => new Date())
             .notNull(),
@@ -207,3 +207,95 @@ export const firewallConfig = sqliteTable(
     },
     (t) => [index('firewallConfig_organizationId_idx').on(t.organizationId)],
 );
+
+// Pi-hole configuration table — stores per-organization Pi-hole connection config
+export const piholeConfig = sqliteTable(
+    'piholeConfig',
+    {
+        id: text('id')
+            .primaryKey()
+            .$defaultFn(() =>
+                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+            ),
+        organizationId: text('organizationId')
+            .notNull()
+            .references(() => organization.id, { onDelete: 'cascade' }),
+        url: text('url').notNull(),
+        password: text('password').notNull(),
+
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+    },
+    (t) => [index('piholeConfig_organizationId_idx').on(t.organizationId)],
+);
+
+// FOG configuration table — stores per-organization FOG connection config
+export const fogConfig = sqliteTable(
+    'fogConfig',
+    {
+        id: text('id')
+            .primaryKey()
+            .$defaultFn(() =>
+                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+            ),
+        organizationId: text('organizationId')
+            .notNull()
+            .references(() => organization.id, { onDelete: 'cascade' }),
+        url: text('url').notNull(),
+        apiToken: text('apiToken').notNull(),
+        userToken: text('userToken').notNull(),
+
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+    },
+    (t) => [index('fogConfig_organizationId_idx').on(t.organizationId)],
+);
+
+// Labs table — stores individual lab configurations linked to a firewall config
+export const lab = sqliteTable(
+    'lab',
+    {
+        id: text('id')
+            .primaryKey()
+            .$defaultFn(() =>
+                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+            ),
+        firewallConfigId: text('firewallConfigId')
+            .notNull()
+            .references(() => firewallConfig.id, { onDelete: 'cascade' }),
+        name: text('name').notNull(),
+        ruleId: text('ruleId'),
+        dhcpServer: text('dhcpServer'),
+        subnet: text('subnet'),
+        description: text('description'),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .notNull()
+            .$defaultFn(() => new Date()),
+    },
+    (t) => [index('lab_firewallConfigId_idx').on(t.firewallConfigId)],
+);
+
+export const firewallConfigRelations = relations(
+    firewallConfig,
+    ({ many }) => ({
+        labs: many(lab),
+    }),
+);
+
+export const labRelations = relations(lab, ({ one }) => ({
+    firewallConfig: one(firewallConfig, {
+        fields: [lab.firewallConfigId],
+        references: [firewallConfig.id],
+    }),
+}));
