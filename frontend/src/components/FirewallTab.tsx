@@ -148,15 +148,17 @@ const FirewallTab: FC = () => {
                     </SimpleGrid>
 
                     <Grid grow>
-                        {labs.map((lab) => (
-                            <LabCard
-                                key={lab.id}
-                                lab={lab}
-                                stats={labStats[lab.id]}
-                                history={labHistory[lab.id]}
-                                onToggle={handleToggle}
-                            />
-                        ))}
+                        {labs
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map((lab) => (
+                                <LabCard
+                                    key={lab.id}
+                                    lab={lab}
+                                    stats={labStats[lab.id]}
+                                    history={labHistory[lab.id]}
+                                    onToggle={handleToggle}
+                                />
+                            ))}
                     </Grid>
                 </>
             )}
