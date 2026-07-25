@@ -236,3 +236,80 @@ export async function setPiholeBlocking(
         'Failed to set Pi-hole blocking status',
     );
 }
+
+// ===================== DNS settings =====================
+
+export type PiholeDnsElement = 'upstreams' | 'hosts' | 'cnameRecords';
+
+export interface PiholeDnsList {
+    element: PiholeDnsElement;
+    items: string[];
+}
+
+export async function getPiholeDnsList(
+    element: PiholeDnsElement,
+): Promise<PiholeDnsList> {
+    return throwOnError(
+        await $fetch<PiholeDnsList>(`/api/pihole/dns/${element}`, {
+            method: 'GET',
+        }),
+        'Failed to fetch Pi-hole DNS list',
+    );
+}
+
+export async function addPiholeDnsItem(
+    element: PiholeDnsElement,
+    value: string,
+): Promise<{ success: boolean }> {
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/pihole/dns/${element}`, {
+            method: 'POST',
+            body: { value },
+        }),
+        'Failed to add Pi-hole DNS entry',
+    );
+}
+
+export async function deletePiholeDnsItem(
+    element: PiholeDnsElement,
+    value: string,
+): Promise<{ success: boolean }> {
+    return throwOnError(
+        await $fetch<{ success: boolean }>(`/api/pihole/dns/${element}`, {
+            method: 'DELETE',
+            body: { value },
+        }),
+        'Failed to delete Pi-hole DNS entry',
+    );
+}
+
+// ===================== Pi-hole connection settings =====================
+
+export interface PiholeSettingsConfig {
+    configured: boolean;
+    url: string;
+    /** Masked when read from the server. */
+    password: string;
+}
+
+export async function getPiholeSettings(): Promise<PiholeSettingsConfig> {
+    return throwOnError(
+        await $fetch<PiholeSettingsConfig>('/api/settings/pihole', {
+            method: 'GET',
+        }),
+        'Failed to fetch Pi-hole settings',
+    );
+}
+
+export async function savePiholeSettings(
+    url: string,
+    password: string,
+): Promise<PiholeSettingsConfig> {
+    return throwOnError(
+        await $fetch<PiholeSettingsConfig>('/api/settings/pihole', {
+            method: 'POST',
+            body: { url, password },
+        }),
+        'Failed to save Pi-hole settings',
+    );
+}

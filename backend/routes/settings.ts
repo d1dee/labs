@@ -1,12 +1,13 @@
 import { eq } from 'drizzle-orm';
 import z from 'zod';
 import { db } from '../../db/database';
-import { firewallConfig, lab, piholeConfig } from '../../db/schema';
+import { firewallConfig, fogConfig, lab, piholeConfig } from '../../db/schema';
 import {
     getFirewallConfigByIdWithLabs,
     getFirewallConfigWithLabs,
     mapLabs,
 } from '../firewall-config';
+import { getFogConfigForOrg, testFogConnection } from '../fog';
 import { testMikrotikConnection } from '../mikrotik';
 import {
     getPiholeConfigForOrg,
@@ -329,6 +330,134 @@ settingsRouter.post('/settings/pihole', async (c) => {
         });
     } catch (error) {
         console.error('Failed to save Pi-hole settings:', error);
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+// ===================== FOG settings =====================
+
+settingsRouter.get('/settings/fog', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    if (!user.organizationId) {
+        return c.json(
+            {
+                error: 'You must join an organization first',
+                code: 'ORG_MISSING',
+            },
+            403,
+        );
+    }
+
+    try {
+        const stored = await getFogConfigForOrg(user.organizationId);
+
+        if (!stored) {
+            return c.json({
+                configured: false,
+                url: '',
+                apiToken: '',
+                userToken: '',
+            });
+        }
+
+        return c.json({
+            configured: true,
+            url: stored.url,
+            // Mask tokens so secrets are never exposed to the client
+            apiToken: new Array(stored.apiToken.length).fill('*').join(''),
+            userToken: new Array(stored.userToken.length).fill('*').join(''),
+        });
+    } catch (error) {
+        console.error('Failed to load FOG settings:', error);
+        return c.json({ error: String(error) }, 500);
+    }
+});
+
+settingsRouter.post('/settings/fog', async (c) => {
+    const user = c.get('user');
+    if (!user) {
+        return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    if (!user.organizationId) {
+        return c.json(
+            {
+                error: 'You must join an organization first',
+                code: 'ORG_MISSING',
+            },
+            403,
+        );
+    }
+
+    try {
+        const schema = z.object({
+            id: z.string().length(12).optional(),
+            url: z.url(),
+            apiToken: z.string().min(1),
+            userToken: z.string().min(1),
+        });
+
+        const body = schema.parse(await c.req.json());
+
+        // Verify connection to FOG with the provided credentials before saving
+        const connectionTest = await testFogConnection({
+            url: body.url,
+            apiToken: body.apiToken,
+            userToken: body.userToken,
+        });
+
+        if (!connectionTest.success) {
+            return c.json(
+                {
+                    message: `Failed to connect to FOG: ${connectionTest.error}`,
+                    code: 'CONNECTION_FAILED',
+                },
+                400,
+            );
+        }
+
+        const existing = await getFogConfigForOrg(user.organizationId);
+
+        await db
+            .insert(fogConfig)
+            .values({
+                id: body.id ?? existing?.id,
+                organizationId: user.organizationId,
+                url: body.url,
+                apiToken: body.apiToken,
+                userToken: body.userToken,
+                updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+                target: fogConfig.id,
+                set: {
+                    url: body.url,
+                    apiToken: body.apiToken,
+                    userToken: body.userToken,
+                    updatedAt: new Date(),
+                },
+            });
+
+        return c.json({
+            success: true,
+            message: 'FOG configuration saved successfully!',
+            data: {
+                configured: true,
+                url: body.url,
+                apiToken: new Array(body.apiToken.length)
+                    .fill('*')
+                    .join(''),
+                userToken: new Array(body.userToken.length)
+                    .fill('*')
+                    .join(''),
+            },
+        });
+    } catch (error) {
+        console.error('Failed to save FOG settings:', error);
         return c.json({ error: String(error) }, 500);
     }
 });
