@@ -290,6 +290,39 @@ export async function getFogStatus(): Promise<{
     );
 }
 
+// ===================== FOG connection settings =====================
+
+export interface FogSettingsConfig {
+    configured: boolean;
+    url: string;
+    /** Masked when read from the server. */
+    apiToken: string;
+    userToken: string;
+}
+
+export async function getFogSettings(): Promise<FogSettingsConfig> {
+    return throwOnError(
+        await $fetch<FogSettingsConfig>('/api/settings/fog', {
+            method: 'GET',
+        }),
+        'Failed to fetch FOG settings',
+    );
+}
+
+export async function saveFogSettings(
+    url: string,
+    apiToken: string,
+    userToken: string,
+): Promise<FogSettingsConfig> {
+    return throwOnError(
+        await $fetch<FogSettingsConfig>('/api/settings/fog', {
+            method: 'POST',
+            body: { url, apiToken, userToken },
+        }),
+        'Failed to save FOG settings',
+    );
+}
+
 export async function getFogSystemInfo(): Promise<unknown> {
     return throwOnError(
         await $fetch<unknown>('/api/fog/system-info', { method: 'GET' }),

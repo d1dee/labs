@@ -1,41 +1,15 @@
+import { eq } from 'drizzle-orm';
+import { db } from '../db/database';
+import { fogConfig } from '../db/schema';
 import type { FogHost, ListFogHosts } from '../frontend/src/api';
 
-const FOG_URL = process.env.FOG_URL?.replace(/\/$/, '') || '';
-const FOG_API_TOKEN = process.env.FOG_API_TOKEN || '';
-const FOG_USER_TOKEN = process.env.FOG_USER_TOKEN || '';
-
-function fogUrl(path: string): string {
-    return `${FOG_URL}${path}`;
-}
-
-export function isFogConfigured(): boolean {
-    return Boolean(FOG_URL && FOG_API_TOKEN && FOG_USER_TOKEN);
-}
-
-async function fogRequest(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
-    path: string,
-    body?: Record<string, unknown>,
-): Promise<Response> {
-    if (!isFogConfigured()) {
-        throw new Error('FOG not configured');
-    }
-
-    const headers: Record<string, string> = {
-        'fog-api-token': FOG_API_TOKEN,
-        'fog-user-token': FOG_USER_TOKEN,
-        'Content-Type': 'application/json',
-    };
-
-    const opts: RequestInit = { method, headers };
-    if (body && (method === 'POST' || method === 'PUT')) {
-        opts.body = JSON.stringify(body);
-    }
-
-    return fetch(fogUrl(path), opts);
-}
-
 // ===================== Types =====================
+
+export interface FogCredentials {
+    url: string;
+    apiToken: string;
+    userToken: string;
+}
 
 export interface FogImage {
     id: number;
@@ -71,525 +45,497 @@ export interface FogTaskResult {
     [key: string]: unknown;
 }
 
-// ===================== API Functions =====================
-
-export async function getFogSystemInfo(): Promise<{
+type FogResult<T> = {
     success: boolean;
-    data?: unknown;
+    data?: T;
     error?: string;
-}> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('GET', '/fog/system/info');
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = await res.json();
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
+};
 
-export async function listFogHosts(
-    searchTerm?: string,
-): Promise<{ success: boolean; data?: ListFogHosts; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const path = searchTerm?.trim()
-            ? `/fog/host/search/${encodeURIComponent(searchTerm.trim())}`
-            : '/fog/host';
-        const res = await fogRequest('GET', path);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as ListFogHosts;
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
+// ===================== Client =====================
 
-export async function getFogHost(
-    id: number,
-): Promise<{ success: boolean; data?: FogHost; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('GET', `/fog/host/${id}`);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as FogHost;
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
+/**
+ * FOG API client bound to specific credentials. Token-auth based (no
+ * sessions), so no auth caching is needed unlike Pi-hole.
+ */
+export class FogClient {
+    private url: string;
+    private apiToken: string;
+    private userToken: string;
 
-export async function getFogTask(
-    taskId: number,
-): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
+    constructor(creds: FogCredentials) {
+        this.url = creds.url.replace(/\/$/, '');
+        this.apiToken = creds.apiToken;
+        this.userToken = creds.userToken;
     }
-    try {
-        const res = await fogRequest('GET', `/fog/task/${taskId}`);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as Record<string, unknown>;
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
 
-export async function createFogHost(
-    hostData: Record<string, unknown>,
-): Promise<{ success: boolean; data?: FogHost; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
+    get configured(): boolean {
+        return Boolean(this.url && this.apiToken && this.userToken);
     }
-    try {
-        const res = await fogRequest('POST', '/fog/host/create', hostData);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as FogHost;
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
 
-export async function updateFogHost(
-    id: number,
-    updates: Record<string, unknown>,
-): Promise<{ success: boolean; data?: FogHost; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
+    private fogUrl(path: string): string {
+        return `${this.url}${path}`;
     }
-    try {
-        const res = await fogRequest('PUT', `/fog/host/${id}/edit`, updates);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as FogHost;
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
 
-export async function deleteFogHost(
-    id: number,
-): Promise<{ success: boolean; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('DELETE', `/fog/host/${id}/delete`);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    private async fogRequest(
+        method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+        path: string,
+        body?: Record<string, unknown>,
+    ): Promise<Response> {
+        if (!this.configured) {
+            throw new Error('FOG not configured');
         }
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
 
-export async function listFogImages(): Promise<{
-    success: boolean;
-    data?: { count: number; images: FogImage[] };
-    error?: string;
-}> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('GET', '/fog/image');
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
-        }
-        const data = (await res.json()) as {
-            count: number;
-            images: FogImage[];
+        const headers: Record<string, string> = {
+            'fog-api-token': this.apiToken,
+            'fog-user-token': this.userToken,
+            'Content-Type': 'application/json',
         };
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
-}
 
-export async function listFogTaskTypes(): Promise<{
-    success: boolean;
-    data?: { count: number; tasktypes: FogTaskType[] };
-    error?: string;
-}> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
+        const opts: RequestInit = { method, headers };
+        if (body && (method === 'POST' || method === 'PUT')) {
+            opts.body = JSON.stringify(body);
+        }
+
+        return fetch(this.fogUrl(path), opts);
     }
-    try {
-        const res = await fogRequest('GET', '/fog/tasktype');
-        if (!res.ok) {
+
+    /** Safely extract an error message from a non-OK FOG response. */
+    private async errorFrom(res: Response): Promise<string> {
+        try {
             const json = (await res.json()) as {
                 error?: string;
                 message?: string;
             };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+            return json.error || json.message || `HTTP ${res.status}`;
+        } catch {
+            return `HTTP ${res.status}`;
         }
-        const data = (await res.json()) as {
-            count: number;
-            tasktypes: FogTaskType[];
-        };
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function listFogSnapins(): Promise<{
-    success: boolean;
-    data?: { count: number; snapins: FogSnapin[] };
-    error?: string;
-}> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('GET', '/fog/snapin');
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    // ---------- System / connection ----------
+
+    async getSystemInfo(): Promise<FogResult<unknown>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', '/fog/system/info');
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = await res.json();
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        const data = (await res.json()) as {
-            count: number;
-            snapins: FogSnapin[];
-        };
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function createFogSnapinTask(
-    hostId: number,
-    snapinId: number,
-    options?: Record<string, unknown>,
-): Promise<{ success: boolean; data?: FogTaskResult; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        // Single Snapin task type is 13 - based on actual API response
-        // Reference: https://github.com/FOGProject/fogproject/blob/620b8cee/packages/web/lib/fog/tasktype.class.php
-        const res = await fogRequest('POST', `/fog/host/${hostId}/task`, {
-            taskTypeID: 13, // Single Snapin task type
-            snapinID: snapinId,
-            ...options,
-        });
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    // ---------- Hosts ----------
+
+    async listHosts(
+        searchTerm?: string,
+    ): Promise<FogResult<ListFogHosts>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const path = searchTerm?.trim()
+                ? `/fog/host/search/${encodeURIComponent(searchTerm.trim())}`
+                : '/fog/host';
+            const res = await this.fogRequest('GET', path);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as ListFogHosts;
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        // FOG returns null on successful task creation
-        const data = (await res.json()) as FogTaskResult | null;
-        return { success: true, data: data ?? {} };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function createFogTask(
-    hostId: number,
-    taskTypeId: number,
-    options?: Record<string, unknown>,
-): Promise<{ success: boolean; data?: FogTaskResult; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        // FOG API expects taskTypeID (camelCase) - integer type
-        // Returns null on success: https://docs.fogproject.org/en/latest/kb/integrations/api/
-        const res = await fogRequest('POST', `/fog/host/${hostId}/task`, {
-            taskTypeID: taskTypeId,
-            ...options,
-        });
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    async getHost(id: number): Promise<FogResult<FogHost>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', `/fog/host/${id}`);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as FogHost;
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        // FOG returns null on successful task creation
-        const data = (await res.json()) as FogTaskResult | null;
-        return { success: true, data: data ?? {} };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function listActiveTasks(): Promise<{
-    success: boolean;
-    data?: { count: number; tasks: unknown[] };
-    error?: string;
-}> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('GET', '/fog/task/active');
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    async createHost(
+        hostData: Record<string, unknown>,
+    ): Promise<FogResult<FogHost>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('POST', '/fog/host/create', hostData);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as FogHost;
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        const data = (await res.json()) as {
-            count: number;
-            tasks: unknown[];
-        };
-        return { success: true, data };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function cancelFogTask(
-    taskId: number,
-): Promise<{ success: boolean; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('DELETE', `/fog/task/${taskId}/cancel`);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    async updateHost(
+        id: number,
+        updates: Record<string, unknown>,
+    ): Promise<FogResult<FogHost>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('PUT', `/fog/host/${id}/edit`, updates);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as FogHost;
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function forceFogTask(
-    taskId: number,
-): Promise<{ success: boolean; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('PUT', `/fog/task/${taskId}/update`, {
-            isForced: 1,
-        });
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+    async deleteHost(id: number): Promise<FogResult<unknown>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('DELETE', `/fog/host/${id}/delete`);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function updateFogTask(
-    taskId: number,
-    updates: Record<string, unknown>,
-): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
-    }
-    try {
-        const res = await fogRequest('PUT', `/fog/task/${taskId}/update`, updates);
-        if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
+    // ---------- Images / Snapins / Task types ----------
+
+    async listImages(): Promise<
+        FogResult<{ count: number; images: FogImage[] }>
+    > {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', '/fog/image');
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as {
+                count: number;
+                images: FogImage[];
             };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        const data = (await res.json()) as Record<string, unknown> | null;
-        return { success: true, data: data ?? {} };
-    } catch (err) {
-        return { success: false, error: String(err) };
     }
-}
 
-export async function restartFogTask(
-    taskId: number,
-    hostId?: number,
-    taskTypeId?: number,
-): Promise<{ success: boolean; error?: string }> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
+    async listTaskTypes(): Promise<
+        FogResult<{ count: number; tasktypes: FogTaskType[] }>
+    > {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', '/fog/tasktype');
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as {
+                count: number;
+                tasktypes: FogTaskType[];
+            };
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
     }
-    try {
-        let actualHostId = hostId;
-        let actualTaskTypeId = taskTypeId;
-        if (!actualHostId || !actualTaskTypeId) {
-            const taskResult = await getFogTask(taskId);
-            if (!taskResult.success || !taskResult.data) {
-                return { success: false, error: taskResult.error || 'Failed to get task details' };
+
+    async listSnapins(): Promise<
+        FogResult<{ count: number; snapins: FogSnapin[] }>
+    > {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', '/fog/snapin');
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as {
+                count: number;
+                snapins: FogSnapin[];
+            };
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    // ---------- Tasks ----------
+
+    async getTask(
+        taskId: number,
+    ): Promise<FogResult<Record<string, unknown>>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', `/fog/task/${taskId}`);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as Record<string, unknown>;
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async createSnapinTask(
+        hostId: number,
+        snapinId: number,
+        options?: Record<string, unknown>,
+    ): Promise<FogResult<FogTaskResult>> {
+        if (!this.configured) return unconfigured();
+        try {
+            // Single Snapin task type is 13 - based on actual API response
+            const res = await this.fogRequest('POST', `/fog/host/${hostId}/task`, {
+                taskTypeID: 13, // Single Snapin task type
+                snapinID: snapinId,
+                ...options,
+            });
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            // FOG returns null on successful task creation
+            const data = (await res.json()) as FogTaskResult | null;
+            return { success: true, data: data ?? {} };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async createTask(
+        hostId: number,
+        taskTypeId: number,
+        options?: Record<string, unknown>,
+    ): Promise<FogResult<FogTaskResult>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('POST', `/fog/host/${hostId}/task`, {
+                taskTypeID: taskTypeId,
+                ...options,
+            });
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            // FOG returns null on successful task creation
+            const data = (await res.json()) as FogTaskResult | null;
+            return { success: true, data: data ?? {} };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async listActiveTasks(): Promise<
+        FogResult<{ count: number; tasks: unknown[] }>
+    > {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', '/fog/task/active');
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as {
+                count: number;
+                tasks: unknown[];
+            };
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async cancelTask(taskId: number): Promise<FogResult<unknown>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('DELETE', `/fog/task/${taskId}/cancel`);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async forceTask(taskId: number): Promise<FogResult<unknown>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('PUT', `/fog/task/${taskId}/update`, {
+                isForced: 1,
+            });
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async updateTask(
+        taskId: number,
+        updates: Record<string, unknown>,
+    ): Promise<FogResult<Record<string, unknown>>> {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('PUT', `/fog/task/${taskId}/update`, updates);
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as Record<string, unknown> | null;
+            return { success: true, data: data ?? {} };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
+    }
+
+    async restartTask(
+        taskId: number,
+        hostId?: number,
+        taskTypeId?: number,
+    ): Promise<FogResult<unknown>> {
+        if (!this.configured) return unconfigured();
+        try {
+            let actualHostId = hostId;
+            let actualTaskTypeId = taskTypeId;
+            if (!actualHostId || !actualTaskTypeId) {
+                const taskResult = await this.getTask(taskId);
+                if (!taskResult.success || !taskResult.data) {
+                    return { success: false, error: taskResult.error || 'Failed to get task details' };
+                }
+                const task = taskResult.data as { hostID?: number; typeID?: number };
+                actualHostId = task.hostID;
+                actualTaskTypeId = task.typeID;
             }
-            const task = taskResult.data as { hostID?: number; typeID?: number };
-            actualHostId = task.hostID;
-            actualTaskTypeId = task.typeID;
-        }
-        if (!actualHostId || !actualTaskTypeId) {
-            return { success: false, error: 'Missing host ID or task type ID' };
-        }
-        // 1. Cancel existing task
-        const cancelResult = await cancelFogTask(taskId);
-        if (!cancelResult.success) {
-            return { success: false, error: cancelResult.error || 'Failed to cancel task' };
-        }
-        // 2. Create new task on same host with same type
-        const createResult = await createFogTask(actualHostId, actualTaskTypeId);
-        if (!createResult.success) {
-            return { success: false, error: createResult.error || 'Failed to create new task' };
-        }
-        // 3. Find and force the newly created task
-        const activeResult = await listActiveTasks();
-        if (!activeResult.success || !activeResult.data) {
-            return { success: false, error: activeResult.error || 'Failed to list active tasks' };
-        }
-        const tasks = activeResult.data.tasks as Array<{
-            id: number;
-            hostID?: number;
-            typeID?: number;
-            stateID?: number;
-        }>;
-        const newTask = tasks
-            .filter(
-                (t) =>
-                    t.hostID === actualHostId &&
-                    t.typeID === actualTaskTypeId &&
-                    (t.stateID === 1 || t.stateID === 2),
-            )
-            .sort((a, b) => b.id - a.id)[0];
-        if (newTask) {
-            const forceResult = await forceFogTask(newTask.id);
-            if (!forceResult.success) {
-                return { success: false, error: forceResult.error || 'Failed to force new task' };
+            if (!actualHostId || !actualTaskTypeId) {
+                return { success: false, error: 'Missing host ID or task type ID' };
             }
+            // 1. Cancel existing task
+            const cancelResult = await this.cancelTask(taskId);
+            if (!cancelResult.success) {
+                return { success: false, error: cancelResult.error || 'Failed to cancel task' };
+            }
+            // 2. Create new task on same host with same type
+            const createResult = await this.createTask(actualHostId, actualTaskTypeId);
+            if (!createResult.success) {
+                return { success: false, error: createResult.error || 'Failed to create new task' };
+            }
+            // 3. Find and force the newly created task
+            const activeResult = await this.listActiveTasks();
+            if (!activeResult.success || !activeResult.data) {
+                return { success: false, error: activeResult.error || 'Failed to list active tasks' };
+            }
+            const tasks = activeResult.data.tasks as Array<{
+                id: number;
+                hostID?: number;
+                typeID?: number;
+                stateID?: number;
+            }>;
+            const newTask = tasks
+                .filter(
+                    (t) =>
+                        t.hostID === actualHostId &&
+                        t.typeID === actualTaskTypeId &&
+                        (t.stateID === 1 || t.stateID === 2),
+                )
+                .sort((a, b) => b.id - a.id)[0];
+            if (newTask) {
+                const forceResult = await this.forceTask(newTask.id);
+                if (!forceResult.success) {
+                    return { success: false, error: forceResult.error || 'Failed to force new task' };
+                }
+            }
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: String(err) };
         }
-        return { success: true };
-    } catch (err) {
-        return { success: false, error: String(err) };
+    }
+
+    async listActiveMulticastSessions(): Promise<
+        FogResult<{ count: number; multicastsessions: unknown[] }>
+    > {
+        if (!this.configured) return unconfigured();
+        try {
+            const res = await this.fogRequest('GET', '/fog/multicastsession/current');
+            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const data = (await res.json()) as {
+                count: number;
+                multicastsessions: unknown[];
+            };
+            return { success: true, data };
+        } catch (err) {
+            return { success: false, error: String(err) };
+        }
     }
 }
 
-export async function listActiveMulticastSessions(): Promise<{
-    success: boolean;
-    data?: { count: number; multicastsessions: unknown[] };
-    error?: string;
-}> {
-    if (!isFogConfigured()) {
-        return { success: false, error: 'FOG not configured' };
+// ===================== Helpers =====================
+
+function unconfigured<T>(): FogResult<T> {
+    return { success: false, error: 'FOG not configured' };
+}
+
+// ===================== Credential resolution =====================
+
+/**
+ * Resolve FOG credentials for an organization.
+ */
+export async function getFogCredentials(
+    organizationId: string,
+): Promise<FogCredentials | undefined> {
+    const row = await db.query.fogConfig.findFirst({
+        where: eq(fogConfig.organizationId, organizationId),
+    });
+    if (row && row.url && row.apiToken && row.userToken) {
+        return {
+            url: row.url,
+            apiToken: row.apiToken,
+            userToken: row.userToken,
+        };
+    }
+    return undefined;
+}
+
+// Cache clients by URL so connections are reused across requests. The cached
+// tokens are compared to detect credential rotation.
+const clientCache = new Map<
+    string,
+    { tokens: string; client: FogClient }
+>();
+
+/**
+ * Get a (cached) FOG client bound to the resolved credentials for the
+ * given organization. Returns an unconfigured client when no credentials
+ * are available; its methods will short-circuit with an error.
+ */
+export async function getFogClient(organizationId: string): Promise<FogClient> {
+    const creds = await getFogCredentials(organizationId);
+
+    if (!creds) return new FogClient({ url: '', apiToken: '', userToken: '' });
+
+    const tokensKey = `${creds.apiToken}|${creds.userToken}`;
+    const cached = clientCache.get(creds.url);
+    if (cached && cached.tokens === tokensKey) {
+        return cached.client;
+    }
+
+    const client = new FogClient(creds);
+    clientCache.set(creds.url, { tokens: tokensKey, client });
+    return client;
+}
+
+export async function isFogConfigured(
+    organizationId: string,
+): Promise<boolean> {
+    const creds = await getFogCredentials(organizationId);
+    return Boolean(creds);
+}
+
+/**
+ * Read the stored per-organization FOG configuration (raw, unmasked).
+ * Returns null when no DB row exists.
+ */
+export async function getFogConfigForOrg(organizationId: string) {
+    return db.query.fogConfig.findFirst({
+        where: eq(fogConfig.organizationId, organizationId),
+    });
+}
+
+/**
+ * Test a FOG connection by calling the system info endpoint. Used by the
+ * settings save flow to validate credentials before persisting.
+ */
+export async function testFogConnection(
+    creds: FogCredentials,
+): Promise<{ success: boolean; error?: string }> {
+    const url = creds.url.replace(/\/$/, '');
+    if (!url || !creds.apiToken || !creds.userToken) {
+        return { success: false, error: 'URL, API token, and user token are required' };
     }
     try {
-        const res = await fogRequest('GET', '/fog/multicastsession/current');
+        const res = await fetch(`${url}/fog/system/info`, {
+            method: 'GET',
+            headers: {
+                'fog-api-token': creds.apiToken,
+                'fog-user-token': creds.userToken,
+                'Content-Type': 'application/json',
+            },
+        });
         if (!res.ok) {
             const json = (await res.json()) as {
                 error?: string;
@@ -600,11 +546,7 @@ export async function listActiveMulticastSessions(): Promise<{
                 error: json.error || json.message || `HTTP ${res.status}`,
             };
         }
-        const data = (await res.json()) as {
-            count: number;
-            multicastsessions: unknown[];
-        };
-        return { success: true, data };
+        return { success: true };
     } catch (err) {
         return { success: false, error: String(err) };
     }

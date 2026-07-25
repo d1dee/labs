@@ -1,4 +1,3 @@
-import process from 'process';
 import {
     applyDemoFogHosts,
     applyDemoFogHost,
@@ -9,25 +8,7 @@ import {
     isDemoUser,
     updateDemoFogHost,
 } from '../demo';
-import {
-    cancelFogTask,
-    createFogHost,
-    createFogSnapinTask,
-    createFogTask,
-    deleteFogHost,
-    forceFogTask,
-    getFogHost,
-    getFogSystemInfo,
-    isFogConfigured,
-    listActiveMulticastSessions,
-    listActiveTasks,
-    listFogHosts,
-    listFogImages,
-    listFogSnapins,
-    listFogTaskTypes,
-    restartFogTask,
-    updateFogHost,
-} from '../fog';
+import { getFogClient, getFogCredentials } from '../fog';
 import { createApp } from './context';
 
 export const fogRouter = createApp();
@@ -38,9 +19,14 @@ fogRouter.get('/fog/status', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const creds = await getFogCredentials(user.organizationId);
     return c.json({
-        configured: isFogConfigured(),
-        url: process.env.FOG_URL || null,
+        configured: Boolean(creds?.url && creds?.apiToken && creds?.userToken),
+        url: creds?.url || null,
     });
 });
 
@@ -50,7 +36,12 @@ fogRouter.get('/fog/system-info', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const result = await getFogSystemInfo();
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const client = await getFogClient(user.organizationId);
+    const result = await client.getSystemInfo();
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -63,8 +54,13 @@ fogRouter.get('/fog/hosts', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const search = c.req.query('search');
-    const result = await listFogHosts(search || undefined);
+    const client = await getFogClient(user.organizationId);
+    const result = await client.listHosts(search || undefined);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -84,21 +80,27 @@ fogRouter.get('/fog/hosts/:id', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const id = parseInt(c.req.param('id'), 10);
     if (isNaN(id)) {
         return c.json({ error: 'Invalid host ID' }, 400);
     }
 
+    const client = await getFogClient(user.organizationId);
+
     // Demo mode: check for demo-created host first
     if (isDemoUser(user)) {
         const overrides = await getDemoFogHostOverrides(user.id);
-        const demoCreation = overrides.creations.find((c) => c.id === id);
+        const demoCreation = overrides.creations.find((o) => o.id === id);
         if (demoCreation) {
             return c.json(demoCreation);
         }
     }
 
-    const result = await getFogHost(id);
+    const result = await client.getHost(id);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -119,8 +121,13 @@ fogRouter.post('/fog/hosts', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     try {
         const body = await c.req.json<Record<string, unknown>>();
+        const client = await getFogClient(user.organizationId);
 
         // Demo mode: persist host creation in demo state
         if (isDemoUser(user)) {
@@ -135,7 +142,7 @@ fogRouter.post('/fog/hosts', async (c) => {
             });
         }
 
-        const result = await createFogHost(body);
+        const result = await client.createHost(body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }
@@ -151,6 +158,10 @@ fogRouter.put('/fog/hosts/:id', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const id = parseInt(c.req.param('id'), 10);
     if (isNaN(id)) {
         return c.json({ error: 'Invalid host ID' }, 400);
@@ -158,12 +169,13 @@ fogRouter.put('/fog/hosts/:id', async (c) => {
 
     try {
         const body = await c.req.json<Record<string, unknown>>();
+        const client = await getFogClient(user.organizationId);
 
         // Demo mode: persist host update in demo state
         if (isDemoUser(user)) {
             await updateDemoFogHost(user.id, id, body);
             // Return updated host by merging with real data if available
-            const result = await getFogHost(id);
+            const result = await client.getHost(id);
             if (result.success && result.data) {
                 const overrides = await getDemoFogHostOverrides(user.id);
                 return c.json(applyDemoFogHost(result.data, overrides, id));
@@ -171,7 +183,7 @@ fogRouter.put('/fog/hosts/:id', async (c) => {
             return c.json({ id, ...body });
         }
 
-        const result = await updateFogHost(id, body);
+        const result = await client.updateHost(id, body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }
@@ -187,10 +199,16 @@ fogRouter.delete('/fog/hosts/:id', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const id = parseInt(c.req.param('id'), 10);
     if (isNaN(id)) {
         return c.json({ error: 'Invalid host ID' }, 400);
     }
+
+    const client = await getFogClient(user.organizationId);
 
     // Demo mode: persist host deletion in demo state
     if (isDemoUser(user)) {
@@ -198,7 +216,7 @@ fogRouter.delete('/fog/hosts/:id', async (c) => {
         return c.json({ success: true });
     }
 
-    const result = await deleteFogHost(id);
+    const result = await client.deleteHost(id);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -211,7 +229,12 @@ fogRouter.get('/fog/images', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const result = await listFogImages();
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const client = await getFogClient(user.organizationId);
+    const result = await client.listImages();
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -224,7 +247,12 @@ fogRouter.get('/fog/tasktypes', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const result = await listFogTaskTypes();
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const client = await getFogClient(user.organizationId);
+    const result = await client.listTaskTypes();
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -237,7 +265,12 @@ fogRouter.get('/fog/snapins', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const result = await listFogSnapins();
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const client = await getFogClient(user.organizationId);
+    const result = await client.listSnapins();
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -250,7 +283,12 @@ fogRouter.get('/fog/tasks/active', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const result = await listActiveTasks();
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const client = await getFogClient(user.organizationId);
+    const result = await client.listActiveTasks();
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -263,7 +301,12 @@ fogRouter.get('/fog/multicastsessions/current', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
-    const result = await listActiveMulticastSessions();
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const client = await getFogClient(user.organizationId);
+    const result = await client.listActiveMulticastSessions();
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -276,6 +319,10 @@ fogRouter.post('/fog/hosts/:id/task', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const hostId = parseInt(c.req.param('id'), 10);
     if (isNaN(hostId)) {
         return c.json({ error: 'Invalid host ID' }, 400);
@@ -286,6 +333,7 @@ fogRouter.post('/fog/hosts/:id/task', async (c) => {
             taskType: string;
             [key: string]: unknown;
         }>();
+        const client = await getFogClient(user.organizationId);
 
         // Demo mode: return success without creating real task
         if (isDemoUser(user)) {
@@ -293,7 +341,7 @@ fogRouter.post('/fog/hosts/:id/task', async (c) => {
         }
 
         const { taskType, ...options } = body;
-        const result = await createFogTask(
+        const result = await client.createTask(
             hostId,
             parseInt(body.taskType, 10),
             options,
@@ -313,6 +361,10 @@ fogRouter.post('/fog/tasks/:id/cancel', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const taskId = parseInt(c.req.param('id'), 10);
     if (isNaN(taskId)) {
         return c.json({ error: 'Invalid task ID' }, 400);
@@ -322,7 +374,8 @@ fogRouter.post('/fog/tasks/:id/cancel', async (c) => {
         return c.json({ success: true });
     }
 
-    const result = await cancelFogTask(taskId);
+    const client = await getFogClient(user.organizationId);
+    const result = await client.cancelTask(taskId);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -335,6 +388,10 @@ fogRouter.post('/fog/tasks/:id/force', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const taskId = parseInt(c.req.param('id'), 10);
     if (isNaN(taskId)) {
         return c.json({ error: 'Invalid task ID' }, 400);
@@ -344,7 +401,8 @@ fogRouter.post('/fog/tasks/:id/force', async (c) => {
         return c.json({ success: true });
     }
 
-    const result = await forceFogTask(taskId);
+    const client = await getFogClient(user.organizationId);
+    const result = await client.forceTask(taskId);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }
@@ -355,6 +413,10 @@ fogRouter.post('/fog/tasks/:id/restart', async (c) => {
     const user = c.get('user');
     if (!user) {
         return c.json({ error: 'Not authenticated' }, 401);
+    }
+
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
     }
 
     const taskId = parseInt(c.req.param('id'), 10);
@@ -371,7 +433,8 @@ fogRouter.post('/fog/tasks/:id/restart', async (c) => {
             hostId?: number;
             taskTypeId?: number;
         }>();
-        const result = await restartFogTask(
+        const client = await getFogClient(user.organizationId);
+        const result = await client.restartTask(
             taskId,
             body.hostId,
             body.taskTypeId,
@@ -391,6 +454,10 @@ fogRouter.post('/fog/hosts/:id/snapin-task', async (c) => {
         return c.json({ error: 'Not authenticated' }, 401);
     }
 
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
     const hostId = parseInt(c.req.param('id'), 10);
     if (isNaN(hostId)) {
         return c.json({ error: 'Invalid host ID' }, 400);
@@ -401,13 +468,14 @@ fogRouter.post('/fog/hosts/:id/snapin-task', async (c) => {
             snapinID: number;
             [key: string]: unknown;
         }>();
+        const client = await getFogClient(user.organizationId);
 
         // Demo mode: return success without creating real snapin task
         if (isDemoUser(user)) {
             return c.json({ success: true, id: 0, name: 'Demo Snapin Task' });
         }
 
-        const result = await createFogSnapinTask(hostId, body.snapinID, body);
+        const result = await client.createSnapinTask(hostId, body.snapinID, body);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }
