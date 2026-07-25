@@ -1,4 +1,6 @@
+import { FogConnectionSettings } from '@/components/settings/FogConnectionSettings';
 import { OrganizationSettings } from '@/components/settings/OrganizationSettings';
+import { PiholeSettings } from '@/components/settings/PiholeSettings';
 import { useSessionContext } from '@/context/SessionContext';
 import { Modal, Stack, Tabs, Text, Title } from '@mantine/core';
 import { FC } from 'react';
@@ -34,14 +36,20 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
                         <Tabs.Tab value='firewall' disabled={!organization}>
                             Firewall
                         </Tabs.Tab>
+                        <Tabs.Tab value='pihole'>DNS</Tabs.Tab>
+                        <Tabs.Tab value='fog'>FOG</Tabs.Tab>
                     </Tabs.List>
-
                     <Tabs.Panel value='organization' pt='md'>
                         <OrganizationSettings />
                     </Tabs.Panel>
-
                     <Tabs.Panel value='firewall' pt='md'>
                         <FirewallSettings />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='pihole' pt='md'>
+                        <PiholeSettings />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='fog' pt='md'>
+                        <FogConnectionSettings />
                     </Tabs.Panel>
                 </Tabs>
             </Stack>
