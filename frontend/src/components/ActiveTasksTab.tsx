@@ -386,42 +386,41 @@ const ActiveTasksTab: FC = () => {
                                     </Group>
                                 </Stack>
                             </Card>
-                            <Card withBorder p='0'>
-                                <Stack gap='md'>
-                                    {error && tasks.length === 0 ? (
-                                        <Text c='red' ta='center'>
-                                            {error}
-                                        </Text>
-                                    ) : tasks.length === 0 ? (
-                                        <Stack align='center' gap='md' py='xl'>
-                                            <IconTools
-                                                size={48}
-                                                color='var(--mantine-color-gray-5)'
-                                            />
-                                            <Text c='dimmed' ta='center'>
-                                                No active tasks found.
-                                            </Text>
-                                        </Stack>
-                                    ) : filteredTasks.length === 0 ? (
-                                        <Stack align='center' gap='md' py='xl'>
-                                            <IconSearch
-                                                size={48}
-                                                color='var(--mantine-color-gray-5)'
-                                            />
-                                            <Text c='dimmed' ta='center'>
-                                                No tasks match your filters.
-                                            </Text>
-                                        </Stack>
-                                    ) : (
-                                        <ActiveTasksTable
-                                            loading={loading}
-                                            tasks={filteredTasks}
-                                            actioningTasks={actioningTasks}
-                                            onTaskAction={handleTaskAction}
+
+                            <Stack gap='md'>
+                                {error && tasks.length === 0 ? (
+                                    <Text c='red' ta='center'>
+                                        {error}
+                                    </Text>
+                                ) : tasks.length === 0 ? (
+                                    <Stack align='center' gap='md' py='xl'>
+                                        <IconTools
+                                            size={48}
+                                            color='var(--mantine-color-gray-5)'
                                         />
-                                    )}
-                                </Stack>
-                            </Card>
+                                        <Text c='dimmed' ta='center'>
+                                            No active tasks found.
+                                        </Text>
+                                    </Stack>
+                                ) : filteredTasks.length === 0 ? (
+                                    <Stack align='center' gap='md' py='xl'>
+                                        <IconSearch
+                                            size={48}
+                                            color='var(--mantine-color-gray-5)'
+                                        />
+                                        <Text c='dimmed' ta='center'>
+                                            No tasks match your filters.
+                                        </Text>
+                                    </Stack>
+                                ) : (
+                                    <ActiveTasksTable
+                                        loading={loading}
+                                        tasks={filteredTasks}
+                                        actioningTasks={actioningTasks}
+                                        onTaskAction={handleTaskAction}
+                                    />
+                                )}
+                            </Stack>
                         </Stack>
                     </Card>
                 </Stack>
