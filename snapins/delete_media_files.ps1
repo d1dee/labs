@@ -279,8 +279,12 @@ function Invoke-MediaCleanup {
 
     # $OlderThan is a value type ([TimeSpan]); an unset value is [TimeSpan]::Zero,
     # NOT $null, so truthiness ("if ($OlderThan)") can't tell "no filter" apart from
-    # an explicit zero duration (e.g. --olderThan 0S). Use ContainsKey. (C1)
-    $hasAgeFilter = $PSBoundParameters.ContainsKey('OlderThan')
+    # an explicit zero duration (e.g. --olderThan 0S). Detect binding instead.
+    # NOTE: use the -in OPERATOR over .Keys, NOT $PSBoundParameters.ContainsKey().
+    # Under PowerShell ConstrainedLanguage mode (Device Guard / WDAC) method calls
+    # on hashtables are blocked and throw "Method invocation is supported only on
+    # core types". Operators + property access are allowed. (C1 / C6)
+    $hasAgeFilter = 'OlderThan' -in $PSBoundParameters.Keys
     $cutoff = if ($hasAgeFilter) { (Get-Date).Subtract($OlderThan) } else { $null }
 
     $totalDeleted = 0
@@ -298,7 +302,14 @@ function Invoke-MediaCleanup {
         foreach ($dir in $topDirs) {
             Write-Log "  Scanning $($dir.FullName) ..." "INFO" "Gray"
 
-            $files = Get-ChildItem -Path $dir.FullName -Recurse -File -Include $mediaWildcardFilters -ErrorAction SilentlyContinue
+            # Use -Filter (native filesystem provider) per extension instead of
+            # -Include. -Include is unreliable with -Recurse (needs a trailing
+            # wildcard path and still misbehaves across PS versions) and under
+            # ConstrainedLanguage mode it silently returns nothing. -Filter is
+            # fast, honours -Recurse without wildcards, and works everywhere.
+            $files = foreach ($ext in $mediaWildcardFilters) {
+                Get-ChildItem -Path $dir.FullName -Filter $ext -Recurse -File -ErrorAction SilentlyContinue
+            }
 
             foreach ($file in $files) {
                 # Skip if path contains any excluded folder anywhere (extra safety)
@@ -336,8 +347,11 @@ function Invoke-MediaCleanup {
             }
         }
 
-        # Also check the root of the drive itself for loose media files
-        $rootFiles = Get-ChildItem -Path "$driveRoot*" -File -Include $mediaWildcardFilters -ErrorAction SilentlyContinue
+        # Also check the root of the drive itself for loose media files.
+        # -Filter per extension (see note in the recursive scan above).
+        $rootFiles = foreach ($ext in $mediaWildcardFilters) {
+            Get-ChildItem -Path $driveRoot -Filter $ext -File -ErrorAction SilentlyContinue
+        }
 
         foreach ($file in $rootFiles) {
             # Age filter
