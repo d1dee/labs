@@ -293,6 +293,8 @@ export function LabsSettings({
                     labs: values.labs.map((lab) => ({
                         firewallId: lab.ruleId,
                         name: lab.name,
+                        subnet: lab.subnet,
+                        dhcpServer: lab.dhcpServer,
                     })),
                 }),
             });

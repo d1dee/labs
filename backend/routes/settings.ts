@@ -114,6 +114,8 @@ settingsRouter.post('/settings/labs', async (c) => {
                     firewallId: z.string(),
                     name: z.string(),
                     description: z.string().optional(),
+                    subnet: z.string().optional(),
+                    dhcpServer: z.string().optional(),
                 }),
             ),
         });
@@ -144,6 +146,8 @@ settingsRouter.post('/settings/labs', async (c) => {
                     name: l.name,
                     ruleId: l.firewallId,
                     description: l.description ?? null,
+                    subnet: l.subnet ?? null,
+                    dhcpServer: l.dhcpServer ?? null,
                 })),
             );
         }
