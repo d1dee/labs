@@ -191,10 +191,9 @@ const PiholeTab: FC = () => {
 
             <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
                 <StatsCard
-                    title='Domains Blocked'
+                    title='Unique Domains'
                     value={
-                        summary?.gravity?.domains_being_blocked?.toLocaleString() ||
-                        0
+                        summary?.queries?.unique_domains?.toLocaleString() || 0
                     }
                 />
                 <StatsCard
@@ -205,25 +204,6 @@ const PiholeTab: FC = () => {
                     title='Queries Blocked'
                     value={summary?.queries?.blocked?.toLocaleString() || 0}
                     color='green'
-                />
-                <StatsCard
-                    title='Block %'
-                    value={`${summary?.queries?.percent_blocked?.toFixed(1) || 0}%`}
-                    color='green'
-                />
-                <StatsCard
-                    title='Unique Domains'
-                    value={
-                        summary?.queries?.unique_domains?.toLocaleString() || 0
-                    }
-                />
-                <StatsCard
-                    title='Forwarded'
-                    value={summary?.queries?.forwarded?.toLocaleString() || 0}
-                />
-                <StatsCard
-                    title='Cached'
-                    value={summary?.queries?.cached?.toLocaleString() || 0}
                 />
                 <StatsCard
                     title='Active Clients'
