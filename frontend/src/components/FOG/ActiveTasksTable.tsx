@@ -2,7 +2,9 @@ import { type FogActiveTask, type FogTaskState } from '@/api/fog';
 import {
     ActionIcon,
     Badge,
+    Button,
     Card,
+    Checkbox,
     Group,
     Pagination,
     Progress,
@@ -11,6 +13,7 @@ import {
     Table,
     Text,
 } from '@mantine/core';
+import { useSelection } from '@mantine/hooks';
 import {
     IconCheck,
     IconClock,
@@ -18,7 +21,7 @@ import {
     IconRefresh,
     IconTrash,
 } from '@tabler/icons-react';
-import { useState, type FC } from 'react';
+import { useEffect, useMemo, useState, type FC } from 'react';
 
 const getStateColor = (state?: FogTaskState): string => {
     const id = state?.id ?? 0;
@@ -64,19 +67,100 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
 }) => {
     const [page, setPage] = useState(1);
 
-    const totalPages = Math.ceil(tasks.length / PAGE_SIZE);
-    const paginatedTasks = tasks.slice(
-        (page - 1) * PAGE_SIZE,
-        page * PAGE_SIZE,
+    const paginatedTasks = useMemo(
+        () => tasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+        [tasks, page],
     );
+    const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+
+    const taskIds = useMemo(
+        () => paginatedTasks.map((t) => t.id),
+        [paginatedTasks],
+    );
+
+    const [selection, handlers] = useSelection({
+        data: taskIds,
+        resetSelectionOnDataChange: false,
+    });
+
+    const selectedTasks = paginatedTasks.filter((t) =>
+        selection.includes(t.id),
+    );
+    const cancelableIds = selectedTasks
+        .filter((t) => !isTerminalState(t.state))
+        .map((t) => t.id);
+    const forceableIds = selectedTasks
+        .filter((t) => {
+            const id = t.stateID ?? t.state?.id ?? 0;
+            return id === 1 || id === 2;
+        })
+        .map((t) => t.id);
+
+    const handleBulkCancel = () => {
+        cancelableIds.forEach((id) => onTaskAction(id, 'cancel'));
+        handlers.resetSelection();
+    };
+
+    const handleBulkForce = () => {
+        forceableIds.forEach((id) => onTaskAction(id, 'force'));
+        handlers.resetSelection();
+    };
+
+    useEffect(() => {
+        setPage(1);
+    }, [tasks.length]);
 
     return (
         <Stack gap='md'>
+            {selectedTasks.length > 0 && (
+                <Group justify='space-between' align='center'>
+                    <Text size='sm' c='dimmed'>
+                        {selectedTasks.length} task
+                        {selectedTasks.length !== 1 ? 's' : ''} selected
+                    </Text>
+                    <Group gap='xs'>
+                        <Button
+                            size='xs'
+                            color='blue'
+                            variant='light'
+                            leftSection={<IconPlayerPlay size={14} />}
+                            disabled={forceableIds.length === 0}
+                            onClick={handleBulkForce}
+                        >
+                            Force Start ({forceableIds.length})
+                        </Button>
+                        <Button
+                            size='xs'
+                            color='red'
+                            variant='light'
+                            leftSection={<IconTrash size={14} />}
+                            disabled={cancelableIds.length === 0}
+                            onClick={handleBulkCancel}
+                        >
+                            Cancel ({cancelableIds.length})
+                        </Button>
+                    </Group>
+                </Group>
+            )}
             <Card p={0} withBorder style={{ position: 'relative' }}>
                 <Table.ScrollContainer minWidth='100%'>
                     <Table highlightOnHover withRowBorders stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
+                                <Table.Th>
+                                    <Checkbox
+                                        aria-label='Select all tasks'
+                                        checked={handlers.isAllSelected()}
+                                        indeterminate={handlers.isSomeSelected()}
+                                        onChange={() => {
+                                            if (handlers.isAllSelected()) {
+                                                handlers.resetSelection();
+                                            } else {
+                                                handlers.setSelection(taskIds);
+                                            }
+                                        }}
+                                    />
+                                </Table.Th>
                                 <Table.Th>Task</Table.Th>
                                 <Table.Th>Host</Table.Th>
                                 <Table.Th>Type</Table.Th>
@@ -153,10 +237,30 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                               ? `${Math.round(progress)}%`
                                               : 'N/A';
 
-                                      return (
-                                          <Table.Tr key={task.id}>
-                                              <Table.Td>
-                                                  <Text size='sm' fw={500}>
+                                        return (
+                                            <Table.Tr
+                                                key={task.id}
+                                                bg={
+                                                    selection.includes(task.id)
+                                                        ? 'var(--mantine-color-blue-light)'
+                                                        : undefined
+                                                }
+                                            >
+                                                <Table.Td>
+                                                    <Checkbox
+                                                        aria-label='Select task'
+                                                        checked={selection.includes(
+                                                            task.id,
+                                                        )}
+                                                        onChange={() =>
+                                                            handlers.select(
+                                                                task.id,
+                                                            )
+                                                        }
+                                                    />
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    <Text size='sm' fw={500}>
                                                       {task.name ||
                                                           `Task #${task.id}`}
                                                   </Text>
