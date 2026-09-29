@@ -293,7 +293,7 @@ function ManagementTab() {
                 <Group justify='space-between'>
                     <Title order={4}>Host Overview</Title>{' '}
                     <Button
-                        size='xs'
+                        radius='md'
                         leftSection={<IconRefresh size={14} />}
                         onClick={loadAll}
                         loading={loading}

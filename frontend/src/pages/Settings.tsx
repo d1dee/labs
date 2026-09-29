@@ -1,6 +1,7 @@
 import { FogConnectionSettings } from '@/components/settings/FogConnectionSettings';
 import { OrganizationSettings } from '@/components/settings/OrganizationSettings';
 import { PiholeSettings } from '@/components/settings/PiholeSettings';
+import { VeyonConnectionSettings } from '@/components/settings/VeyonConnectionSettings';
 import { useSessionContext } from '@/context/SessionContext';
 import { Modal, Stack, Tabs, Text, Title } from '@mantine/core';
 import { FC } from 'react';
@@ -38,6 +39,7 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
                         </Tabs.Tab>
                         <Tabs.Tab value='pihole'>DNS</Tabs.Tab>
                         <Tabs.Tab value='fog'>FOG</Tabs.Tab>
+                        <Tabs.Tab value='veyon'>Veyon</Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel value='organization' pt='md'>
                         <OrganizationSettings />
@@ -50,6 +52,9 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
                     </Tabs.Panel>
                     <Tabs.Panel value='fog' pt='md'>
                         <FogConnectionSettings />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='veyon' pt='md'>
+                        <VeyonConnectionSettings />
                     </Tabs.Panel>
                 </Tabs>
             </Stack>

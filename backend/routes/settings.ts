@@ -1,7 +1,13 @@
 import { eq } from 'drizzle-orm';
 import z from 'zod';
 import { db } from '../../db/database';
-import { firewallConfig, fogConfig, lab, piholeConfig } from '../../db/schema';
+import {
+    firewallConfig,
+    fogConfig,
+    lab,
+    piholeConfig,
+    veyonConfig,
+} from '../../db/schema';
 import {
     getFirewallConfigByIdWithLabs,
     getFirewallConfigWithLabs,
@@ -9,6 +15,12 @@ import {
 } from '../firewall-config';
 import { getFogConfigForOrg, testFogConnection } from '../fog';
 import { testMikrotikConnection } from '../mikrotik';
+import {
+    clearVeyonConnections,
+    getVeyonConfigForOrg,
+    VEYON_AUTH_METHODS,
+    VeyonClient,
+} from '../veyon';
 import {
     getPiholeConfigForOrg,
     testPiholeConnection,
@@ -463,5 +475,129 @@ settingsRouter.post('/settings/fog', async (c) => {
     } catch (error) {
         console.error('Failed to save FOG settings:', error);
         return c.json({ error: String(error) }, 500);
+    }
+});
+
+// ===================== Veyon settings =====================
+
+settingsRouter.get('/settings/veyon', async (c) => {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Not authenticated' }, 401);
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    const stored = await getVeyonConfigForOrg(user.organizationId);
+    return c.json({
+        configured: Boolean(stored),
+        url: stored?.url ?? '',
+        authMethod: stored?.authMethod ?? VEYON_AUTH_METHODS.logon,
+        username: stored?.username ?? '',
+        passwordConfigured: Boolean(stored?.password),
+        keyName: stored?.keyName ?? '',
+        keyConfigured: Boolean(stored?.keyData),
+        verifyTls: stored?.verifyTls ?? true,
+    });
+});
+
+settingsRouter.post('/settings/veyon', async (c) => {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Not authenticated' }, 401);
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    try {
+        const schema = z
+            .object({
+                url: z.url(),
+                authMethod: z.enum([
+                    VEYON_AUTH_METHODS.authKeys,
+                    VEYON_AUTH_METHODS.ldap,
+                    VEYON_AUTH_METHODS.logon,
+                    VEYON_AUTH_METHODS.simple,
+                ]),
+                username: z.string().trim().optional(),
+                password: z.string().optional(),
+                keyName: z.string().trim().optional(),
+                keyData: z.string().optional(),
+                verifyTls: z.boolean().default(true),
+                testHost: z.string().trim().min(1),
+            })
+            .superRefine((value, ctx) => {
+                if (
+                    [VEYON_AUTH_METHODS.logon, VEYON_AUTH_METHODS.ldap].includes(
+                        value.authMethod as typeof VEYON_AUTH_METHODS.logon,
+                    ) &&
+                    (!value.username || !value.password)
+                ) {
+                    ctx.addIssue({
+                        code: 'custom',
+                        message: 'Username and password are required',
+                    });
+                }
+                if (
+                    value.authMethod === VEYON_AUTH_METHODS.simple &&
+                    !value.password
+                ) {
+                    ctx.addIssue({ code: 'custom', message: 'Password is required' });
+                }
+                if (
+                    value.authMethod === VEYON_AUTH_METHODS.authKeys &&
+                    (!value.keyName || !value.keyData)
+                ) {
+                    ctx.addIssue({
+                        code: 'custom',
+                        message: 'Key name and PEM private key are required',
+                    });
+                }
+            });
+        const body = schema.parse(await c.req.json());
+        const credentials = {
+            url: body.url,
+            authMethod: body.authMethod,
+            username: body.username || null,
+            password: body.password || null,
+            keyName: body.keyName || null,
+            keyData: body.keyData || null,
+            verifyTls: body.verifyTls,
+        };
+
+        const testClient = new VeyonClient(
+            credentials,
+            user.organizationId,
+            user.id,
+        );
+        await testClient.information(body.testHost);
+        await testClient.close(body.testHost);
+
+        await db
+            .insert(veyonConfig)
+            .values({ organizationId: user.organizationId, ...credentials })
+            .onConflictDoUpdate({
+                target: veyonConfig.organizationId,
+                set: { ...credentials, updatedAt: new Date() },
+            });
+        clearVeyonConnections(user.organizationId);
+        return c.json({
+            success: true,
+            configured: true,
+            url: body.url,
+            authMethod: body.authMethod,
+            username: body.username ?? '',
+            passwordConfigured: Boolean(body.password),
+            keyName: body.keyName ?? '',
+            keyConfigured: Boolean(body.keyData),
+            verifyTls: body.verifyTls,
+        });
+    } catch (error) {
+        console.error('Failed to save Veyon settings:', error);
+        const message =
+            error instanceof z.ZodError
+                ? error.issues[0]?.message
+                : error instanceof Error
+                  ? error.message
+                  : 'Failed to connect to Veyon';
+        return c.json({ error: message, code: 'CONNECTION_FAILED' }, 400);
     }
 });

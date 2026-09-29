@@ -9,7 +9,7 @@ import {
 } from '@/api/fog';
 import {
     Alert,
-    Badge,
+    Button,
     Card,
     Center,
     Group,
@@ -275,7 +275,7 @@ const ActiveTasksTab: FC = () => {
         <Stack gap='md'>
             <Group justify='space-between'>
                 <Title order={4}>Active FOG Tasks</Title>
-                <Badge
+                <Button
                     leftSection={<IconRefresh size={14} />}
                     color='blue'
                     style={{ cursor: 'pointer' }}
@@ -284,58 +284,42 @@ const ActiveTasksTab: FC = () => {
                     }}
                 >
                     Refresh
-                </Badge>
+                </Button>
             </Group>
 
             {/* Stats Cards */}
-            <SimpleGrid cols={{ base: 2, sm: 3, md: 5 }}>
-                <Card withBorder p='sm'>
-                    <Stack gap={4} align='center'>
-                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
-                            Total
-                        </Text>
-                        <Title order={3}>{stats.total}</Title>
-                    </Stack>
+            <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
+                <Card withBorder>
+                    <Text size='sm' c='dimmed' fw={600}>
+                        Total
+                    </Text>
+                    <Text size='xl' fw={700}>
+                        {stats.total}{' '}
+                    </Text>
                 </Card>
-                <Card withBorder p='sm'>
-                    <Stack gap={4} align='center'>
-                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
-                            Running
-                        </Text>
-                        <Title order={3} c='blue'>
-                            {stats.running}
-                        </Title>
-                    </Stack>
+                <Card withBorder>
+                    <Text size='sm' c='dimmed' fw={600}>
+                        Running
+                    </Text>
+                    <Text size='xl' fw={700} c='blue'>
+                        {stats.running}
+                    </Text>
                 </Card>
-                <Card withBorder p='sm'>
-                    <Stack gap={4} align='center'>
-                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
-                            Pending
-                        </Text>
-                        <Title order={3} c='yellow'>
-                            {stats.pending}
-                        </Title>
-                    </Stack>
+                <Card withBorder>
+                    <Text size='sm' c='dimmed' fw={600}>
+                        Pending
+                    </Text>
+                    <Text size='xl' fw={700} c='yellow'>
+                        {stats.pending}
+                    </Text>
                 </Card>
-                <Card withBorder p='sm'>
-                    <Stack gap={4} align='center'>
-                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
-                            Completed
-                        </Text>
-                        <Title order={3} c='green'>
-                            {stats.completed}
-                        </Title>
-                    </Stack>
-                </Card>
-                <Card withBorder p='sm'>
-                    <Stack gap={4} align='center'>
-                        <Text size='xs' c='dimmed' tt='uppercase' fw={600}>
-                            Failed
-                        </Text>
-                        <Title order={3} c='red'>
-                            {stats.failed}
-                        </Title>
-                    </Stack>
+                <Card withBorder>
+                    <Text size='sm' c='dimmed' fw={600}>
+                        Completed
+                    </Text>
+                    <Text size='xl' fw={700} c='green'>
+                        {stats.completed}
+                    </Text>
                 </Card>
             </SimpleGrid>
 

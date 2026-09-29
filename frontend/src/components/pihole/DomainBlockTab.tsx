@@ -143,13 +143,15 @@ const DomainBlockTab: FC = () => {
                 <Group justify='space-between'>
                     <Title order={4}>Domain Blocking</Title>
                     <Group>
-                        <ActionIcon
-                            variant='subtle'
+                        <Button
+                            size='sm'
+                            leftSection={<IconRefresh size={16} />}
                             onClick={refresh}
                             loading={refreshing}
+                            variant='outline'
                         >
-                            <IconRefresh size={18} />
-                        </ActionIcon>
+                            Refresh
+                        </Button>
                         <Button
                             leftSection={<IconPlus size={16} />}
                             onClick={open}

@@ -16,6 +16,7 @@ import { labsRouter, startDataUsageSnapshots } from './routes/labs';
 import { organizationsRouter } from './routes/organizations';
 import { piholeRouter } from './routes/pihole';
 import { settingsRouter } from './routes/settings';
+import { veyonRouter } from './routes/veyon';
 
 // Globally accept self-signed certificates for outbound fetch requests
 // when MikroTik is configured with insecure TLS (self-signed routers).
@@ -94,6 +95,7 @@ app.route('/api', labsRouter);
 app.route('/api', piholeRouter);
 app.route('/api', fogRouter);
 app.route('/api', settingsRouter);
+app.route('/api', veyonRouter);
 
 // Start background data usage snapshots
 startDataUsageSnapshots();

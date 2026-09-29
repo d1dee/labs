@@ -1,5 +1,11 @@
 import { relations } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import {
+    index,
+    integer,
+    sqliteTable,
+    text,
+    uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 // Users table — stores auth users with username support
 export const user = sqliteTable(
@@ -257,6 +263,73 @@ export const fogConfig = sqliteTable(
             .notNull(),
     },
     (t) => [index('fogConfig_organizationId_idx').on(t.organizationId)],
+);
+
+// Veyon WebAPI proxy configuration. Credentials remain server-side and are
+// never returned by the settings API.
+export const veyonConfig = sqliteTable(
+    'veyonConfig',
+    {
+        id: text('id')
+            .primaryKey()
+            .$defaultFn(() =>
+                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+            ),
+        organizationId: text('organizationId')
+            .notNull()
+            .references(() => organization.id, { onDelete: 'cascade' }),
+        url: text('url').notNull(),
+        authMethod: text('authMethod').notNull(),
+        username: text('username'),
+        password: text('password'),
+        keyName: text('keyName'),
+        keyData: text('keyData'),
+        verifyTls: integer('verifyTls', { mode: 'boolean' })
+            .notNull()
+            .default(true),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+    },
+    (t) => [
+        uniqueIndex('veyonConfig_organizationId_idx').on(t.organizationId),
+    ],
+);
+
+// Organization-scoped directory used by the management screen. The host
+// value is passed to a Veyon WebAPI server operating in proxy mode.
+export const veyonComputer = sqliteTable(
+    'veyonComputer',
+    {
+        id: text('id')
+            .primaryKey()
+            .$defaultFn(() =>
+                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+            ),
+        organizationId: text('organizationId')
+            .notNull()
+            .references(() => organization.id, { onDelete: 'cascade' }),
+        name: text('name').notNull(),
+        host: text('host').notNull(),
+        macAddress: text('macAddress'),
+        location: text('location'),
+        createdAt: integer('createdAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+        updatedAt: integer('updatedAt', { mode: 'timestamp' })
+            .$defaultFn(() => new Date())
+            .notNull(),
+    },
+    (t) => [
+        index('veyonComputer_organizationId_idx').on(t.organizationId),
+        uniqueIndex('veyonComputer_org_host_idx').on(
+            t.organizationId,
+            t.host,
+        ),
+    ],
 );
 
 // Labs table — stores individual lab configurations linked to a firewall config

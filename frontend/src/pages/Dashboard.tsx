@@ -1,5 +1,6 @@
 import ActiveTasksTab from '@/components/ActiveTasksTab';
-import ManagementTab from '@/components/FOG/ManagementTab';
+import FogManagementTab from '@/components/FOG/ManagementTab';
+import VeyonManagementTab from '@/components/VeyonManagementTab';
 import PiholeTab from '@/components/pihole/PiholeTab';
 import { useSessionContext } from '@/context/SessionContext';
 import {
@@ -20,8 +21,10 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import {
     IconExclamationCircle,
+    IconDeviceDesktop,
     IconKey,
     IconLogout,
+    IconPackage,
     IconNetwork,
     IconSettings,
     IconShieldCheck,
@@ -34,7 +37,8 @@ import FirewallTab from '../components/FirewallTab';
 const navTabs = [
     { value: 'firewall', label: 'Firewall', Icon: IconShieldCheck },
     { value: 'network-block', label: 'Network Block', Icon: IconNetwork },
-    { value: 'management', label: 'Management', Icon: IconSettings },
+    { value: 'management', label: 'Management', Icon: IconDeviceDesktop },
+    { value: 'deployment', label: 'Deployment', Icon: IconPackage },
     { value: 'active-tasks', label: 'Active Tasks', Icon: IconTools },
 ] as const;
 
@@ -221,7 +225,11 @@ const Dashboard: FC<DashboardProps> = ({
                                 </Tabs.Panel>
 
                                 <Tabs.Panel value='management' pt='md'>
-                                    <ManagementTab />
+                                    <VeyonManagementTab />
+                                </Tabs.Panel>
+
+                                <Tabs.Panel value='deployment' pt='md'>
+                                    <FogManagementTab />
                                 </Tabs.Panel>
 
                                 <Tabs.Panel value='active-tasks' pt='md'>
