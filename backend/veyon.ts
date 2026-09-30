@@ -1,13 +1,14 @@
+import { createPrivateKey } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { veyonConfig } from '../db/schema';
 
-export const VEYON_AUTH_METHODS = {
-    authKeys: '0c69b301-81b4-42d6-8fae-128cdd113314',
-    ldap: '6f0a491e-c1c6-4338-8244-f823b0bf8670',
-    logon: '63611f7c-b457-42c7-832e-67d0f9281085',
-    simple: '73430b14-ef69-4c75-a145-ba635d1cc676',
-} as const;
+// Veyon WebAPI authentication method UUIDs. Key file authentication
+// (AuthKeys) is the only method this backend supports: the WebAPI server
+// receives the PEM private key plus key name, signs the Veyon Server's
+// random challenge with it, and the server verifies the signature against
+// the public key deployed under that key name.
+export const VEYON_AUTH_KEYS_METHOD = '0c69b301-81b4-42d6-8fae-128cdd113314';
 
 export const VEYON_FEATURES = {
     screenLock: 'ccb535a2-1d24-4cc1-a709-8b47d2b2ac79',
@@ -26,11 +27,8 @@ export const VEYON_FEATURES = {
 
 export type VeyonCredentials = {
     url: string;
-    authMethod: string;
-    username: string | null;
-    password: string | null;
-    keyName: string | null;
-    keyData: string | null;
+    keyName: string;
+    keyData: string;
     verifyTls: boolean;
 };
 
@@ -42,6 +40,34 @@ export class VeyonApiError extends Error {
     ) {
         super(message);
     }
+}
+
+// Fail before any network call when the stored credential set cannot drive
+// key file authentication (missing key material or unparsable PEM).
+export function assertValidPrivateKeyPem(pem: string) {
+    if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(pem)) {
+        throw new VeyonApiError(
+            'Key data must be a PEM-encoded private key (-----BEGIN PRIVATE KEY-----)',
+            400,
+            'INVALID_KEY',
+        );
+    }
+    try {
+        createPrivateKey(pem);
+    } catch {
+        throw new VeyonApiError('PEM private key could not be parsed', 400, 'INVALID_KEY');
+    }
+}
+
+export function assertKeyCredentials(config: VeyonCredentials) {
+    if (!config.keyName?.trim() || !config.keyData) {
+        throw new VeyonApiError(
+            'Veyon key file authentication requires a key name and PEM private key',
+            409,
+            'CONFIG_MISSING',
+        );
+    }
+    assertValidPrivateKeyPem(config.keyData);
 }
 
 type Connection = {
@@ -57,13 +83,31 @@ const connections = new Map<string, Connection>();
 const pendingConnections = new Map<string, Promise<Connection>>();
 const IDLE_RECONNECT_MS = 50_000;
 
+type VeyonConfigRow = typeof veyonConfig.$inferSelect;
+const configCache = new Map<
+    string,
+    { config: VeyonConfigRow | undefined; expiresAt: number }
+>();
+const CONFIG_CACHE_TTL_MS = 5_000;
+
 export async function getVeyonConfigForOrg(organizationId: string) {
-    return db.query.veyonConfig.findFirst({
+    // The framebuffer route polls this on every frame (~16×/s per wall);
+    // a short TTL keeps the hot path off the database. Settings saves call
+    // clearVeyonConnections, which drops this entry immediately.
+    const cached = configCache.get(organizationId);
+    if (cached && cached.expiresAt > Date.now()) return cached.config;
+    const config = await db.query.veyonConfig.findFirst({
         where: eq(veyonConfig.organizationId, organizationId),
     });
+    configCache.set(organizationId, {
+        config,
+        expiresAt: Date.now() + CONFIG_CACHE_TTL_MS,
+    });
+    return config;
 }
 
 export function clearVeyonConnections(organizationId: string) {
+    configCache.delete(organizationId);
     for (const [key, connection] of connections) {
         if (connection.organizationId === organizationId) connections.delete(key);
     }
@@ -94,14 +138,11 @@ async function readError(response: Response) {
     }
 }
 
+// AuthKeys credentials per the Veyon WebAPI protocol: the WebAPI server
+// loads the PEM private key and signs the target Veyon Server's challenge
+// with it; the server verifies against the public key stored under keyname.
 function credentialsBody(config: VeyonCredentials) {
-    if (config.authMethod === VEYON_AUTH_METHODS.authKeys) {
-        return { keyname: config.keyName, keydata: config.keyData };
-    }
-    if (config.authMethod === VEYON_AUTH_METHODS.simple) {
-        return { password: config.password };
-    }
-    return { username: config.username, password: config.password };
+    return { keyname: config.keyName, keydata: config.keyData };
 }
 
 export class VeyonClient {
@@ -119,6 +160,19 @@ export class VeyonClient {
         return `${this.baseUrl}/api/v1${path}`;
     }
 
+    // GET /api/v1/hoststate/<host> — unauthenticated reachability probe of
+    // the Veyon Server behind the WebAPI proxy.
+    async hostState(host: string) {
+        const response = await fetch(
+            this.url(`/hoststate/${encodeURIComponent(host)}`),
+            requestOptions(this.config, { signal: AbortSignal.timeout(8_000) }),
+        );
+        if (!response.ok) {
+            throw new VeyonApiError(await readError(response), response.status);
+        }
+        return response.json() as Promise<Record<string, unknown>>;
+    }
+
     async authenticationMethods(host: string): Promise<string[]> {
         const response = await fetch(
             this.url(`/authentication/${encodeURIComponent(host)}`),
@@ -131,14 +185,17 @@ export class VeyonClient {
         return body.methods ?? [];
     }
 
-    private async connect(host: string): Promise<Connection> {
+    // POST /api/v1/authentication/<host> — creates a connection and performs
+    // key file authentication. Normally called lazily by getConnection.
+    async authenticate(host: string): Promise<Connection> {
+        assertKeyCredentials(this.config);
         const response = await fetch(
             this.url(`/authentication/${encodeURIComponent(host)}`),
             requestOptions(this.config, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    method: this.config.authMethod,
+                    method: VEYON_AUTH_KEYS_METHOD,
                     credentials: credentialsBody(this.config),
                 }),
                 signal: AbortSignal.timeout(12_000),
@@ -187,7 +244,7 @@ export class VeyonClient {
         const pending = pendingConnections.get(key);
         if (pending) return pending;
 
-        const connecting = this.connect(host).finally(() => {
+        const connecting = this.authenticate(host).finally(() => {
             pendingConnections.delete(key);
         });
         pendingConnections.set(key, connecting);
@@ -250,8 +307,22 @@ export class VeyonClient {
         };
     }
 
-    async framebuffer(host: string, query: URLSearchParams) {
-        return this.authenticatedRequest(host, `/framebuffer?${query.toString()}`);
+    // GET /api/v1/user — logged-on user information.
+    async user(host: string) {
+        return (await this.authenticatedRequest(host, '/user')).json();
+    }
+
+    // GET /api/v1/session — session information (id, uptime, client).
+    async session(host: string) {
+        return (await this.authenticatedRequest(host, '/session')).json();
+    }
+
+    async framebuffer(host: string, query: URLSearchParams, signal?: AbortSignal) {
+        return this.authenticatedRequest(
+            host,
+            `/framebuffer?${query.toString()}`,
+            signal ? { signal } : {},
+        );
     }
 
     async features(host: string) {

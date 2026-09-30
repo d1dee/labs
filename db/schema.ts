@@ -279,11 +279,12 @@ export const veyonConfig = sqliteTable(
             .notNull()
             .references(() => organization.id, { onDelete: 'cascade' }),
         url: text('url').notNull(),
-        authMethod: text('authMethod').notNull(),
-        username: text('username'),
-        password: text('password'),
-        keyName: text('keyName'),
-        keyData: text('keyData'),
+        // Key file authentication (AuthKeys) is the only supported method.
+        // keyName selects the public key deployed on the Veyon Servers;
+        // keyData is the PEM-encoded RSA private key used to sign the
+        // server challenge. Both are required.
+        keyName: text('keyName').notNull(),
+        keyData: text('keyData').notNull(),
         verifyTls: integer('verifyTls', { mode: 'boolean' })
             .notNull()
             .default(true),
@@ -316,6 +317,7 @@ export const veyonComputer = sqliteTable(
         host: text('host').notNull(),
         macAddress: text('macAddress'),
         location: text('location'),
+        fogHostId: integer('fogHostId'),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .$defaultFn(() => new Date())
             .notNull(),

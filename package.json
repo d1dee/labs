@@ -11,7 +11,9 @@
         "start": "bun run build && bun run backend/server.ts",
         "dev:landing": "bun run --hot src/landing/server.ts",
         "serve:landing": "bun run src/landing/server.ts",
-        "dev:frontend": "cd frontend && bun run dev"
+        "dev:frontend": "cd frontend && bun run dev",
+        "test": "bun test",
+        "test:frontend": "cd frontend && bun run test"
     },
     "dependencies": {
         "@better-auth/drizzle-adapter": "^1.6.10",

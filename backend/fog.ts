@@ -99,17 +99,33 @@ export class FogClient {
         return fetch(this.fogUrl(path), opts);
     }
 
+    /**
+     * Parse a FOG response body as JSON. FOG returns HTML pages (login or
+     * error pages) when the URL is wrong or tokens are rejected, so surface a
+     * human-readable message instead of a raw JSON SyntaxError.
+     */
+    private async readJson(res: Response): Promise<unknown> {
+        const text = await res.text();
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error(nonJsonMessage(this.url, res.status, text));
+        }
+    }
+
     /** Safely extract an error message from a non-OK FOG response. */
     private async errorFrom(res: Response): Promise<string> {
+        const text = await res.text().catch(() => '');
         try {
-            const json = (await res.json()) as {
+            const json = JSON.parse(text) as {
                 error?: string;
                 message?: string;
             };
-            return json.error || json.message || `HTTP ${res.status}`;
+            if (json.error || json.message) return json.error || json.message!;
         } catch {
-            return `HTTP ${res.status}`;
+            // Body is not JSON (e.g. an HTML error page); fall through.
         }
+        return statusMessage(this.url, res.status, text);
     }
 
     // ---------- System / connection ----------
@@ -119,10 +135,10 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/system/info');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = await res.json();
+            const data = await this.readJson(res);
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -138,10 +154,10 @@ export class FogClient {
                 : '/fog/host';
             const res = await this.fogRequest('GET', path);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as ListFogHosts;
+            const data = (await this.readJson(res)) as ListFogHosts;
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -150,10 +166,10 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', `/fog/host/${id}`);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as FogHost;
+            const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -164,10 +180,10 @@ export class FogClient {
         try {
             const res = await this.fogRequest('POST', '/fog/host/create', hostData);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as FogHost;
+            const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -179,10 +195,10 @@ export class FogClient {
         try {
             const res = await this.fogRequest('PUT', `/fog/host/${id}/edit`, updates);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as FogHost;
+            const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -193,7 +209,7 @@ export class FogClient {
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -206,13 +222,13 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/image');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as {
+            const data = (await this.readJson(res)) as {
                 count: number;
                 images: FogImage[];
             };
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -223,13 +239,13 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/tasktype');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as {
+            const data = (await this.readJson(res)) as {
                 count: number;
                 tasktypes: FogTaskType[];
             };
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -240,13 +256,13 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/snapin');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as {
+            const data = (await this.readJson(res)) as {
                 count: number;
                 snapins: FogSnapin[];
             };
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -259,10 +275,10 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', `/fog/task/${taskId}`);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as Record<string, unknown>;
+            const data = (await this.readJson(res)) as Record<string, unknown>;
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -281,10 +297,10 @@ export class FogClient {
             });
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             // FOG returns null on successful task creation
-            const data = (await res.json()) as FogTaskResult | null;
+            const data = (await this.readJson(res)) as FogTaskResult | null;
             return { success: true, data: data ?? {} };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -301,10 +317,10 @@ export class FogClient {
             });
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             // FOG returns null on successful task creation
-            const data = (await res.json()) as FogTaskResult | null;
+            const data = (await this.readJson(res)) as FogTaskResult | null;
             return { success: true, data: data ?? {} };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -315,13 +331,13 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/task/active');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as {
+            const data = (await this.readJson(res)) as {
                 count: number;
                 tasks: unknown[];
             };
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -332,7 +348,7 @@ export class FogClient {
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -345,7 +361,7 @@ export class FogClient {
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -357,10 +373,10 @@ export class FogClient {
         try {
             const res = await this.fogRequest('PUT', `/fog/task/${taskId}/update`, updates);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as Record<string, unknown> | null;
+            const data = (await this.readJson(res)) as Record<string, unknown> | null;
             return { success: true, data: data ?? {} };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -422,7 +438,7 @@ export class FogClient {
             }
             return { success: true };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 
@@ -433,13 +449,13 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/multicastsession/current');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await res.json()) as {
+            const data = (await this.readJson(res)) as {
                 count: number;
                 multicastsessions: unknown[];
             };
             return { success: true, data };
         } catch (err) {
-            return { success: false, error: String(err) };
+            return { success: false, error: errorMessage(err) };
         }
     }
 }
@@ -448,6 +464,54 @@ export class FogClient {
 
 function unconfigured<T>(): FogResult<T> {
     return { success: false, error: 'FOG not configured' };
+}
+
+/** True when a response body looks like HTML/XML rather than JSON. */
+function looksLikeHtml(body: string): boolean {
+    return body.trimStart().startsWith('<');
+}
+
+/** Friendly message for a FOG response that is not valid JSON. */
+function nonJsonMessage(url: string, status: number, body: string): string {
+    if (looksLikeHtml(body)) {
+        return `FOG server at ${url} returned an HTML page instead of JSON (HTTP ${status}). This usually means the FOG URL is incorrect or the API/user tokens were rejected. Please check the FOG settings.`;
+    }
+    return `FOG server at ${url} returned an invalid response (HTTP ${status}). Please verify the FOG server URL and tokens in the FOG settings.`;
+}
+
+/** Friendly message for a non-OK FOG response without a usable JSON error. */
+function statusMessage(url: string, status: number, body: string): string {
+    if (status === 401 || status === 403) {
+        return `FOG rejected the API credentials (HTTP ${status}). Please verify the API token and user token in the FOG settings.`;
+    }
+    if (status === 404) {
+        return `FOG endpoint not found at ${url} (HTTP 404). Please verify the FOG server URL in the FOG settings.`;
+    }
+    if (looksLikeHtml(body)) {
+        return nonJsonMessage(url, status, body);
+    }
+    return `FOG request failed (HTTP ${status}).`;
+}
+
+/** Convert an unknown thrown value into a user-presentable message. */
+function errorMessage(err: unknown): string {
+    if (err instanceof Error) {
+        if (
+            err instanceof SyntaxError ||
+            /JSON Parse error|not valid JSON|Unexpected token/i.test(err.message)
+        ) {
+            return 'The FOG server returned an unexpected (non-JSON) response. Please verify the FOG server URL and tokens in the FOG settings.';
+        }
+        if (
+            /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|network/i.test(
+                `${err.message} ${err.cause instanceof Error ? err.cause.message : ''}`,
+            )
+        ) {
+            return 'Could not reach the FOG server. Please verify the FOG server URL in the FOG settings and that the server is online.';
+        }
+        return err.message;
+    }
+    return String(err);
 }
 
 // ===================== Credential resolution =====================
@@ -536,18 +600,30 @@ export async function testFogConnection(
                 'Content-Type': 'application/json',
             },
         });
+        const text = await res.text();
         if (!res.ok) {
-            const json = (await res.json()) as {
-                error?: string;
-                message?: string;
-            };
-            return {
-                success: false,
-                error: json.error || json.message || `HTTP ${res.status}`,
-            };
+            try {
+                const json = JSON.parse(text) as {
+                    error?: string;
+                    message?: string;
+                };
+                if (json.error || json.message) {
+                    return { success: false, error: json.error || json.message };
+                }
+            } catch {
+                // Body is not JSON (e.g. an HTML error page); fall through.
+            }
+            return { success: false, error: statusMessage(url, res.status, text) };
+        }
+        // A 200 with an HTML body means we reached a web server that is not
+        // the FOG API (or an auth redirect); treat it as a failed test.
+        try {
+            JSON.parse(text);
+        } catch {
+            return { success: false, error: nonJsonMessage(url, res.status, text) };
         }
         return { success: true };
     } catch (err) {
-        return { success: false, error: String(err) };
+        return { success: false, error: errorMessage(err) };
     }
 }

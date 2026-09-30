@@ -1,0 +1,4 @@
+[test]
+# Frontend tests run with vitest (cd frontend && bun run test); keep bun test
+# scoped to the backend suite.
+pathIgnorePatterns = ["frontend/**"]

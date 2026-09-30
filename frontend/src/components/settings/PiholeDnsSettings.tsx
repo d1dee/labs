@@ -253,12 +253,15 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
                         required={field.required}
                         type={field.type ?? 'text'}
                         value={formValues[field.key] ?? ''}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                            // Capture the value before the state updater runs —
+                            // React nulls currentTarget once the handler returns.
+                            const value = e.currentTarget.value;
                             setFormValues((prev) => ({
                                 ...prev,
-                                [field.key]: e.currentTarget.value,
-                            }))
-                        }
+                                [field.key]: value,
+                            }));
+                        }}
                     />
                 ))}
                 <Box>

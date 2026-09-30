@@ -16,9 +16,10 @@ import {
 import { getFogConfigForOrg, testFogConnection } from '../fog';
 import { testMikrotikConnection } from '../mikrotik';
 import {
+    assertValidPrivateKeyPem,
     clearVeyonConnections,
     getVeyonConfigForOrg,
-    VEYON_AUTH_METHODS,
+    VeyonApiError,
     VeyonClient,
 } from '../veyon';
 import {
@@ -480,6 +481,10 @@ settingsRouter.post('/settings/fog', async (c) => {
 
 // ===================== Veyon settings =====================
 
+// Key file authentication (AuthKeys) is the only supported mode: the
+// organization stores a key name plus the PEM private key; the WebAPI
+// server signs each Veyon Server challenge with it.
+
 settingsRouter.get('/settings/veyon', async (c) => {
     const user = c.get('user');
     if (!user) return c.json({ error: 'Not authenticated' }, 401);
@@ -491,9 +496,6 @@ settingsRouter.get('/settings/veyon', async (c) => {
     return c.json({
         configured: Boolean(stored),
         url: stored?.url ?? '',
-        authMethod: stored?.authMethod ?? VEYON_AUTH_METHODS.logon,
-        username: stored?.username ?? '',
-        passwordConfigured: Boolean(stored?.password),
         keyName: stored?.keyName ?? '',
         keyConfigured: Boolean(stored?.keyData),
         verifyTls: stored?.verifyTls ?? true,
@@ -508,67 +510,47 @@ settingsRouter.post('/settings/veyon', async (c) => {
     }
 
     try {
-        const schema = z
-            .object({
-                url: z.url(),
-                authMethod: z.enum([
-                    VEYON_AUTH_METHODS.authKeys,
-                    VEYON_AUTH_METHODS.ldap,
-                    VEYON_AUTH_METHODS.logon,
-                    VEYON_AUTH_METHODS.simple,
-                ]),
-                username: z.string().trim().optional(),
-                password: z.string().optional(),
-                keyName: z.string().trim().optional(),
-                keyData: z.string().optional(),
-                verifyTls: z.boolean().default(true),
-                testHost: z.string().trim().min(1),
-            })
-            .superRefine((value, ctx) => {
-                if (
-                    [VEYON_AUTH_METHODS.logon, VEYON_AUTH_METHODS.ldap].includes(
-                        value.authMethod as typeof VEYON_AUTH_METHODS.logon,
-                    ) &&
-                    (!value.username || !value.password)
-                ) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message: 'Username and password are required',
-                    });
-                }
-                if (
-                    value.authMethod === VEYON_AUTH_METHODS.simple &&
-                    !value.password
-                ) {
-                    ctx.addIssue({ code: 'custom', message: 'Password is required' });
-                }
-                if (
-                    value.authMethod === VEYON_AUTH_METHODS.authKeys &&
-                    (!value.keyName || !value.keyData)
-                ) {
-                    ctx.addIssue({
-                        code: 'custom',
-                        message: 'Key name and PEM private key are required',
-                    });
-                }
-            });
+        const schema = z.object({
+            url: z.url(),
+            keyName: z.string().trim().min(1).max(100),
+            keyData: z.string().optional(),
+            verifyTls: z.boolean().default(true),
+            testHost: z.string().trim().min(1),
+        });
         const body = schema.parse(await c.req.json());
+
+        // An omitted keyData reuses the stored private key so the form can
+        // update URL/TLS/test settings without re-uploading the secret.
+        const stored = body.keyData
+            ? undefined
+            : await getVeyonConfigForOrg(user.organizationId);
+        const keyData = body.keyData?.trim() || stored?.keyData;
+        if (!keyData) {
+            return c.json(
+                {
+                    error: 'PEM private key is required (none stored for this organization)',
+                    code: 'INVALID_KEY',
+                },
+                400,
+            );
+        }
+        assertValidPrivateKeyPem(keyData);
+
         const credentials = {
             url: body.url,
-            authMethod: body.authMethod,
-            username: body.username || null,
-            password: body.password || null,
-            keyName: body.keyName || null,
-            keyData: body.keyData || null,
+            keyName: body.keyName,
+            keyData,
             verifyTls: body.verifyTls,
         };
 
+        // Prove the key pair works end to end before persisting: the WebAPI
+        // server signs the challenge of testHost with the PEM private key.
         const testClient = new VeyonClient(
             credentials,
             user.organizationId,
             user.id,
         );
-        await testClient.information(body.testHost);
+        await testClient.authenticate(body.testHost);
         await testClient.close(body.testHost);
 
         await db
@@ -583,15 +565,16 @@ settingsRouter.post('/settings/veyon', async (c) => {
             success: true,
             configured: true,
             url: body.url,
-            authMethod: body.authMethod,
-            username: body.username ?? '',
-            passwordConfigured: Boolean(body.password),
-            keyName: body.keyName ?? '',
-            keyConfigured: Boolean(body.keyData),
+            keyName: body.keyName,
+            keyConfigured: true,
             verifyTls: body.verifyTls,
         });
     } catch (error) {
         console.error('Failed to save Veyon settings:', error);
+        if (error instanceof VeyonApiError) {
+            const status = error.status >= 400 && error.status <= 599 ? error.status : 400;
+            return c.json({ error: error.message, code: error.code }, status as any);
+        }
         const message =
             error instanceof z.ZodError
                 ? error.issues[0]?.message
@@ -600,4 +583,18 @@ settingsRouter.post('/settings/veyon', async (c) => {
                   : 'Failed to connect to Veyon';
         return c.json({ error: message, code: 'CONNECTION_FAILED' }, 400);
     }
+});
+
+settingsRouter.delete('/settings/veyon', async (c) => {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Not authenticated' }, 401);
+    if (!user.organizationId) {
+        return c.json({ error: 'You must join an organization first' }, 403);
+    }
+
+    await db
+        .delete(veyonConfig)
+        .where(eq(veyonConfig.organizationId, user.organizationId));
+    clearVeyonConnections(user.organizationId);
+    return c.json({ success: true, configured: false });
 });

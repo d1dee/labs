@@ -3,7 +3,6 @@ import {
     deleteVeyonComputer,
     getVeyonInformation,
     getVeyonStatus,
-    launchVeyonRemoteAccess,
     listVeyonComputers,
     powerOnVeyonComputer,
     sendVeyonCommand,
@@ -15,9 +14,12 @@ import {
     type VeyonFeature,
     type VeyonInformation,
 } from '@/api/veyon';
+import VeyonMonitoringWall from '@/components/veyon/VeyonMonitoringWall';
+import VeyonSyncModal from '@/components/veyon/VeyonSyncModal';
 import {
     ActionIcon,
     Alert,
+    Autocomplete,
     Badge,
     Box,
     Button,
@@ -52,16 +54,18 @@ import {
     IconBrandWindows,
     IconBrowser,
     IconCheck,
+    IconCloud,
+    IconCloudDownload,
     IconCommand,
     IconDeviceDesktop,
     IconDotsVertical,
     IconEdit,
     IconEye,
     IconKey,
+    IconLayoutGrid,
     IconLock,
     IconLockOpen,
     IconMessage,
-    IconPlayerPlay,
     IconPlus,
     IconPower,
     IconRefresh,
@@ -74,13 +78,15 @@ import {
 import {
     startTransition,
     type ReactNode,
+    useCallback,
     useDeferredValue,
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from 'react';
 
-type LiveState =
+export type LiveState =
     | { state: 'loading' }
     | { state: 'online'; information: VeyonInformation }
     | { state: 'offline'; error: string };
@@ -129,6 +135,8 @@ export default function VeyonManagementTab() {
     const [loading, setLoading] = useState(true);
     const [editor, setEditor] = useState<EditorState>({ opened: false, computer: null });
     const [viewer, setViewer] = useState<VeyonComputer | null>(null);
+    const [syncOpened, setSyncOpened] = useState(false);
+    const [wallOpened, setWallOpened] = useState(false);
     const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
     const filteredComputers = useMemo(
@@ -178,11 +186,13 @@ export default function VeyonManagementTab() {
         argumentsValue: Record<string, unknown> = {},
         active = true,
         featureUidValue?: string,
+        targetIds?: string[],
     ) => {
-        if (!selected.length) return;
+        const targets = targetIds ?? selected;
+        if (!targets.length) return;
         try {
             const result = await sendVeyonCommand({
-                computerIds: selected,
+                computerIds: targets,
                 action,
                 active,
                 arguments: argumentsValue,
@@ -219,6 +229,22 @@ export default function VeyonManagementTab() {
             onConfirm: () => void runCommand(action),
         });
     };
+
+    const runCommandRef = useRef(runCommand);
+    useEffect(() => {
+        runCommandRef.current = runCommand;
+    });
+
+    const handleWallOpenViewer = useCallback((computer: VeyonComputer) => {
+        setWallOpened(false);
+        setViewer(computer);
+    }, []);
+
+    const handleWallCommand = useCallback(
+        (computerId: string, action: VeyonCommandAction) =>
+            runCommandRef.current(action, {}, true, undefined, [computerId]),
+        [],
+    );
 
     const removeComputer = (computer: VeyonComputer) => {
         modals.openConfirmModal({
@@ -284,6 +310,23 @@ export default function VeyonManagementTab() {
                     </Group>
                     <Group gap='xs'>
                         <Button
+                            variant='light'
+                            color='teal'
+                            leftSection={<IconCloudDownload size={16} />}
+                            onClick={() => setSyncOpened(true)}
+                        >
+                            Sync with FOG
+                        </Button>
+                        <Button
+                            variant='light'
+                            color='teal'
+                            leftSection={<IconLayoutGrid size={16} />}
+                            disabled={computers.length === 0}
+                            onClick={() => setWallOpened(true)}
+                        >
+                            Live monitor
+                        </Button>
+                        <Button
                             variant='white'
                             color='dark'
                             leftSection={<IconPlus size={16} />}
@@ -344,9 +387,15 @@ export default function VeyonManagementTab() {
                                                     !filteredComputers.every((computer) => selected.includes(computer.id))
                                                 }
                                                 onChange={(event) => {
+                                                    // Read currentTarget before
+                                                    // the state updater runs —
+                                                    // React nulls it once the
+                                                    // handler returns.
+                                                    const checked =
+                                                        event.currentTarget.checked;
                                                     const visibleIds = filteredComputers.map((computer) => computer.id);
                                                     setSelected((current) =>
-                                                        event.currentTarget.checked
+                                                        checked
                                                             ? [...new Set([...current, ...visibleIds])]
                                                             : current.filter((id) => !visibleIds.includes(id)),
                                                     );
@@ -433,6 +482,20 @@ export default function VeyonManagementTab() {
                 }}
             />
             <RemoteViewer computer={viewer} onClose={() => setViewer(null)} />
+            <VeyonSyncModal
+                opened={syncOpened}
+                onClose={() => setSyncOpened(false)}
+                onApplied={() => void load()}
+            />
+            <VeyonMonitoringWall
+                opened={wallOpened}
+                computers={computers}
+                live={live}
+                initialSelection={selected}
+                onClose={() => setWallOpened(false)}
+                onOpenViewer={handleWallOpenViewer}
+                onCommand={handleWallCommand}
+            />
         </Stack>
     );
 }
@@ -479,7 +542,23 @@ function ComputerRow({
                         <IconDeviceDesktop size={17} />
                     </ThemeIcon>
                     <div>
-                        <Text fw={600} size='sm'>{computer.name}</Text>
+                        <Group gap={6} wrap='nowrap'>
+                            <Text fw={600} size='sm'>{computer.name}</Text>
+                            {computer.fogHostId != null ? (
+                                <Tooltip label='Synced from FOG'>
+                                    <Box
+                                        component='span'
+                                        aria-label='Synced from FOG'
+                                        style={{
+                                            display: 'flex',
+                                            color: 'var(--mantine-color-blue-6)',
+                                        }}
+                                    >
+                                        <IconCloud size={14} />
+                                    </Box>
+                                </Tooltip>
+                            ) : null}
+                        </Group>
                         <Text size='xs' c='dimmed'>{computer.host}</Text>
                     </div>
                 </Group>
@@ -559,6 +638,16 @@ function CommandDeck({
     const uniqueFeatures = [...new Map(features.map((feature) => [featureUid(feature), feature])).values()].filter(
         (feature) => featureUid(feature),
     );
+    const featureNames = useMemo(
+        () =>
+            new Map(
+                uniqueFeatures.map((feature) => [
+                    featureUid(feature),
+                    featureName(feature),
+                ]),
+            ),
+        [uniqueFeatures],
+    );
 
     return (
         <Card withBorder radius='lg' p={{ base: 'md', md: 'lg' }}>
@@ -625,18 +714,50 @@ function CommandDeck({
                 ) : null}
                 {mode === 'plugin' ? (
                     <CommandForm title='Installed Veyon feature' icon={IconBrandWindows}>
-                        <TextInput
+                        <Autocomplete
                             label='Feature UID'
-                            list='veyon-feature-uids'
+                            data={uniqueFeatures.map((feature) =>
+                                featureUid(feature),
+                            )}
                             value={customUid}
-                            onChange={(event) => setCustomUid(event.currentTarget.value)}
+                            onChange={setCustomUid}
                             placeholder='Select or enter an advertised feature UID'
+                            renderOption={({ option }) => (
+                                <Stack gap={0}>
+                                    <Text size='sm'>
+                                        {featureNames.get(option.value) ??
+                                            option.value}
+                                    </Text>
+                                    <Text size='xs' c='dimmed' ff='monospace'>
+                                        {option.value}
+                                    </Text>
+                                </Stack>
+                            )}
+                            filter={({ options, search }) => {
+                                const query = search.toLowerCase().trim();
+                                if (!query) return options;
+                                // Runtime options are parsed combobox items
+                                // ({ value, label }), not the raw strings.
+                                return options.filter((option) => {
+                                    const uid =
+                                        typeof option === 'string'
+                                            ? option
+                                            : String(
+                                                  (
+                                                      option as {
+                                                          value?: unknown;
+                                                      }
+                                                  ).value ?? '',
+                                              );
+                                    return (
+                                        uid.toLowerCase().includes(query) ||
+                                        (featureNames.get(uid) ?? '')
+                                            .toLowerCase()
+                                            .includes(query)
+                                    );
+                                });
+                            }}
                         />
-                        <datalist id='veyon-feature-uids'>
-                            {uniqueFeatures.map((feature) => (
-                                <option key={featureUid(feature)} value={featureUid(feature)}>{featureName(feature)}</option>
-                            ))}
-                        </datalist>
                         <Textarea label='Arguments (JSON)' value={customArguments} onChange={(event) => setCustomArguments(event.currentTarget.value)} minRows={3} styles={{ input: { fontFamily: 'monospace' } }} />
                         <Group>
                             {[true, false].map((active) => (
@@ -813,6 +934,13 @@ function ComputerEditor({ state, onClose, onSaved }: { state: EditorState; onClo
     return (
         <Modal opened={state.opened} onClose={onClose} title={state.computer ? 'Edit computer' : 'Add computer'} centered>
             <Stack>
+                {state.computer?.fogHostId != null ? (
+                    <Alert color='blue' icon={<IconCloud size={16} />} title='Managed by FOG sync'>
+                        This computer is linked to a FOG host. Its display name is managed by FOG
+                        synchronization and will be renamed on the next sync; all fields remain
+                        editable.
+                    </Alert>
+                ) : null}
                 <TextInput label='Display name' value={name} onChange={(event) => setName(event.currentTarget.value)} required data-autofocus />
                 <TextInput label='Host address' description='Hostname/IP and optional Veyon session port' placeholder='lab-pc-01.example.edu:11100' value={host} onChange={(event) => setHost(event.currentTarget.value)} required />
                 <TextInput label='Location' placeholder='Lab A' value={location} onChange={(event) => setLocation(event.currentTarget.value)} />
@@ -855,8 +983,6 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
                         {information?.user.login ? <Text size='sm' c='dimmed'>{information.user.fullName || information.user.login}</Text> : null}
                     </Group>
                     <Group gap='xs'>
-                        <Button variant='default' leftSection={<IconEye size={16} />} onClick={() => void launchVeyonRemoteAccess(computer.id, 'view')}>Native view</Button>
-                        <Button leftSection={<IconPlayerPlay size={16} />} onClick={() => void launchVeyonRemoteAccess(computer.id, 'control')}>Remote control</Button>
                         <Button component='a' href={veyonFramebufferUrl(computer.id, { download: true })} variant='light'>Screenshot</Button>
                     </Group>
                 </Group>
@@ -871,7 +997,7 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
                         <SessionField label='Uptime' value={`${Math.floor(information.session.sessionUptime / 60)} minutes`} />
                     </SimpleGrid>
                 ) : null}
-                <Text size='xs' c='dimmed'>Interactive input is handled by the native Veyon remote-access window launched on the dashboard server; the WebAPI exposes framebuffer images but no pointer or keyboard endpoint.</Text>
+                <Text size='xs' c='dimmed'>The Veyon WebAPI exposes framebuffer images but no pointer or keyboard endpoint, so this view is read-only.</Text>
             </Stack>
         </Modal>
     );
