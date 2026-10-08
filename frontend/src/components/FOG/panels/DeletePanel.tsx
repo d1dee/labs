@@ -1,5 +1,6 @@
 import type { FogHost } from '@/api/fog';
 import { deleteFogHost } from '@/api/fog';
+import { useApiStream } from '@/api/useApiStream';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconTrash, IconX } from '@tabler/icons-react';
@@ -12,6 +13,7 @@ interface Props {
 
 export function DeletePanel({ hosts, onDone }: Props) {
     const [loading, setLoading] = useState(false);
+    const refresh = useApiStream(null, () => {});
     const isBulk = hosts.length > 1;
 
     const handleDelete = async () => {
@@ -32,6 +34,7 @@ export function DeletePanel({ hosts, onDone }: Props) {
         const failed = results.filter((r) => r.status === 'rejected').length;
 
         if (succeeded > 0) {
+            refresh();
             notifications.show({
                 color: 'green',
                 title: 'Hosts Deleted',

@@ -101,6 +101,11 @@ export interface VeyonFeature {
     [key: string]: unknown;
 }
 
+export type VeyonInformationEvent = { computerId: string } & (
+    | { state: 'online'; information: VeyonInformation }
+    | { state: 'offline'; error: string }
+);
+
 export interface VeyonSettings {
     configured: boolean;
     url: string;

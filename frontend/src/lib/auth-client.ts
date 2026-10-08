@@ -7,6 +7,7 @@ export const authClient = createAuthClient({
         credentials: 'include',
     },
     sessionOptions: {
+        refetchInterval: 10,
         refetchOnWindowFocus: true,
         refetchWhenOffline: false,
     },

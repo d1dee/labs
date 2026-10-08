@@ -15,6 +15,7 @@ import { organizationsRouter } from './routes/organizations';
 import { piholeRouter } from './routes/pihole';
 import { settingsRouter } from './routes/settings';
 import { veyonRouter } from './routes/veyon';
+import { createStreamRouter, streamIdentityMatches, type StreamIdentity } from './routes/stream';
 import { configureLogger, getLogger } from './logger';
 
 // Configure LogTape before handling any request so every logger in the
@@ -87,7 +88,23 @@ app.use(
 
 // Auth middleware - populate user/session/organization in context
 app.use('*', async (c, next) => {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await auth.api.getSession({
+        headers: c.req.raw.headers,
+        query: { disableCookieCache: true },
+    });
+
+    // This binding is injected only by the in-process stream dispatcher, never
+    // parsed from an HTTP header. A session or membership change ends the stream.
+    if (c.env && 'streamIdentity' in c.env) {
+        const actual: StreamIdentity = session ? {
+            userId: session.user.id,
+            sessionId: session.session.id,
+            organizationId: session.user.organizationId ?? null,
+        } : null;
+        if (!streamIdentityMatches(c.env.streamIdentity ?? null, actual)) {
+            return c.json({ error: 'Session or organization changed', code: 'STREAM_IDENTITY_CHANGED' }, session ? 403 : 401);
+        }
+    }
 
     if (!session) {
         c.set('user', null);
@@ -126,6 +143,10 @@ app.route('/api', piholeRouter);
 app.route('/api', fogRouter);
 app.route('/api', settingsRouter);
 app.route('/api', veyonRouter);
+app.route('/api', createStreamRouter((request, streamIdentity) =>
+    app.request(request, undefined, { streamIdentity }),
+    ['http://10.10.1.10:5173', 'http://localhost:5173'],
+));
 
 // Start background data usage snapshots
 startDataUsageSnapshots();

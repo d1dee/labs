@@ -1,4 +1,5 @@
 import { betterFetch } from '@better-fetch/fetch';
+import { useApiStream } from '@/api/useApiStream';
 import {
     ActionIcon,
     Badge,
@@ -17,7 +18,6 @@ import { schemaResolver, useForm } from '@mantine/form';
 import {
     randomId,
     useDebouncedValue,
-    useForceUpdate,
     useMask,
 } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -25,15 +25,12 @@ import {
     IconCheck,
     IconPencil,
     IconPlus,
-    IconRefresh,
     IconTrash,
     IconX,
 } from '@tabler/icons-react';
 import {
     type ReactNode,
-    useCallback,
     useEffect,
-    useRef,
     useState,
 } from 'react';
 import z from 'zod';
@@ -96,27 +93,22 @@ interface LabRuleIdInputProps {
     index: number;
     ruleId: string;
     error?: ReactNode;
-    fetching: boolean;
+    enabled: boolean;
     onChangeRuleId: (masked: string) => void;
-    onFetch: (index: number, ruleId: string) => void;
+    onDetails: (index: number, details: { subnet?: string; dhcpServer?: string }) => void;
 }
 
 /**
- * Rule ID field with an auto-prepended "*" mask and auto-fetch behaviour:
- * details are fetched when the (debounced) value settles or when the field
- * loses focus (mouse leave), without re-fetching the same value twice.
+ * Subscribe to the settled rule ID; snapshots update derived metadata only.
  */
 function LabRuleIdInput({
     index,
     ruleId,
     error,
-    fetching,
+    enabled,
     onChangeRuleId,
-    onFetch,
+    onDetails,
 }: LabRuleIdInputProps) {
-    const lastFetchedRef = useRef('');
-    const mountedRef = useRef(false);
-
     const { ref } = useMask({
         mask: RULE_ID_MASK,
         slotChar: null,
@@ -125,27 +117,21 @@ function LabRuleIdInput({
 
     const [debounced] = useDebouncedValue(ruleId, 600);
 
-    const triggerFetch = useCallback(
-        (value: string) => {
-            const hasContent = value.replace(/^\*/, '').trim().length > 0;
-            if (!hasContent || lastFetchedRef.current === value) return;
-            lastFetchedRef.current = value;
-            onFetch(index, value);
-        },
-        [index, onFetch],
-    );
-
-    // Auto-fetch once the user stops editing the field (debounced). The initial
-    // mount value is seeded as "already fetched" so configured labs are not
-    // re-fetched on load.
-    useEffect(() => {
-        if (!mountedRef.current) {
-            mountedRef.current = true;
-            lastFetchedRef.current = debounced;
-            return;
-        }
-        triggerFetch(debounced);
-    }, [debounced, triggerFetch]);
+    const [loadedRule, setLoadedRule] = useState('');
+    const path = enabled && debounced === ruleId && ruleId.replace(/^\*/, '').trim()
+        ? `/api/labs/by-rule/${encodeURIComponent(ruleId)}` : null;
+    useApiStream<{ success: boolean; data: { subnet?: string; dhcpServer?: string }; error?: string }>(path,
+        (snapshot) => {
+            setLoadedRule(ruleId);
+            if (snapshot.success && snapshot.data) {
+                onDetails(index, snapshot.data);
+            } else {
+                notifications.show({ title: 'Error', message: snapshot.error ?? 'Failed to fetch lab details', color: 'red', icon: <IconX size={16} /> });
+            }
+        }, (error) => {
+            setLoadedRule(ruleId);
+            notifications.show({ title: 'Error', message: error.message, color: 'red', icon: <IconX size={16} /> });
+        });
 
     return (
         <TextInput
@@ -155,22 +141,7 @@ function LabRuleIdInput({
             error={error}
             ref={ref}
             defaultValue={ruleId}
-            onBlur={() => triggerFetch(ruleId)}
-            rightSection={
-                fetching ? (
-                    <Loader size={16} />
-                ) : ruleId ? (
-                    <ActionIcon
-                        variant='subtle'
-                        onClick={() => triggerFetch(ruleId)}
-                    >
-                        <IconRefresh
-                            size={16}
-                            color='var(--mantine-color-blue-6)'
-                        />
-                    </ActionIcon>
-                ) : undefined
-            }
+            rightSection={path && loadedRule !== ruleId ? <Loader size={16} /> : undefined}
         />
     );
 }
@@ -190,10 +161,13 @@ function LabField({ label, value }: { label: string; value?: string }) {
 
 export function LabsSettings({
     firewallConfig,
+    enabled = true,
+    onSaved,
 }: {
     firewallConfig?: FirewallConfig;
+    enabled?: boolean;
+    onSaved: () => void;
 }) {
-    const [fetchingLab, setFetchingLab] = useState<Record<number, boolean>>({});
     const [saving, setSaving] = useState(false);
     // Tracks which saved labs are currently expanded into their edit form.
     // Labs without an id are always in edit mode.
@@ -207,77 +181,20 @@ export function LabsSettings({
     });
 
     useEffect(() => {
-        form.setValues({
+        if (form.isDirty() || editingKeys.size) {
+            // Keep editable drafts and stable keys, but reconcile read-only metadata.
+            form.setValues({ labs: form.getValues().labs.map((lab) => {
+                const saved = firewallConfig?.labs?.find((item) => item.id === lab.id && item.ruleId === lab.ruleId);
+                return saved ? { ...lab, subnet: saved.subnet ?? '', dhcpServer: saved.dhcpServer ?? '' } : lab;
+            }) });
+            return;
+        }
+        const values = {
             labs: firewallConfig?.labs?.map(toFormLab) ?? [],
-        });
-        setEditingKeys(new Set());
+        };
+        form.setValues(values);
+        form.resetDirty(values);
     }, [firewallConfig]);
-
-    const fetchLabDetails = useCallback(
-        async (index: number, ruleId: string): Promise<void> => {
-            if (!ruleId) return;
-
-            setFetchingLab((prev) => ({ ...prev, [index]: true }));
-
-            try {
-                const { data, error } = await betterFetch<{
-                    success: boolean;
-                    data: {
-                        subnet?: string;
-                        dhcpServer?: string;
-                        ruleId?: string;
-                    };
-                    error?: string;
-                }>(`/api/labs/by-rule/${ruleId}`);
-
-                if (error) {
-                    throw new Error(
-                        error.message ?? 'Failed to fetch lab details',
-                    );
-                }
-
-                if (data?.success && data.data) {
-                    form.setFieldValue(
-                        `labs.${index}.subnet`,
-                        data.data.subnet || '',
-                    );
-                    form.setFieldValue(
-                        `labs.${index}.dhcpServer`,
-                        data.data.dhcpServer || '',
-                    );
-                    form.setFieldValue(
-                        `labs.${index}.ruleId`,
-                        data.data.ruleId || ruleId,
-                    );
-
-                    notifications.show({
-                        title: 'Success',
-                        message: 'Lab details fetched successfully!',
-                        color: 'green',
-                        icon: <IconCheck size={16} />,
-                    });
-                } else {
-                    throw new Error(
-                        data?.error || 'Failed to fetch lab details',
-                    );
-                }
-            } catch (err) {
-                console.error(err);
-                notifications.show({
-                    title: 'Error',
-                    message:
-                        'Failed to fetch lab details. Please check the rule ID.',
-                    color: 'red',
-                    icon: <IconX size={16} />,
-                });
-            } finally {
-                setFetchingLab((prev) => ({ ...prev, [index]: false }));
-            }
-        },
-        [],
-    );
-
-    const forceUpdate = useForceUpdate();
     async function submit(values: LabsFormValues) {
         setSaving(true);
         try {
@@ -317,7 +234,9 @@ export function LabsSettings({
                 color: 'green',
                 icon: <IconCheck size={16} />,
             });
-            forceUpdate();
+            form.resetDirty(values);
+            setEditingKeys(new Set());
+            onSaved();
         } catch (err) {
             notifications.show({
                 title: 'Error',
@@ -456,7 +375,7 @@ export function LabsSettings({
                                     <LabRuleIdInput
                                         index={index}
                                         ruleId={lab.ruleId}
-                                        fetching={!!fetchingLab[index]}
+                                        enabled={enabled}
                                         error={
                                             form.getInputProps(
                                                 `labs.${index}.ruleId`,
@@ -468,7 +387,10 @@ export function LabsSettings({
                                                 masked,
                                             )
                                         }
-                                        onFetch={fetchLabDetails}
+                                        onDetails={(currentIndex, details) => {
+                                            form.setFieldValue(`labs.${currentIndex}.subnet`, details.subnet ?? '');
+                                            form.setFieldValue(`labs.${currentIndex}.dhcpServer`, details.dhcpServer ?? '');
+                                        }}
                                     />
                                     <TextInput
                                         label='DHCP Server'

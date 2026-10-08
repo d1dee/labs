@@ -112,7 +112,7 @@ const Dashboard: FC<DashboardProps> = ({
     );
 
     return (
-        <Tabs value={activeTab} onChange={setActiveTab}>
+        <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
             <AppShell
                 header={{ height: 60 }}
                 footer={{ height: 48 }}

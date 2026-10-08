@@ -1,4 +1,5 @@
 import { signIn, signUp } from '@/lib/auth-client';
+import { useApiStream } from '@/api/useApiStream';
 import {
     Alert,
     Anchor,
@@ -40,12 +41,7 @@ const Login: FC = () => {
         }
     }, []);
 
-    useEffect(() => {
-        fetch('/api/config')
-            .then((res) => res.json())
-            .then((config: AppConfig) => setAllowSignup(config.allowSignup))
-            .catch(() => setAllowSignup(false));
-    }, []);
+    useApiStream<AppConfig>('/api/config', (config) => setAllowSignup(config.allowSignup), () => setAllowSignup(false));
 
     const handleSubmit = async (
         e: FormEvent<HTMLFormElement>,

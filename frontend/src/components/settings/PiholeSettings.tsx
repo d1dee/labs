@@ -1,27 +1,15 @@
-import { getPiholeStatus } from '@/api/pihole';
+import { useApiStream } from '@/api/useApiStream';
 import { Alert, Center, Divider, Loader, Stack, Text } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { type FC, useCallback, useEffect, useState } from 'react';
+import { type FC, useState } from 'react';
 import { PiholeConnectionSettings } from './PiholeConnectionSettings';
 import { PiholeDnsListTabs } from './PiholeDnsSettings';
 
-export const PiholeSettings: FC = () => {
+export const PiholeSettings: FC<{ enabled?: boolean }> = ({ enabled = true }) => {
     const [configured, setConfigured] = useState<boolean | null>(null);
-    const [version, setVersion] = useState(0);
-
-    const reload = useCallback(async () => {
-        try {
-            const status = await getPiholeStatus();
-            setConfigured(status.configured);
-        } catch {
-            setConfigured(false);
-        }
-        setVersion((v) => v + 1);
-    }, []);
-
-    useEffect(() => {
-        reload();
-    }, [reload]);
+    const refresh = useApiStream<{ configured: boolean }>(enabled ? '/api/pihole/status' : null,
+        (status) => setConfigured(status.configured),
+        () => setConfigured((current) => current ?? false));
 
     if (configured === null) {
         return (
@@ -33,7 +21,7 @@ export const PiholeSettings: FC = () => {
 
     return (
         <Stack gap='md'>
-            <PiholeConnectionSettings onSaved={reload} />
+            <PiholeConnectionSettings enabled={enabled} onSaved={refresh} />
 
             {!configured && (
                 <Alert
@@ -52,7 +40,7 @@ export const PiholeSettings: FC = () => {
             {configured && (
                 <>
                     <Divider variant='dotted' />
-                    <PiholeDnsListTabs key={version} />
+                    <PiholeDnsListTabs enabled={enabled} />
                 </>
             )}
         </Stack>

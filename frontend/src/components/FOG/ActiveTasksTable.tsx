@@ -108,8 +108,12 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
 
     const [selection, handlers] = useSelection({
         data: taskIds,
-        resetSelectionOnDataChange: true,
+        resetSelectionOnDataChange: false,
     });
+    useEffect(() => {
+        const retained = selection.filter((id) => taskIds.includes(id));
+        if (retained.length !== selection.length) handlers.setSelection(retained);
+    }, [taskIds, selection, handlers]);
 
     const selectedTasks = paginatedTasks.filter((t) =>
         selection.includes(t.id),

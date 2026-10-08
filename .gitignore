@@ -19,4 +19,3 @@ frontend/node_modules/
 backend/test-fog-api.ts
 logs/
 *.test.*
-backend/veyon.test.ts

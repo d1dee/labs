@@ -8,10 +8,10 @@ import {
     type FogActiveTask,
 } from '@/api/fog';
 import { PageHero } from '@/components/ui/PageHero';
+import { useApiStream } from '@/api/useApiStream';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import {
     Alert,
-    Button,
     Card,
     Center,
     Group,
@@ -22,15 +22,13 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { useInterval } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
     IconAlertCircle,
-    IconRefresh,
     IconSearch,
     IconTools,
 } from '@tabler/icons-react';
-import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
+import { useCallback, useMemo, useState, type FC } from 'react';
 import ActiveTasksTable from './FOG/ActiveTasksTable';
 
 interface TaskStats {
@@ -79,55 +77,23 @@ const ActiveTasksTab: FC = () => {
     const [typeFilter, setTypeFilter] = useState<string | null>(null);
     const { opened, toggle, controlsId } = useMobileTableFilters();
 
-    const fetchStatus = useCallback(async () => {
-        try {
-            const status = await getFogStatus();
-            setConfigured(status.configured);
-            return status.configured;
-        } catch {
-            setConfigured(false);
-            return false;
-        }
-    }, []);
-
-    const fetchTasks = useCallback(async () => {
-        try {
-            setError(null);
-            const data = await listActiveFogTasks();
-
-            setTasks(data.tasks || []);
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            setError(msg);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    const loadAll = useCallback(async () => {
-        setLoading(true);
-        const ok = await fetchStatus();
-        if (ok) {
-            await fetchTasks();
-        }
+    const streamError = (err: Error) => {
+        setError(err.message);
         setLoading(false);
-    }, [fetchStatus, fetchTasks]);
-
-    useEffect(() => {
-        loadAll();
-    }, [loadAll]);
-
-    // Auto-refresh every 10 seconds, only while configured
-    const interval = useInterval(() => {
-        fetchStatus().then((ok) => {
-            if (ok) fetchTasks();
-        });
-    }, 10000);
-
-    useEffect(() => {
-        interval.start();
-        return interval.stop;
-    }, [interval]);
+    };
+    useApiStream<Awaited<ReturnType<typeof getFogStatus>>>('/api/fog/status', (status) => {
+        setConfigured(status.configured);
+        setError(null);
+        if (!status.configured) setLoading(false);
+    }, streamError);
+    const refresh = useApiStream<Awaited<ReturnType<typeof listActiveFogTasks>>>(
+        configured ? '/api/fog/tasks/active' : null,
+        (data) => {
+            setTasks(data.tasks || []);
+            setError(null);
+            setLoading(false);
+        }, streamError,
+    );
 
     const stats = useMemo(() => computeStats(tasks), [tasks]);
 
@@ -232,7 +198,7 @@ const ActiveTasksTab: FC = () => {
                         color: 'blue',
                     });
                 }
-                fetchTasks();
+                refresh();
             } catch (err) {
                 notifications.show({
                     title: 'Action Failed',
@@ -247,10 +213,10 @@ const ActiveTasksTab: FC = () => {
                 });
             }
         },
-        [tasks, fetchTasks],
+        [tasks, refresh],
     );
 
-    if (loading && configured === null) {
+    if (loading && configured !== false) {
         return (
             <Center py={60}>
                 <Stack align='center' gap='md'>
@@ -261,7 +227,9 @@ const ActiveTasksTab: FC = () => {
         );
     }
 
-    if (!configured) {
+    if (configured === null && error) return <Alert color='red'>{error}</Alert>;
+
+    if (configured === false) {
         return (
             <Alert
                 icon={<IconAlertCircle size={18} />}
@@ -282,19 +250,6 @@ const ActiveTasksTab: FC = () => {
                 title='Active FOG tasks'
                 description='Track and manage currently running deployment tasks across hosts.'
                 icon={<IconTools size={25} />}
-                actions={
-                    <Button
-                        variant='light'
-                        color='teal'
-                        leftSection={<IconRefresh size={16} />}
-                        onClick={() => {
-                            loadAll();
-                        }}
-                        loading={loading}
-                    >
-                        Refresh
-                    </Button>
-                }
                 metrics={[
                     { label: 'Total', value: stats.total },
                     { label: 'Running', value: stats.running, accent: true },
@@ -304,6 +259,7 @@ const ActiveTasksTab: FC = () => {
             />
 
             {/* Tasks Table */}
+            {error && <Alert color='red'>{error}</Alert>}
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
                     <Group justify='space-between' align='flex-end'>
@@ -353,21 +309,9 @@ const ActiveTasksTab: FC = () => {
                     </Group>
                     </MobileFilterPanel>
 
-                    {error && tasks.length === 0 ? (
-                        <Text c='red' ta='center'>
-                            {error}
-                        </Text>
-                    ) : tasks.length === 0 ? (
-                        <Stack align='center' gap='md' py='xl'>
-                            <IconTools
-                                size={48}
-                                color='var(--mantine-color-gray-5)'
-                            />
-                            <Text c='dimmed' ta='center'>
-                                No active tasks found.
-                            </Text>
-                        </Stack>
-                    ) : (
+                    {tasks.length === 0 && !error && (
+                        <Text c='dimmed' ta='center'>No active tasks found.</Text>
+                    )}
                         <ActiveTasksTable
                             loading={loading}
                             tasks={filteredTasks}
@@ -375,7 +319,6 @@ const ActiveTasksTab: FC = () => {
                             actioningTasks={actioningTasks}
                             onTaskAction={handleTaskAction}
                         />
-                    )}
                 </Stack>
             </Card>
         </Stack>

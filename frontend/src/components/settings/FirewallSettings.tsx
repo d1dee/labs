@@ -1,8 +1,8 @@
-import { betterFetch } from '@better-fetch/fetch';
+import { useApiStream } from '@/api/useApiStream';
 import { Alert, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconInfoCircle, IconX } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { z } from 'zod';
 import { LabsSettings } from './LabsSettings';
 import { MikroTikSettings } from './MikrotikSettings';
@@ -40,33 +40,23 @@ export const configSchema = z.object({
         .optional(),
 });
 
-export function FirewallSettings() {
+export function FirewallSettings({ enabled = true }: { enabled?: boolean }) {
     const [initialLoading, setInitialLoading] = useState(true);
     const [configMissing, setConfigMissing] = useState(true);
     const [firewallConfig, setFirewallConfig] = useState<
         FirewallConfig | undefined
     >(undefined);
 
-    const loadFirewallConfig = async (): Promise<void> => {
+    const refresh = useApiStream<FirewallConfig>(enabled ? '/api/settings/firewall' : null, (data) => {
         setConfigMissing(false);
-        try {
-            const { data, error } = await betterFetch<
-                FirewallConfig,
-                { message?: string; error?: string; code?: string }
-            >('/api/settings/firewall');
-
-            if (error) {
-                if (error.code === 'CONFIG_MISSING') {
-                    setConfigMissing(true);
-                    return;
-                }
-                throw new Error(
-                    error.error || 'Failed to load firewall settings',
-                );
-            }
-
-            setFirewallConfig(data);
-        } catch (err) {
+        setFirewallConfig(data);
+        setInitialLoading(false);
+    }, (err) => {
+        setInitialLoading(false);
+        if (err.code === 'CONFIG_MISSING') {
+            setConfigMissing(true);
+            setFirewallConfig(undefined);
+        } else {
             notifications.show({
                 title: 'Error',
                 message: 'Failed to load firewall settings.',
@@ -74,14 +64,8 @@ export function FirewallSettings() {
                 icon: <IconX size={16} />,
             });
             console.error(err);
-        } finally {
-            setInitialLoading(false);
         }
-    };
-
-    useEffect(() => {
-        loadFirewallConfig();
-    }, []);
+    });
 
     return (
         <Stack gap='md'>
@@ -102,8 +86,9 @@ export function FirewallSettings() {
             <MikroTikSettings
                 config={firewallConfig}
                 setFirewallConfig={setFirewallConfig}
+                onSaved={refresh}
             />
-            <LabsSettings firewallConfig={firewallConfig} />
+            <LabsSettings firewallConfig={firewallConfig} enabled={enabled} onSaved={refresh} />
         </Stack>
     );
 }

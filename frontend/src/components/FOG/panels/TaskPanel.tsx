@@ -1,5 +1,6 @@
 import type { FogHost, FogTaskType } from '@/api/fog';
 import { createFogTask } from '@/api/fog';
+import { useApiStream } from '@/api/useApiStream';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconPlayerPlay, IconX } from '@tabler/icons-react';
@@ -13,6 +14,7 @@ interface Props {
 
 export function TaskPanel({ hosts, taskType, onDone }: Props) {
     const [loading, setLoading] = useState(false);
+    const refresh = useApiStream(null, () => {});
     const isBulk = hosts.length > 1;
 
     const hostsWithImage = hosts.filter((h) => h.imageID || h.imagename);
@@ -38,6 +40,7 @@ export function TaskPanel({ hosts, taskType, onDone }: Props) {
         }
 
         if (succeeded > 0) {
+            refresh();
             notifications.show({
                 color: 'green',
                 title: `${taskType.name} Started`,

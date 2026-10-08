@@ -1,13 +1,10 @@
 import {
-    getPiholeBlocking,
-    getPiholeStatus,
-    getPiholeSummary,
-    getPiholeTopDomains,
     setPiholeBlocking,
     type PiholeBlocking,
     type PiholeSummary,
     type PiholeTopDomains,
 } from '@/api/pihole';
+import { useApiStream } from '@/api/useApiStream';
 import {
     MobileFilterPanel,
     MobileFilterToggle,
@@ -57,8 +54,9 @@ const PiholeTab: FC = () => {
     const [summary, setSummary] = useState<PiholeSummary | null>(null);
     const [topDomains, setTopDomains] = useState<PiholeTopDomains | null>(null);
     const [blocking, setBlocking] = useState<PiholeBlocking | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [errors, setErrors] = useState<Record<string, string | null>>({});
+    const error = Object.values(errors).filter(Boolean).join('; ') || null;
+    const loading = !error && configured !== false && (!summary || !blocking);
     const [togglingBlocking, setTogglingBlocking] = useState(false);
     const [domainType, setDomainType] = useState('blocked');
     const [domainPeriod, setDomainPeriod] = useState('1');
@@ -71,7 +69,6 @@ const PiholeTab: FC = () => {
     );
     const [topLoading, setTopLoading] = useState(true);
     const [topError, setTopError] = useState<string | null>(null);
-    const [topRetry, setTopRetry] = useState(0);
     const customFrom = new Date(`${startDate}T00:00:00`).getTime() / 1000;
     const customUntil = Math.floor(
         new Date(`${endDate}T23:59:59`).getTime() / 1000,
@@ -87,87 +84,39 @@ const PiholeTab: FC = () => {
                   ? 'Start date must be on or before end date.'
                   : null;
 
-    const fetchData = async () => {
-        try {
-            setLoading(true);
-            const status = await getPiholeStatus();
-            setConfigured(status.configured);
-
-            if (status.configured) {
-                const [sum, block] = await Promise.all([
-                    getPiholeSummary(),
-                    getPiholeBlocking(),
-                ]);
-                setSummary(sum);
-                setBlocking(block);
-            } else {
-                setSummary(null);
-                setBlocking(null);
-            }
-            setError(null);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-        } finally {
-            setLoading(false);
+    useApiStream<{ configured: boolean; url: string | null }>('/api/pihole/status', (status) => {
+        setConfigured(status.configured);
+        setErrors((current) => ({ ...current, status: null }));
+        if (!status.configured) {
+            setSummary(null);
+            setBlocking(null);
+            setErrors({});
         }
-    };
+    }, (err) => setErrors((current) => ({ ...current, status: err.message })));
+    useApiStream<PiholeSummary>(configured ? '/api/pihole/summary' : null, (data) => {
+        setSummary(data);
+        setErrors((current) => ({ ...current, summary: null }));
+    }, (err) => setErrors((current) => ({ ...current, summary: err.message })));
+    const refresh = useApiStream<PiholeBlocking>(configured ? '/api/pihole/blocking' : null, (data) => {
+        setBlocking(data);
+        setErrors((current) => ({ ...current, blocking: null }));
+    }, (err) => setErrors((current) => ({ ...current, blocking: err.message })));
 
+    const topPath = !configured || rangeError ? null
+        : `/api/pihole/top-domains?blocked=${domainType === 'blocked'}&count=10&${domainPeriod === 'custom' ? `from=${customFrom}&until=${customUntil}` : `windowSeconds=${Number(domainPeriod) * 86400}`}`;
     useEffect(() => {
-        fetchData();
-        const interval = setInterval(fetchData, 30000);
-        return () => clearInterval(interval);
-    }, []);
-
-    useEffect(() => {
-        let active = true;
-        let inFlight = false;
         setTopDomains(null);
         setTopError(null);
+        setTopLoading(Boolean(topPath));
+    }, [topPath]);
+    useApiStream<PiholeTopDomains>(topPath, (data) => {
+        setTopDomains(data);
+        setTopError(null);
         setTopLoading(false);
-        if (!configured || rangeError) return;
-
-        const fetchTopDomains = async () => {
-            if (!active || inFlight) return;
-            inFlight = true;
-            setTopLoading(true);
-            const until = Math.floor(Date.now() / 1000);
-            const range =
-                domainPeriod === 'custom'
-                    ? { from: customFrom, until: customUntil }
-                    : { from: until - Number(domainPeriod) * 86400, until };
-            try {
-                const result = await getPiholeTopDomains(
-                    domainType === 'blocked',
-                    10,
-                    range,
-                );
-                if (!active) return;
-                setTopDomains(result);
-                setTopError(null);
-            } catch (err) {
-                if (!active) return;
-                setTopDomains(null);
-                setTopError(err instanceof Error ? err.message : String(err));
-            } finally {
-                inFlight = false;
-                if (active) setTopLoading(false);
-            }
-        };
-        void fetchTopDomains();
-        const interval = setInterval(fetchTopDomains, 30000);
-        return () => {
-            active = false;
-            clearInterval(interval);
-        };
-    }, [
-        configured,
-        domainType,
-        domainPeriod,
-        customFrom,
-        customUntil,
-        rangeError,
-        topRetry,
-    ]);
+    }, (err) => {
+        setTopError(err.message);
+        setTopLoading(false);
+    });
 
     const handleToggleBlocking = async () => {
         if (!blocking || togglingBlocking) return;
@@ -176,6 +125,7 @@ const PiholeTab: FC = () => {
         try {
             const result = await setPiholeBlocking(newState);
             setBlocking(result);
+            refresh();
             if (result.blocking !== (newState ? 'enabled' : 'disabled')) {
                 throw new Error(
                     `Pi-hole did not ${newState ? 'enable' : 'disable'} blocking (status: ${result.blocking}).`,
@@ -199,7 +149,7 @@ const PiholeTab: FC = () => {
         }
     };
 
-    if (loading && configured !== false && summary === null && !error) {
+    if (loading && summary === null) {
         return (
             <Center py={60}>
                 <Stack align='center' gap='md'>
@@ -223,14 +173,6 @@ const PiholeTab: FC = () => {
                         Showing the last successfully loaded data.
                     </Text>
                 )}
-                <Button
-                    variant='light'
-                    color='red'
-                    loading={loading}
-                    onClick={fetchData}
-                >
-                    Retry
-                </Button>
             </Stack>
         </Alert>
     ) : null;
@@ -433,23 +375,11 @@ const PiholeTab: FC = () => {
                             )}
                         </Group>
                     </MobileFilterPanel>
+                    {topError && (
+                        <Alert color='red' title='Top Domains Request Failed'>{topError}</Alert>
+                    )}
                     {rangeError ? (
                         <Alert color='yellow'>{rangeError}</Alert>
-                    ) : topError ? (
-                        <Alert color='red' title='Top Domains Request Failed'>
-                            <Stack gap='sm'>
-                                <Text size='sm'>{topError}</Text>
-                                <Button
-                                    variant='light'
-                                    color='red'
-                                    onClick={() =>
-                                        setTopRetry((value) => value + 1)
-                                    }
-                                >
-                                    Retry Top Domains
-                                </Button>
-                            </Stack>
-                        </Alert>
                     ) : topLoading && topDomains === null ? (
                         <Group role='status'>
                             <Loader size='sm' />

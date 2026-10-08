@@ -17,9 +17,11 @@ const mikrotikSchema = z.object({
 export function MikroTikSettings({
     config,
     setFirewallConfig,
+    onSaved,
 }: {
     config?: FirewallConfig;
     setFirewallConfig: (config: FirewallConfig) => void;
+    onSaved: () => void;
 }) {
     const [saving, setSaving] = useState(false);
 
@@ -57,6 +59,12 @@ export function MikroTikSettings({
             });
 
             setFirewallConfig(data.data);
+            form.resetDirty({
+                mikrotikBaseUrl: values.mikrotikBaseUrl,
+                mikrotikUsername: values.mikrotikUsername,
+                mikrotikPassword: values.mikrotikPassword,
+            });
+            onSaved();
         } catch (err) {
             notifications.show({
                 title: 'Error',
@@ -83,12 +91,14 @@ export function MikroTikSettings({
     });
 
     useEffect(() => {
-        if (config) {
-            form.setValues({
+        if (config && !form.isDirty()) {
+            const values = {
                 mikrotikBaseUrl: config.mikrotikBaseUrl ?? '',
                 mikrotikUsername: config.mikrotikUsername ?? '',
                 mikrotikPassword: config.mikrotikPassword ?? '',
-            });
+            };
+            form.setValues(values);
+            form.resetDirty(values);
         }
     }, [config]);
 

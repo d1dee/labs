@@ -1,9 +1,10 @@
 import {
     addPiholeDnsItem,
     deletePiholeDnsItem,
-    getPiholeDnsList,
+    type PiholeDnsList,
     type PiholeDnsElement,
 } from '@/api/pihole';
+import { useApiStream } from '@/api/useApiStream';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
@@ -28,12 +29,11 @@ import {
     IconLink,
     IconMapPin,
     IconPlus,
-    IconRefresh,
     IconServer,
     IconTrash,
     IconX,
 } from '@tabler/icons-react';
-import { type FC, useCallback, useEffect, useState } from 'react';
+import { type FC, useState } from 'react';
 
 interface AddField {
     key: string;
@@ -141,10 +141,9 @@ const DNS_CONFIGS: DnsElementConfig[] = [
     },
 ];
 
-const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
+const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ config, enabled }) => {
     const [items, setItems] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
     const [formValues, setFormValues] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
     const [search, setSearch] = useState('');
@@ -166,29 +165,19 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
         visibleItems.sort((a, b) => compareTableValues(sortValue(a.cells), sortValue(b.cells), sort.direction));
     }
 
-    const fetchItems = useCallback(async () => {
-        try {
-            const data = await getPiholeDnsList(config.element);
+    const refresh = useApiStream<PiholeDnsList>(enabled ? `/api/pihole/dns/${config.element}` : null,
+        (data) => {
             setItems(data.items);
-        } catch (err) {
+            setLoading(false);
+        }, (err) => {
+            setLoading(false);
             notifications.show({
                 color: 'red',
                 title: 'Error',
                 message: String(err),
                 icon: <IconX size={16} />,
             });
-        }
-    }, [config.element]);
-
-    const refresh = useCallback(async () => {
-        setRefreshing(true);
-        await fetchItems();
-        setRefreshing(false);
-    }, [fetchItems]);
-
-    useEffect(() => {
-        fetchItems().finally(() => setLoading(false));
-    }, [fetchItems]);
+        });
 
     const handleAdd = async () => {
         const value = config.buildValue(formValues);
@@ -209,7 +198,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
                 icon: <IconCheck size={16} />,
             });
             setFormValues({});
-            await fetchItems();
+            refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -231,7 +220,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
                 message: `${value} removed`,
                 icon: <IconCheck size={16} />,
             });
-            await fetchItems();
+            refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -263,9 +252,6 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
                         <TextInput aria-label={`Search ${config.title}`} placeholder='Search all fields...'
                             value={search} onChange={(event) => setSearch(event.currentTarget.value)}
                             w={{ base: '100%', sm: 300 }} />
-                        <ActionIcon aria-label={`Refresh ${config.title}`} variant='subtle' onClick={refresh} loading={refreshing}>
-                            <IconRefresh size={18} />
-                        </ActionIcon>
                     </Group>
                 </Group>
 
@@ -390,9 +376,10 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
     );
 };
 
-export const PiholeDnsListTabs: FC = () => {
+export const PiholeDnsListTabs: FC<{ enabled?: boolean }> = ({ enabled = true }) => {
+    const [activeTab, setActiveTab] = useState<string | null>(DNS_CONFIGS[0].element);
     return (
-        <Tabs defaultValue={DNS_CONFIGS[0].element}>
+        <Tabs value={activeTab} onChange={setActiveTab} keepMounted keepMountedMode='display-none'>
             <Tabs.List>
                 {DNS_CONFIGS.map((cfg) => (
                     <Tabs.Tab
@@ -406,7 +393,7 @@ export const PiholeDnsListTabs: FC = () => {
             </Tabs.List>
             {DNS_CONFIGS.map((cfg) => (
                 <Tabs.Panel key={cfg.element} value={cfg.element} pt='md'>
-                    <DnsListPanel config={cfg} />
+                    <DnsListPanel config={cfg} enabled={enabled && activeTab === cfg.element} />
                 </Tabs.Panel>
             ))}
         </Tabs>

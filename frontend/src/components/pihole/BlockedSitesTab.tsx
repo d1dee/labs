@@ -1,8 +1,10 @@
-import { getPiholeQueries, type PiholeQueries } from '@/api/pihole';
+import { type PiholeQueries } from '@/api/pihole';
+import { useApiStream } from '@/api/useApiStream';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import { DatePickerInput } from '@mantine/dates';
 import {
+    Alert,
     Badge,
     Card,
     Center,
@@ -16,7 +18,7 @@ import {
     TextInput,
     Title,
 } from '@mantine/core';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useState } from 'react';
 
 const isBlockedStatus = (status: string): boolean => {
     const blocked = ['GRAVITY', 'DENYLIST', 'REGEX', 'EXACT', 'BLOCK'];
@@ -40,6 +42,7 @@ const BlockedSitesTab: FC = () => {
     const filters = useMobileTableFilters();
     const [queriesData, setQueriesData] = useState<PiholeQueries>();
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [search, setSearch] = useState('');
     const [client, setClient] = useState('');
     const [status, setStatus] = useState('all');
@@ -47,26 +50,14 @@ const BlockedSitesTab: FC = () => {
     const [dateRange, setDateRange] = useState<[string | null, string | null]>([null, null]);
     const [sort, setSort] = useState<SortState<'time' | 'domain' | 'client' | 'type' | 'status'>>({ key: 'time', direction: 'desc' });
 
-    useEffect(() => {
-        let active = true;
-        let inFlight = false;
-        const fetchQueries = async () => {
-            if (!active || inFlight) return;
-            inFlight = true;
-            try {
-                const data = await getPiholeQueries(200);
-                if (active) setQueriesData(data);
-            } catch (err) {
-                if (active) console.error('Failed to load queries:', err);
-            } finally {
-                inFlight = false;
-                if (active) setLoading(false);
-            }
-        };
-        void fetchQueries();
-        const interval = setInterval(fetchQueries, 15000);
-        return () => { active = false; clearInterval(interval); };
-    }, []);
+    useApiStream<PiholeQueries>('/api/pihole/queries?length=200', (data) => {
+        setQueriesData(data);
+        setError(null);
+        setLoading(false);
+    }, (err) => {
+        setError(err.message);
+        setLoading(false);
+    });
 
     const blockedQueries = (queriesData?.queries ?? []).filter((q) => isBlockedStatus(q.status));
     const from = dateRange[0] ? new Date(`${dateRange[0]}T00:00:00`).getTime() / 1000 : null;
@@ -94,6 +85,7 @@ const BlockedSitesTab: FC = () => {
     return (
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
+                {error && <Alert color='red' title='Queries Request Failed'>{error}</Alert>}
                 <Group justify='space-between' align='flex-end'>
                     <div>
                         <Title order={4}>Blocked Sites</Title>

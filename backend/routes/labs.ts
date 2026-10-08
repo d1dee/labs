@@ -387,6 +387,9 @@ labsRouter.get('/labs/:labId/history', async (c) => {
     const labId = c.req.param('labId');
 
     try {
+        if (!user.organizationId) return c.json({ error: 'You must join an organization first' }, 403);
+        const config = await getFirewallConfigWithLabs(user.organizationId);
+        if (!config?.labs.some((lab) => lab.id === labId)) return c.json({ error: 'Lab not found' }, 404);
         return c.json({ history: await fetchLabHistory(user, labId) });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -451,6 +454,9 @@ labsRouter.get('/labs/:labId/usage-history', async (c) => {
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
     try {
+        if (!user.organizationId) return c.json({ error: 'You must join an organization first' }, 403);
+        const config = await getFirewallConfigWithLabs(user.organizationId);
+        if (!config?.labs.some((lab) => lab.id === labId)) return c.json({ error: 'Lab not found' }, 404);
         const usageHistory = await db
             .select()
             .from(dataUsageHistory)

@@ -75,7 +75,7 @@ export default function VeyonMonitoringWall({
 }) {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [columns, setColumns] = useState('auto');
-    const [refresh, setRefresh] = useState('5000');
+    const [refresh, setRefresh] = useState('10000');
     const [search, setSearch] = useState('');
     const [selectionSearch, setSelectionSearch] = useState('');
     const [scrollTop, setScrollTop] = useState(0);
@@ -170,7 +170,7 @@ export default function VeyonMonitoringWall({
     });
     const fullscreen = useVeyonScreenshots(opened && pinnedComputer ? [pinnedComputer.id] : [], {
         paused: refresh === 'paused',
-        minFrameIntervalMs: 1000,
+        minFrameIntervalMs: 10_000,
         width: 1280,
         quality: 75,
         priority: 'viewer',

@@ -1,5 +1,6 @@
 import type { FogHost, FogSnapin } from '@/api/fog';
 import { createFogSnapinTask } from '@/api/fog';
+import { useApiStream } from '@/api/useApiStream';
 import { Button, Group, Select, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
@@ -16,6 +17,7 @@ export function SnapinPanel({ hosts, snapins, onDone }: Props) {
         null,
     );
     const [loading, setLoading] = useState(false);
+    const refresh = useApiStream(null, () => {});
 
     const isBulk = hosts.length > 1;
     const selectedSnapin = snapins.find(
@@ -36,6 +38,7 @@ export function SnapinPanel({ hosts, snapins, onDone }: Props) {
         const failed = results.filter((r) => r.status === 'rejected').length;
 
         if (succeeded > 0) {
+            refresh();
             notifications.show({
                 color: 'green',
                 title: 'Snapin Sent',

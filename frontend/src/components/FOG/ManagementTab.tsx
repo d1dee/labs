@@ -13,6 +13,7 @@ import {
     type FogTaskType,
 } from '@/api/fog';
 import { PageHero } from '@/components/ui/PageHero';
+import { useApiStream } from '@/api/useApiStream';
 import {
     Alert,
     Button,
@@ -29,10 +30,9 @@ import {
     IconAlertCircle,
     IconCheck,
     IconPackage,
-    IconRefresh,
     IconX,
 } from '@tabler/icons-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { HostTable } from './HostTable';
 import { SelectedHostCard } from './SelectedHostCard';
 
@@ -42,6 +42,7 @@ function ManagementTab() {
     const [taskTypes, setTaskTypes] = useState<FogTaskType[]>([]);
     const [snapins, setSnapins] = useState<FogSnapin[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [allHosts, setAllHosts] = useState<FogHost[]>([]);
 
     // Selection state lives here and is shared down to both table and card
@@ -59,70 +60,29 @@ function ManagementTab() {
         [allHosts, selectedIds],
     );
 
-    const fetchStatus = async () => {
-        try {
-            const status = await getFogStatus();
-            setConfigured(status.configured);
-            return status.configured;
-        } catch {
-            setConfigured(false);
-            return false;
-        }
-    };
-
-    const fetchReferenceData = async () => {
-        try {
-            const [imgs, types, snaps, hosts] = await Promise.all([
-                listFogImages(),
-                listFogTaskTypes(),
-                listFogSnapins(),
-                listFogHosts(),
-            ]);
-            setImages(imgs.images);
-            setTaskTypes(types.tasktypes);
-            setSnapins(snaps.snapins);
-
-            // Reconcile selection against the fresh host list
-            const freshIds = new Set(hosts.hosts.map((h) => h.id));
-            setAllHosts(
-                hosts.hosts.map((v) => ({
-                    id: v.id,
-                    name: v.name,
-                    macs: v.macs,
-                    inventory: v.inventory,
-                    imagename: v.imagename,
-                    pingstatuscode: v.pingstatuscode,
-                    pingstatustext: v.pingstatustext,
-                })),
-            );
-            setSelectedIds((prev) => prev.filter((id) => freshIds.has(id)));
-
-            const deploy = types.tasktypes.find((t) =>
-                t.name?.toLowerCase().includes('deploy'),
-            );
-            const capture = types.tasktypes.find((t) =>
-                t.name?.toLowerCase().includes('capture'),
-            );
-
-            if (deploy) setDeployTaskTypeId(deploy.id);
-            if (capture) setCaptureTaskTypeId(capture.id);
-        } catch {
-            // non-critical
-        }
-    };
-
-    const loadAll = async () => {
-        setLoading(true);
-        const ok = await fetchStatus();
-        if (ok) {
-            await fetchReferenceData();
-        }
+    const streamError = (err: Error) => {
+        setError(err.message);
         setLoading(false);
     };
-
-    useEffect(() => {
-        loadAll();
-    }, []);
+    useApiStream<Awaited<ReturnType<typeof getFogStatus>>>('/api/fog/status', (status) => {
+        setConfigured(status.configured);
+        setError(null);
+        if (!status.configured) setLoading(false);
+    }, streamError);
+    const refresh = useApiStream<Awaited<ReturnType<typeof listFogHosts>>>(configured ? '/api/fog/hosts' : null, (data) => {
+        const freshIds = new Set(data.hosts.map((host) => host.id));
+        setAllHosts(data.hosts);
+        setSelectedIds((prev) => prev.filter((id) => freshIds.has(id)));
+        setLoading(false);
+        setError(null);
+    }, streamError);
+    useApiStream<Awaited<ReturnType<typeof listFogImages>>>(configured ? '/api/fog/images' : null, (data) => setImages(data.images), streamError);
+    useApiStream<Awaited<ReturnType<typeof listFogSnapins>>>(configured ? '/api/fog/snapins' : null, (data) => setSnapins(data.snapins), streamError);
+    useApiStream<Awaited<ReturnType<typeof listFogTaskTypes>>>(configured ? '/api/fog/tasktypes' : null, (data) => {
+        setTaskTypes(data.tasktypes);
+        setDeployTaskTypeId(data.tasktypes.find((t) => t.name?.toLowerCase().includes('deploy'))?.id ?? null);
+        setCaptureTaskTypeId(data.tasktypes.find((t) => t.name?.toLowerCase().includes('capture'))?.id ?? null);
+    }, streamError);
 
     const modelCounts = useMemo(() => {
         const counts = new Map<string, number>();
@@ -181,6 +141,7 @@ function ManagementTab() {
                 onConfirm: async () => {
                     try {
                         await createFogTask(host.id, deployTaskTypeId);
+                        refresh();
                         notifications.show({
                             color: 'green',
                             title: 'Deploy Started',
@@ -198,7 +159,7 @@ function ManagementTab() {
                 },
             });
         },
-        [deployTaskTypeId],
+        [deployTaskTypeId, refresh],
     );
 
     const handleSnapin = useCallback(
@@ -235,6 +196,7 @@ function ManagementTab() {
                 onConfirm: async () => {
                     try {
                         await deleteFogHost(host.id);
+                        refresh();
                         notifications.show({
                             color: 'green',
                             title: 'Host Deleted',
@@ -253,14 +215,14 @@ function ManagementTab() {
                 },
             });
         },
-        [handleHostsDeleted],
+        [handleHostsDeleted, refresh],
     );
 
     // Stable key for SelectedHostCard — forces remount (resets tab state) when
     // the set of selected hosts changes identity
     const cardKey = selectedIds.slice().sort().join(',');
 
-    if (loading && configured === null) {
+    if (loading && configured !== false) {
         return (
             <Center py={60}>
                 <Stack align='center' gap='md'>
@@ -271,7 +233,9 @@ function ManagementTab() {
         );
     }
 
-    if (!configured) {
+    if (configured === null && error) return <Alert color='red'>{error}</Alert>;
+
+    if (configured === false) {
         return (
             <Alert
                 icon={<IconAlertCircle size={18} />}
@@ -293,17 +257,6 @@ function ManagementTab() {
                 title='FOG host overview'
                 description='Manage registered hosts, images and snapins for network deployment.'
                 icon={<IconPackage size={25} />}
-                actions={
-                    <Button
-                        variant='light'
-                        color='teal'
-                        leftSection={<IconRefresh size={16} />}
-                        onClick={loadAll}
-                        loading={loading}
-                    >
-                        Refresh
-                    </Button>
-                }
                 metrics={[
                     { label: 'Total hosts', value: allHosts.length },
                     { label: 'Models', value: topModels.length },
@@ -312,6 +265,7 @@ function ManagementTab() {
                 ]}
             />
 
+            {error && <Alert color='red'>{error}</Alert>}
             <Stack>
                 <SelectedHostCard
                     key={cardKey}
@@ -353,6 +307,12 @@ function SnapinQuickActionModal({
         null,
     );
     const [loading, setLoading] = useState(false);
+    const [liveSnapins, setLiveSnapins] = useState(snapins);
+    const [error, setError] = useState<string | null>(null);
+    const refresh = useApiStream<Awaited<ReturnType<typeof listFogSnapins>>>('/api/fog/snapins', (data) => {
+        setLiveSnapins(data.snapins);
+        setError(null);
+    }, (err) => setError(err.message));
 
     const handleSend = async () => {
         if (!selectedSnapinId) return;
@@ -361,6 +321,7 @@ function SnapinQuickActionModal({
 
         try {
             await createFogSnapinTask(host.id, snapinId);
+            refresh();
             notifications.show({
                 color: 'green',
                 title: 'Snapin Sent',
@@ -382,13 +343,14 @@ function SnapinQuickActionModal({
 
     return (
         <Stack gap='sm'>
+            {error && <Alert color='red'>{error}</Alert>}
             <Text size='sm'>
                 Select a snapin to send to host <strong>{host.name}</strong>.
             </Text>
             <Select
                 label='Select snapin'
                 placeholder='Choose snapin…'
-                data={snapins.map((s) => ({
+                data={liveSnapins.map((s) => ({
                     value: String(s.id),
                     label: s.name,
                 }))}

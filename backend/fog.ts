@@ -190,7 +190,7 @@ export class FogClient {
             'Content-Type': 'application/json',
         };
 
-        const opts: RequestInit = { method, headers };
+        const opts: RequestInit = { method, headers, signal: AbortSignal.timeout(15_000) };
         if (body && (method === 'POST' || method === 'PUT')) {
             opts.body = JSON.stringify(body);
         }

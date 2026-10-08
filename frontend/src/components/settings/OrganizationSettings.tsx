@@ -1,5 +1,6 @@
 import type { Organization } from '@/context/SessionContext';
 import { useSessionContext } from '@/context/SessionContext';
+import { useApiStream } from '@/api/useApiStream';
 import { betterFetch } from '@better-fetch/fetch';
 import {
     ActionIcon,
@@ -38,7 +39,7 @@ import { PhoneNumberInput } from '../PhoneNumberInput';
 
 export type { Organization };
 
-export function OrganizationSettings() {
+export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) {
     const {
         organization: userOrganization,
         setOrganization: onOrganizationChange,
@@ -46,6 +47,8 @@ export function OrganizationSettings() {
     const [loading, setLoading] = useState(false);
     const [joining, setJoining] = useState(false);
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const refresh = useApiStream<{ organizations: Organization[] }>(enabled ? '/api/organizations' : null,
+        (data) => onOrganizationChange(data.organizations[0] ?? null));
 
     const orgSchema = z.object({
         name: z
@@ -116,6 +119,7 @@ export function OrganizationSettings() {
             });
 
             onOrganizationChange(data.organization);
+            refresh();
             setShowCreateForm(false);
             createForm.reset();
         } catch (err) {
@@ -160,6 +164,7 @@ export function OrganizationSettings() {
             });
 
             onOrganizationChange(data.organization);
+            refresh();
             joinForm.reset();
         } catch (err) {
             notifications.show({
@@ -223,6 +228,7 @@ export function OrganizationSettings() {
             });
 
             onOrganizationChange(null);
+            refresh();
         } catch (err) {
             notifications.show({
                 title: 'Error',

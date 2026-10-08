@@ -63,7 +63,7 @@ export function resolveVeyonPollerConfig(
         return Math.min(max, Math.max(min, parsed));
     };
     return {
-        pollIntervalMs: int('VEYON_POLL_INTERVAL_MS', 5_000, 250, 60_000),
+        pollIntervalMs: int('VEYON_POLL_INTERVAL_MS', 10_000, 250, 60_000),
         requestTimeoutMs: int('VEYON_POLL_TIMEOUT_MS', 5_000, 500, 120_000),
         maxBackoffMs: int('VEYON_POLL_MAX_BACKOFF_MS', 10_000, 1_000, 300_000),
         jitterMs: int('VEYON_POLL_JITTER_MS', 300, 0, 5_000),
@@ -71,7 +71,7 @@ export function resolveVeyonPollerConfig(
         idleLingerMs: int('VEYON_POLL_IDLE_LINGER_MS', 5_000, 0, 300_000),
         frameWidth: int('VEYON_POLL_FRAME_WIDTH', 320, 160, 1_920),
         frameQuality: int('VEYON_POLL_FRAME_QUALITY', 50, 1, 100),
-        viewerIntervalMs: int('VEYON_VIEWER_INTERVAL_MS', 1_000, 250, 60_000),
+        viewerIntervalMs: int('VEYON_VIEWER_INTERVAL_MS', 10_000, 250, 60_000),
         viewerWidth: int('VEYON_VIEWER_FRAME_WIDTH', 1_280, 160, 1_920),
         viewerQuality: int('VEYON_VIEWER_FRAME_QUALITY', 75, 1, 100),
         organizationRequestsPerSecond: int('VEYON_ORG_REQUESTS_PER_SECOND', 12, 1, 1_000),

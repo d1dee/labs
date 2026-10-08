@@ -1,5 +1,6 @@
 import type { FogHost, FogImage } from '@/api/fog';
-import { getFogHost, updateFogHost } from '@/api/fog';
+import { updateFogHost } from '@/api/fog';
+import { useApiStream } from '@/api/useApiStream';
 import { Button, Group, Select, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
@@ -15,6 +16,7 @@ interface Props {
 export function ImagePanel({ hosts, images, onDone, onImageAssigned }: Props) {
     const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    const refresh = useApiStream(null, () => {});
 
     const isBulk = hosts.length > 1;
     const selectedImage = images.find(
@@ -39,6 +41,7 @@ export function ImagePanel({ hosts, images, onDone, onImageAssigned }: Props) {
                 (r) => r.status === 'rejected',
             ).length;
             if (succeeded > 0) {
+                refresh();
                 notifications.show({
                     color: 'green',
                     title: 'Images Assigned',
@@ -56,27 +59,23 @@ export function ImagePanel({ hosts, images, onDone, onImageAssigned }: Props) {
             }
             setLoading(false);
             if (onImageAssigned) {
-                const updated = hosts.map((h) => ({
-                    ...h,
-                    imageID: imageId,
-                    imagename:
-                        images.find((img) => img.id === imageId)?.name ||
-                        h.imagename,
-                }));
+                const updated = results.flatMap((result) =>
+                    result.status === 'fulfilled' ? [result.value] : [],
+                );
                 onImageAssigned(updated);
             }
             onDone();
         } else {
             const host = hosts[0];
             try {
-                await updateFogHost(host.id, { imageID: imageId });
+                const updated = await updateFogHost(host.id, { imageID: imageId });
+                refresh();
                 notifications.show({
                     color: 'green',
                     title: 'Image Assigned',
                     message: `Image assigned to ${host.name}`,
                     icon: <IconCheck size={16} />,
                 });
-                const updated = await getFogHost(host.id);
                 setLoading(false);
                 if (onImageAssigned && updated) {
                     onImageAssigned([updated]);

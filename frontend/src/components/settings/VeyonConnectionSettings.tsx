@@ -1,8 +1,9 @@
 import {
     deleteVeyonSettings,
-    getVeyonSettings,
+    type VeyonSettings,
     saveVeyonSettings,
 } from '@/api/veyon';
+import { useApiStream } from '@/api/useApiStream';
 import {
     Alert,
     Badge,
@@ -19,9 +20,9 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconInfoCircle, IconTrash, IconUpload, IconX } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 
-export function VeyonConnectionSettings() {
+export function VeyonConnectionSettings({ enabled = true }: { enabled?: boolean }) {
     const [url, setUrl] = useState('http://localhost:11080');
     const [keyName, setKeyName] = useState('teacher');
     const [keyData, setKeyData] = useState('');
@@ -34,17 +35,18 @@ export function VeyonConnectionSettings() {
     const [saving, setSaving] = useState(false);
     const [removing, setRemoving] = useState(false);
 
-    useEffect(() => {
-        getVeyonSettings()
-            .then((settings) => {
-                if (settings.url) setUrl(settings.url);
-                if (settings.keyName) setKeyName(settings.keyName);
-                setVerifyTls(settings.verifyTls);
-                setKeyConfigured(settings.keyConfigured);
-                setConfigured(settings.configured);
-            })
-            .finally(() => setLoading(false));
-    }, []);
+    const seeded = useRef(false);
+    const refresh = useApiStream<VeyonSettings>(enabled ? '/api/settings/veyon' : null, (settings) => {
+        if (!seeded.current) {
+            if (settings.url) setUrl(settings.url);
+            if (settings.keyName) setKeyName(settings.keyName);
+            setVerifyTls(settings.verifyTls);
+            seeded.current = true;
+        }
+        setKeyConfigured(settings.keyConfigured);
+        setConfigured(settings.configured);
+        setLoading(false);
+    }, () => setLoading(false));
 
     const onKeyFile = async (file: File | null) => {
         if (!file) return;
@@ -66,6 +68,7 @@ export function VeyonConnectionSettings() {
             setKeyFileName('');
             setKeyConfigured(true);
             setConfigured(true);
+            refresh();
             notifications.show({
                 color: 'teal',
                 title: 'Veyon connected',
@@ -92,6 +95,7 @@ export function VeyonConnectionSettings() {
             setKeyFileName('');
             setKeyConfigured(false);
             setConfigured(false);
+            refresh();
             notifications.show({
                 color: 'teal',
                 title: 'Configuration removed',
@@ -141,7 +145,7 @@ export function VeyonConnectionSettings() {
                     label='WebAPI URL'
                     placeholder='https://veyon-proxy.example.edu:11080'
                     value={url}
-                    onChange={(event) => setUrl(event.currentTarget.value)}
+                    onChange={(event) => { seeded.current = true; setUrl(event.currentTarget.value); }}
                     disabled={loading}
                     required
                 />
@@ -149,7 +153,7 @@ export function VeyonConnectionSettings() {
                     label='Key name'
                     description='Name of the key pair created with veyon-cli authkeys create (e.g. "teacher")'
                     value={keyName}
-                    onChange={(event) => setKeyName(event.currentTarget.value)}
+                    onChange={(event) => { seeded.current = true; setKeyName(event.currentTarget.value); }}
                     required
                 />
                 <Textarea
@@ -193,7 +197,7 @@ export function VeyonConnectionSettings() {
                 <Checkbox
                     label='Verify the WebAPI TLS certificate'
                     checked={verifyTls}
-                    onChange={(event) => setVerifyTls(event.currentTarget.checked)}
+                    onChange={(event) => { seeded.current = true; setVerifyTls(event.currentTarget.checked); }}
                 />
                 <Group>
                     <Button onClick={save} loading={saving} disabled={!canSave}>

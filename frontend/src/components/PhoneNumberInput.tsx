@@ -3,13 +3,13 @@ import {
     CheckIcon,
     Combobox,
     Group,
+    Input,
     InputBase,
     ScrollArea,
     useCombobox,
     type InputBaseProps,
     type PolymorphicComponentProps,
 } from '@mantine/core';
-import { useUncontrolled } from '@mantine/hooks';
 import { IconArrowDown } from '@tabler/icons-react';
 import countries from 'i18n-iso-countries';
 import en from 'i18n-iso-countries/langs/en.json';
@@ -21,7 +21,7 @@ import {
     type CountryCode,
 } from 'libphonenumber-js';
 import examples from 'libphonenumber-js/mobile/examples';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { IMaskInput } from 'react-imask';
 
 countries.registerLocale(en);
@@ -40,7 +40,7 @@ const libPhoneNumberCountries = getCountries();
 const countryOptionsDataMap = Object.fromEntries(
     libPhoneNumberCountries
         .map((code) => {
-            const name = libIsoCountries[code];
+            const name = libIsoCountries[code] ?? code;
             const emoji = getFlagEmoji(code);
 
             return [
@@ -67,15 +67,15 @@ const countryOptionsData = Object.values(countryOptionsDataMap);
 type Country = (typeof countryOptionsData)[number];
 
 function getFormat(countryCode: CountryCode) {
-    const example = getExampleNumber(countryCode, examples)!.formatNational();
-    const mask = example.replace(/\d/g, '0');
+    const example = getExampleNumber(countryCode, examples)?.formatNational() ?? '';
+    const mask = example ? example.replace(/\d/g, '0') : '000000000000000';
     return { example, mask };
 }
 
 function getInitialDataFromValue(
-    value: string | undefined,
+    value: string | null | undefined,
     options: {
-        initialCountryCode: string;
+        initialCountryCode: CountryCode;
     },
 ): {
     country: Country;
@@ -84,7 +84,7 @@ function getInitialDataFromValue(
 } {
     const defaultValue = {
         country: countryOptionsDataMap[options.initialCountryCode],
-        format: getFormat(options.initialCountryCode as CountryCode),
+        format: getFormat(options.initialCountryCode),
         localValue: '',
     };
     if (!value) return defaultValue;
@@ -93,17 +93,18 @@ function getInitialDataFromValue(
     if (!phoneNumber.country) return defaultValue;
     return {
         country: countryOptionsDataMap[phoneNumber.country],
-        localValue: phoneNumber.formatNational(),
+        localValue: phoneNumber.formatNational().replace(/\D/g, ''),
         format: getFormat(phoneNumber.country),
     };
 }
 
 export type PhoneInputProps = {
-    initialCountryCode?: string;
-    defaultValue?: string;
+    initialCountryCode?: CountryCode;
+    value?: string | null;
+    defaultValue?: string | null;
 } & Omit<
-    PolymorphicComponentProps<typeof IMaskInput, InputBaseProps>,
-    'onChange' | 'defaultValue'
+    PolymorphicComponentProps<'input', InputBaseProps>,
+    'onChange' | 'defaultValue' | 'value' | 'component' | 'renderRoot'
 > & { onChange: (value: string | null) => void };
 
 export function PhoneNumberInput({
@@ -113,68 +114,57 @@ export function PhoneNumberInput({
     defaultValue,
     ...props
 }: PhoneInputProps) {
-    const [value, onChange] = useUncontrolled({
-        value: _value,
-        defaultValue,
-        onChange: _onChange,
-    });
-    const initialData = useRef(
-        getInitialDataFromValue(value, {
-            initialCountryCode: initialCountryCode,
-        }),
-    );
-    const [country, setCountry] = useState(initialData.current.country);
-    const [format, setFormat] = useState(initialData.current.format);
-    const [localValue, setLocalValue] = useState(
-        initialData.current.localValue,
-    );
+    const [data, setData] = useState(() => getInitialDataFromValue(
+        _value === undefined ? defaultValue : _value,
+        { initialCountryCode },
+    ));
+    const [previousValue, setPreviousValue] = useState(_value);
+    const lastNotifiedValue = useRef(_value);
+    // Synchronize external values before IMask renders, without notifying consumers.
+    if (_value !== previousValue) {
+        setPreviousValue(_value);
+        if (_value !== undefined && _value !== lastNotifiedValue.current) {
+            setData(getInitialDataFromValue(_value, { initialCountryCode }));
+        }
+        lastNotifiedValue.current = _value;
+    }
+    const { country, format, localValue } = data;
     const inputRef = useRef<HTMLInputElement>(null);
-
-    const lastNotifiedValue = useRef<string | null | undefined>(value ?? '');
-
-    useEffect(() => {
-        let value = '';
-        if (localValue.trim().length > 0) {
-            const asYouType = new AsYouType(country.code);
-            asYouType.input(localValue);
-            value = asYouType.getNumber()?.number ?? '';
-        }
-        if (value !== lastNotifiedValue.current) {
-            lastNotifiedValue.current = value;
-            onChange(value);
-        }
-    }, [country.code, localValue]);
-
-    useEffect(() => {
-        if (
-            typeof value !== 'undefined' &&
-            value !== lastNotifiedValue.current && value !==null
-        ) {
-            const initialData = getInitialDataFromValue(value, {
-                initialCountryCode,
-            });
-            lastNotifiedValue.current = value;
-            setCountry(initialData.country);
-            setFormat(initialData.format);
-            setLocalValue(initialData.localValue);
-        }
-    }, [value]);
 
     const { readOnly, disabled } = props;
     const leftSectionWidth = 45;
 
-    const handleCountryChange = useCallback((country: Country) => {
-        setCountry(country);
-        setFormat(getFormat(country.code));
-        setLocalValue('');
+    const handleCountryChange = (country: Country) => {
+        setData({ country, format: getFormat(country.code), localValue: '' });
+        if (localValue || _value) {
+            lastNotifiedValue.current = '';
+            _onChange('');
+        }
         inputRef.current?.focus();
-    }, []);
+    };
 
     return (
         <InputBase
             {...props}
-            component={IMaskInput}
-            inputRef={inputRef}
+            renderRoot={(inputProps) => (
+                <IMaskInput
+                    {...inputProps}
+                    inputRef={inputRef}
+                    mask={format.mask}
+                    unmask={true}
+                    value={localValue}
+                    onAccept={(acceptedValue: string, _mask: unknown, event?: InputEvent) => {
+                        // IMask also accepts programmatic updates; only user edits notify.
+                        if (!event || readOnly || disabled) return;
+                        setData({ ...data, localValue: acceptedValue });
+                        const formatter = new AsYouType(country.code);
+                        formatter.input(acceptedValue);
+                        const nextValue = formatter.getNumber()?.number ?? '';
+                        lastNotifiedValue.current = nextValue;
+                        _onChange(nextValue);
+                    }}
+                />
+            )}
             leftSection={
                 <CountrySelect
                     disabled={disabled || readOnly}
@@ -184,6 +174,7 @@ export function PhoneNumberInput({
                 />
             }
             leftSectionWidth={leftSectionWidth}
+            leftSectionPointerEvents='all'
             styles={{
                 input: {
                     paddingLeft: `calc(${leftSectionWidth}px + var(--mantine-spacing-sm))`,
@@ -194,10 +185,6 @@ export function PhoneNumberInput({
                 },
             }}
             inputMode='numeric'
-            mask={format.mask}
-            unmask={true}
-            value={localValue}
-            onAccept={(value) => setLocalValue(value)}
         />
     );
 }
@@ -226,7 +213,7 @@ const CountrySelect = memo(function CountrySelect({
         onDropdownOpen: () => {
             combobox.focusSearchInput();
             setTimeout(() => {
-                selectedRef.current?.scrollIntoView({
+                selectedRef.current?.scrollIntoView?.({
                     behavior: 'instant',
                     block: 'center',
                 });
@@ -269,12 +256,12 @@ const CountrySelect = memo(function CountrySelect({
                 combobox.closeDropdown();
             }}
         >
-            <Combobox.Target withAriaAttributes={false}>
+            <Combobox.Target>
                 <ActionIcon
                     variant='transparent'
                     onClick={() => combobox.toggleDropdown()}
                     size='lg'
-                    tabIndex={-1}
+                    aria-label={`Select country, ${country.name}`}
                     disabled={disabled}
                     w={leftSectionWidth}
                     c='dimmed'
@@ -287,17 +274,20 @@ const CountrySelect = memo(function CountrySelect({
             </Combobox.Target>
 
             <Combobox.Dropdown>
-                <Combobox.Search
-                    value={search}
-                    onChange={(event) => setSearch(event.currentTarget.value)}
-                    placeholder='Buscar país'
-                />
+                <Input.Wrapper>
+                    <Combobox.Search
+                        value={search}
+                        onChange={(event) => setSearch(event.currentTarget.value)}
+                        placeholder='Search countries'
+                        aria-label='Search countries'
+                    />
+                </Input.Wrapper>
                 <Combobox.Options>
                     <ScrollArea.Autosize mah={200} type='scroll'>
                         {options.length > 0 ? (
                             options
                         ) : (
-                            <Combobox.Empty>No encontrado</Combobox.Empty>
+                            <Combobox.Empty>No countries found</Combobox.Empty>
                         )}
                     </ScrollArea.Autosize>
                 </Combobox.Options>

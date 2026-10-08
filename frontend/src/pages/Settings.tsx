@@ -4,7 +4,7 @@ import { PiholeSettings } from '@/components/settings/PiholeSettings';
 import { VeyonConnectionSettings } from '@/components/settings/VeyonConnectionSettings';
 import { useSessionContext } from '@/context/SessionContext';
 import { Modal, Stack, Tabs, Text, Title } from '@mantine/core';
-import { FC } from 'react';
+import { FC, useState } from 'react';
 import { FirewallSettings } from '../components/settings/FirewallSettings';
 
 interface SettingsProps {
@@ -14,15 +14,17 @@ interface SettingsProps {
 
 const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
     const { organization } = useSessionContext();
+    const [activeTab, setActiveTab] = useState<string | null>('organization');
 
     return (
         <Modal
             opened={opened}
             onClose={onClose}
+            closeButtonProps={{ 'aria-label': 'Close settings' }}
             title={
                 <>
-                    <Title order={3}>Settings</Title>
-                    <Text size='sm' color='dimmed'>
+                    <Title component='span' order={3}>Settings</Title>
+                    <Text component='span' display='block' size='sm' color='dimmed'>
                         Manage your organization and firewall configuration
                     </Text>
                 </>
@@ -31,7 +33,7 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
             centered
         >
             <Stack pos='relative'>
-                <Tabs defaultValue='organization'>
+                <Tabs value={activeTab} onChange={setActiveTab} keepMounted keepMountedMode='display-none'>
                     <Tabs.List>
                         <Tabs.Tab value='organization'>Organization</Tabs.Tab>
                         <Tabs.Tab value='firewall' disabled={!organization}>
@@ -42,19 +44,19 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
                         <Tabs.Tab value='veyon'>Veyon</Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel value='organization' pt='md'>
-                        <OrganizationSettings />
+                        <OrganizationSettings enabled={opened && activeTab === 'organization'} />
                     </Tabs.Panel>
                     <Tabs.Panel value='firewall' pt='md'>
-                        <FirewallSettings />
+                        <FirewallSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'firewall' && !!organization} />
                     </Tabs.Panel>
                     <Tabs.Panel value='pihole' pt='md'>
-                        <PiholeSettings />
+                        <PiholeSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'pihole' && !!organization} />
                     </Tabs.Panel>
                     <Tabs.Panel value='fog' pt='md'>
-                        <FogConnectionSettings />
+                        <FogConnectionSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'fog' && !!organization} />
                     </Tabs.Panel>
                     <Tabs.Panel value='veyon' pt='md'>
-                        <VeyonConnectionSettings />
+                        <VeyonConnectionSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'veyon' && !!organization} />
                     </Tabs.Panel>
                 </Tabs>
             </Stack>

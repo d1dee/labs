@@ -479,11 +479,11 @@ export class VeyonClient {
         await connection?.dispose(signal);
     }
 
-    async information(host: string) {
+    async information(host: string, signal?: AbortSignal) {
         const [userResponse, sessionResponse, featuresResponse] = await Promise.all([
-            this.authenticatedRequest(host, '/user'),
-            this.authenticatedRequest(host, '/session'),
-            this.authenticatedRequest(host, '/feature'),
+            this.authenticatedRequest(host, '/user', { signal }),
+            this.authenticatedRequest(host, '/session', { signal }),
+            this.authenticatedRequest(host, '/feature', { signal }),
         ]);
         return {
             user: await userResponse.json(),

@@ -1,10 +1,13 @@
 import { useSession } from '@/lib/auth-client';
+import { refreshApiStreams, resetApiStreams, useApiStream } from '@/api/useApiStream';
+import { modals } from '@mantine/modals';
 import {
     createContext,
     useCallback,
     useContext,
-    useEffect,
+    useLayoutEffect,
     useMemo,
+    useRef,
     useState,
     type ReactNode,
 } from 'react';
@@ -26,7 +29,7 @@ export interface Organization {
 }
 
 type SessionData = NonNullable<ReturnType<typeof useSession>['data']>;
-type User = SessionData['user'];
+type User = SessionData['user'] & { organizationId?: string | null };
 
 interface SessionContextValue {
     session: SessionData | null;
@@ -43,34 +46,37 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
     const { data: session, isPending } = useSession();
-    const [organization, setOrganization] = useState<Organization | null>(null);
-
-    const refreshOrganization = useCallback(async () => {
-        try {
-            const response = await fetch('/api/organizations');
-            if (!response.ok) {
-                setOrganization(null);
-                return;
-            }
-            const data = await response.json();
-            if (data.organizations && data.organizations.length > 0) {
-                setOrganization(data.organizations[0]);
-            } else {
-                setOrganization(null);
-            }
-        } catch (err) {
-            console.error('Failed to load organization:', err);
-            setOrganization(null);
+    const user = session?.user as User | undefined;
+    const [organization, setOrganizationState] = useState<Organization | null>(null);
+    const organizationScope = useRef<string | null>(null);
+    const setOrganization = useCallback((next: Organization | null) => {
+        if (organizationScope.current !== (next?.id ?? null)) {
+            organizationScope.current = next?.id ?? null;
+            modals.closeAll();
+            resetApiStreams();
         }
+        setOrganizationState(next);
     }, []);
 
-    useEffect(() => {
-        if (session) {
-            refreshOrganization();
-        } else {
-            setOrganization(null);
-        }
-    }, [session, refreshOrganization]);
+    const refreshOrganization = useCallback(async () => refreshApiStreams(), []);
+
+    // Clear protected caches before new-identity children subscribe in passive
+    // effects, not after they could receive the previous user's snapshot.
+    useLayoutEffect(() => {
+        modals.closeAll();
+        setOrganization(null);
+        resetApiStreams();
+    }, [user?.id, user?.organizationId, setOrganization]);
+
+    useApiStream<{ organizations: Organization[] }>(
+        session ? '/api/organizations' : null,
+        (data) => setOrganization(data.organizations[0] ?? null),
+        (error) => {
+            // Keep the last good organization on transport errors, but never
+            // retain privileged data after an authorization failure.
+            if (error.status === 401 || error.status === 403) setOrganization(null);
+        },
+    );
 
     const value = useMemo<SessionContextValue>(
         () => ({
@@ -83,7 +89,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             refreshOrganization,
             setOrganization,
         }),
-        [session, isPending, organization, refreshOrganization],
+        [session, isPending, organization, refreshOrganization, setOrganization],
     );
 
     return (

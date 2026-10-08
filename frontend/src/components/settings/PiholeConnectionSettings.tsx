@@ -1,31 +1,31 @@
-import { getPiholeSettings, savePiholeSettings } from '@/api/pihole';
+import { type PiholeSettingsConfig, savePiholeSettings } from '@/api/pihole';
+import { useApiStream } from '@/api/useApiStream';
 import { Button, Card, Checkbox, Group, Stack, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useRef, useState } from 'react';
 
 interface Props {
     onSaved?: () => void;
+    enabled?: boolean;
 }
 
-export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
+export const PiholeConnectionSettings: FC<Props> = ({ onSaved, enabled = true }) => {
     const [url, setUrl] = useState('');
     const [password, setPassword] = useState('');
     const [verifyTls, setVerifyTls] = useState(true);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
-    useEffect(() => {
-        getPiholeSettings()
-            .then((cfg) => {
-                setUrl(cfg.url);
-                setVerifyTls(cfg.verifyTls ?? true);
-            })
-            .catch(() => {
-                /* not configured yet */
-            })
-            .finally(() => setLoading(false));
-    }, []);
+    const seeded = useRef(false);
+    const refresh = useApiStream<PiholeSettingsConfig>(enabled ? '/api/settings/pihole' : null, (cfg) => {
+        if (!seeded.current) {
+            setUrl(cfg.url);
+            setVerifyTls(cfg.verifyTls ?? true);
+            seeded.current = true;
+        }
+        setLoading(false);
+    }, () => setLoading(false));
 
     const handleSave = async () => {
         if (!url.trim() || !password.trim()) return;
@@ -39,6 +39,7 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
                 icon: <IconCheck size={16} />,
             });
             setPassword('');
+            refresh();
             onSaved?.();
         } catch (err) {
             notifications.show({
@@ -60,7 +61,7 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
                     label='Pi-hole URL'
                     placeholder='https://192.168.1.xx'
                     value={url}
-                    onChange={(e) => setUrl(e.currentTarget.value)}
+                    onChange={(e) => { seeded.current = true; setUrl(e.currentTarget.value); }}
                     disabled={loading}
                     required
                 />
@@ -75,7 +76,7 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
                 <Checkbox
                     label='Verify the Pi-hole TLS certificate'
                     checked={verifyTls}
-                    onChange={(event) => setVerifyTls(event.currentTarget.checked)}
+                    onChange={(event) => { seeded.current = true; setVerifyTls(event.currentTarget.checked); }}
                     disabled={loading}
                 />
                 {!verifyTls && (

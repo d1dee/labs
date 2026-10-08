@@ -8,7 +8,7 @@ import Login from './pages/Login';
 import Settings from './pages/Settings';
 
 const AppContent: FC = () => {
-    const { isAuthenticated, isLoading } = useSessionContext();
+    const { isAuthenticated, isLoading, user, organizationId } = useSessionContext();
     const [changePasswordOpened, setChangePasswordOpened] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -33,6 +33,7 @@ const AppContent: FC = () => {
     return (
         <>
             <Dashboard
+                key={`dashboard:${user?.id}:${organizationId}`}
                 onLogout={handleLogout}
                 onChangePassword={() => setChangePasswordOpened(true)}
                 onSettingsOpen={() => setSettingsOpen(true)}
@@ -42,6 +43,7 @@ const AppContent: FC = () => {
                 onClose={() => setChangePasswordOpened(false)}
             />
             <Settings
+                key={`settings:${user?.id}:${organizationId}`}
                 opened={settingsOpen}
                 onClose={() => setSettingsOpen(false)}
             />

@@ -469,6 +469,101 @@ veyonRouter.delete('/veyon/computers/:id', async (c) => {
     }
 });
 
+veyonRouter.get('/veyon/information/stream', (c) => {
+    const auth = requireUser(c);
+    if (auth.response) return auth.response;
+    const response = streamSSE(c, async (stream) => {
+        const controller = new AbortController();
+        const { signal } = controller;
+        const abort = () => {
+            controller.abort();
+            c.req.raw.signal.removeEventListener('abort', abort);
+            stream.abort();
+        };
+        stream.onAbort(abort);
+        c.req.raw.signal.addEventListener('abort', abort, { once: true });
+        if (c.req.raw.signal.aborted || stream.aborted) abort();
+
+        // Race even non-cancellable setup against disconnect, without leaving
+        // listeners behind or allowing late results to start more work.
+        const pending = <T>(operation: Promise<T>): Promise<T> => new Promise((resolve, reject) => {
+            const cancel = () => reject(signal.reason);
+            signal.addEventListener('abort', cancel, { once: true });
+            operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', cancel));
+            if (signal.aborted) cancel();
+        });
+        const sleep = (ms: number) => new Promise<void>((resolve) => {
+            const finish = () => {
+                clearTimeout(timer);
+                signal.removeEventListener('abort', finish);
+                resolve();
+            };
+            const timer = setTimeout(finish, ms);
+            signal.addEventListener('abort', finish, { once: true });
+            if (signal.aborted) finish();
+        });
+        let writes = Promise.resolve();
+        const write = (event: string, data: unknown) => {
+            writes = writes.then(async () => {
+                if (!signal.aborted) await pending(stream.writeSSE({ event, data: JSON.stringify(data) }));
+            });
+            return writes;
+        };
+        const sanitizedError = (error: unknown) => error instanceof Error &&
+            (error.name === 'TimeoutError' || error.name === 'AbortError')
+            ? 'Veyon connection timed out' : 'Veyon request failed';
+        const heartbeat = (async () => {
+            while (!signal.aborted) {
+                await sleep(15_000);
+                if (!signal.aborted) await write('heartbeat', {});
+            }
+        })().catch(abort);
+        try {
+            while (!signal.aborted) {
+                try {
+                    const computers = await pending(db.query.veyonComputer.findMany({
+                        where: eq(veyonComputer.organizationId, auth.user.organizationId),
+                        orderBy: (computer, { asc }) => [asc(computer.location), asc(computer.name)],
+                    }));
+                    await write('directory', { computers });
+                    signal.throwIfAborted();
+                    const client = await pending(getVeyonClient(auth.user.organizationId, auth.user.id));
+                    let next = 0;
+                    await Promise.all(Array.from({ length: Math.min(6, computers.length) }, async () => {
+                        while (!signal.aborted) {
+                            const computer = computers[next++];
+                            if (!computer) return;
+                            let data;
+                            try {
+                                const information = await pending(client.information(computer.host, signal));
+                                data = { computerId: computer.id, state: 'online', information };
+                            } catch (error) {
+                                if (signal.aborted) return;
+                                data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
+                            }
+                            await write('information', data);
+                        }
+                    }));
+                } catch (error) {
+                    if (signal.aborted) break;
+                    await write('unavailable', { error: sanitizedError(error) });
+                }
+                if (signal.aborted) break;
+                await write('complete', {});
+                await sleep(10_000);
+            }
+        } catch {
+            abort();
+        } finally {
+            abort();
+            await heartbeat;
+        }
+    });
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('X-Accel-Buffering', 'no');
+    return response;
+});
+
 veyonRouter.get('/veyon/computers/:id/information', async (c) => {
     const auth = requireUser(c);
     if (auth.response) return auth.response;

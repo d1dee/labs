@@ -1,10 +1,11 @@
 import {
     addPiholeDomain,
     deletePiholeDomain,
-    getPiholeDomains,
+    type PiholeDomains,
     type PiholeDomainItem,
     updatePiholeDomain,
 } from '@/api/pihole';
+import { useApiStream } from '@/api/useApiStream';
 import {
     MobileFilterPanel,
     MobileFilterToggle,
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
+    Alert,
     Badge,
     Button,
     Card,
@@ -43,12 +45,13 @@ import {
     IconTrash,
     IconX,
 } from '@tabler/icons-react';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useState } from 'react';
 
 const DomainBlockTab: FC = () => {
     const filters = useMobileTableFilters();
     const [domains, setDomains] = useState<PiholeDomainItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [opened, { open, close }] = useDisclosure(false);
     const [newDomain, setNewDomain] = useState('');
     const [newType, setNewType] = useState<'allow' | 'deny'>('deny');
@@ -67,27 +70,14 @@ const DomainBlockTab: FC = () => {
         direction: 'asc',
     });
 
-    const fetchDomains = async () => {
-        try {
-            const data = await getPiholeDomains();
-            setDomains(data.domains);
-        } catch (err) {
-            notifications.show({
-                color: 'red',
-                title: 'Error',
-                message: 'Failed to load domains',
-                icon: <IconX size={16} />,
-            });
-        }
-    };
-
-    const refresh = async () => {
-        await fetchDomains();
-    };
-
-    useEffect(() => {
-        fetchDomains().finally(() => setLoading(false));
-    }, []);
+    const refresh = useApiStream<PiholeDomains>('/api/pihole/domains', (data) => {
+        setDomains(data.domains);
+        setError(null);
+        setLoading(false);
+    }, (err) => {
+        setError(err.message);
+        setLoading(false);
+    });
 
     const openAdd = () => {
         setEditingDomain(null);
@@ -147,7 +137,7 @@ const DomainBlockTab: FC = () => {
             });
             setNewDomain('');
             close();
-            await refresh();
+            refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -169,7 +159,7 @@ const DomainBlockTab: FC = () => {
                 message: `Removed ${d.domain}`,
                 icon: <IconCheck size={16} />,
             });
-            await refresh();
+            refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -191,7 +181,7 @@ const DomainBlockTab: FC = () => {
                 message: `${d.domain} ${!d.enabled ? 'enabled' : 'disabled'}`,
                 icon: <IconCheck size={16} />,
             });
-            await refresh();
+            refresh();
         } catch (err) {
             notifications.show({
                 color: 'red',
@@ -231,6 +221,7 @@ const DomainBlockTab: FC = () => {
     return (
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
+                {error && <Alert color='red' title='Domains Request Failed'>{error}</Alert>}
                 <Group justify='space-between' align='flex-end'>
                     <div>
                         <Title order={4}>Domain Blocking</Title>

@@ -1,11 +1,11 @@
 import {
     applyVeyonSync,
-    getVeyonSyncPreview,
     type VeyonSyncApplyInput,
     type VeyonSyncApplyResult,
     type VeyonSyncPlan,
     type VeyonSyncPreview,
 } from '@/api/veyon';
+import { useApiStream } from '@/api/useApiStream';
 import {
     Alert,
     Badge,
@@ -33,10 +33,9 @@ import {
     IconInfoCircle,
     IconLink,
     IconPlus,
-    IconRefresh,
     IconTrash,
 } from '@tabler/icons-react';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
@@ -44,6 +43,11 @@ function errorMessage(error: unknown) {
 
 function resultKey(type: string, id: string | number) {
     return `${type}:${id}`;
+}
+
+function retainUnchanged<T, K>(selected: Set<K>, previous: T[], next: T[], key: (item: T) => K) {
+    return new Set(next.filter((item) => selected.has(key(item)) && previous.some((old) =>
+        key(old) === key(item) && JSON.stringify(old) === JSON.stringify(item))).map(key));
 }
 
 export default function VeyonSyncModal({
@@ -66,6 +70,8 @@ export default function VeyonSyncModal({
     const [result, setResult] = useState<VeyonSyncApplyResult | null>(null);
     const mountedRef = useRef(true);
     const appliedRef = useRef(false);
+    const previewRef = useRef<VeyonSyncPreview | null>(null);
+    const applyingRef = useRef(false);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -74,35 +80,52 @@ export default function VeyonSyncModal({
         };
     }, []);
 
-    const loadPreview = useCallback(async () => {
+    useEffect(() => {
+        if (!opened) return;
+        previewRef.current = null;
+        setPreview(null);
         setLoadingPreview(true);
         setError(null);
         setResult(null);
         setUnderstandRemovals(false);
-        try {
-            const data = await getVeyonSyncPreview();
-            if (!mountedRef.current) return;
-            setPreview(data);
-            if (data.plan) {
-                setCheckedAdditions(new Set(data.plan.additions.map((item) => item.fogHostId)));
-                setCheckedRenames(new Set(data.plan.renames.map((item) => item.computerId)));
-                setCheckedRemovals(new Set());
-            }
-        } catch (err) {
-            if (!mountedRef.current) return;
-            const message = errorMessage(err);
-            setError(message);
-            notifications.show({ color: 'red', title: 'Sync preview failed', message });
-        } finally {
-            if (mountedRef.current) setLoadingPreview(false);
-        }
-    }, []);
+        setCheckedAdditions(new Set());
+        setCheckedRenames(new Set());
+        setCheckedRemovals(new Set());
+    }, [opened]);
 
-    useEffect(() => {
-        if (opened) void loadPreview();
-    }, [opened, loadPreview]);
+    const refreshPreview = useApiStream<VeyonSyncPreview>(opened ? '/api/veyon/sync/preview' : null, (data) => {
+        if (applyingRef.current) return;
+        const previous = previewRef.current;
+        const nextPlan = data.fogConfigured ? data.plan : null;
+        const oldPlan = previous?.fogConfigured ? previous.plan : null;
+        if (!previous && nextPlan) {
+            setCheckedAdditions(new Set(nextPlan.additions.map((item) => item.fogHostId)));
+            setCheckedRenames(new Set(nextPlan.renames.map((item) => item.computerId)));
+        } else {
+            // Do not reselect unchecked operations or arm new/changed operations on a live update.
+            setCheckedAdditions((current) => retainUnchanged(current, oldPlan?.additions ?? [], nextPlan?.additions ?? [], (item) => item.fogHostId));
+            setCheckedRenames((current) => retainUnchanged(current, oldPlan?.renames ?? [], nextPlan?.renames ?? [], (item) => item.computerId));
+            setCheckedRemovals((current) => retainUnchanged(current, oldPlan?.removals ?? [], nextPlan?.removals ?? [], (item) => item.computerId));
+            if (JSON.stringify(oldPlan?.removals) !== JSON.stringify(nextPlan?.removals)) setUnderstandRemovals(false);
+            if (nextPlan) {
+                const links = nextPlan.links.filter((item) =>
+                    oldPlan?.links.some((old) => old.computerId === item.computerId && old.fogHostId === item.fogHostId));
+                data = { ...data, plan: { ...nextPlan, links, warnings: links.length === nextPlan.links.length
+                    ? nextPlan.warnings
+                    : [...nextPlan.warnings, 'New or changed automatic FOG links are deferred until you reopen this preview.'] } };
+            }
+        }
+        previewRef.current = data;
+        setPreview(data);
+        setError(null);
+        setLoadingPreview(false);
+    }, (err) => {
+        setError(err.message);
+        setLoadingPreview(false);
+    });
 
     const handleClose = () => {
+        if (applyingRef.current) return;
         if (appliedRef.current) {
             appliedRef.current = false;
             onApplied();
@@ -113,6 +136,7 @@ export default function VeyonSyncModal({
     const apply = async () => {
         const plan = preview?.fogConfigured ? preview.plan : null;
         if (!plan) return;
+        applyingRef.current = true;
         setApplying(true);
         setError(null);
         const input: VeyonSyncApplyInput = { links: plan.links };
@@ -148,6 +172,8 @@ export default function VeyonSyncModal({
             setError(message);
             notifications.show({ color: 'red', title: 'Sync failed', message });
         } finally {
+            applyingRef.current = false;
+            refreshPreview();
             if (mountedRef.current) setApplying(false);
         }
     };
@@ -188,7 +214,7 @@ export default function VeyonSyncModal({
             else next.delete(computerId);
             return next;
         });
-        if (!checked) setUnderstandRemovals(false);
+        setUnderstandRemovals(false);
     };
 
     return (
@@ -239,7 +265,7 @@ export default function VeyonSyncModal({
                                 {successCount} of {result.results.length} change
                                 {result.results.length === 1 ? '' : 's'} applied
                                 {failureCount
-                                    ? `, ${failureCount} failed. Refresh the preview to retry the remaining items.`
+                                    ? `, ${failureCount} failed. Review the remaining changes to retry.`
                                     : '.'}
                             </Alert>
                             {result.results.map((item) => (
@@ -418,7 +444,7 @@ export default function VeyonSyncModal({
                                         ? new Set(plan.removals.map((item) => item.computerId))
                                         : new Set(),
                                 );
-                                if (!checked) setUnderstandRemovals(false);
+                                setUnderstandRemovals(false);
                             }}
                         >
                             {plan.removals.map((item) => (
@@ -511,16 +537,11 @@ export default function VeyonSyncModal({
                 <Divider />
 
                 <Group justify='space-between'>
-                    <Button
-                        variant={result ? 'light' : 'default'}
-                        leftSection={<IconRefresh size={16} />}
-                        loading={loadingPreview}
-                        onClick={() => void loadPreview()}
-                    >
-                        {result ? 'Refresh preview' : 'Reload'}
-                    </Button>
+                    {result ? <Button variant='light' onClick={() => setResult(null)}>
+                        Review remaining changes
+                    </Button> : <Text size='xs' c='dimmed'>Preview updates automatically every 10 seconds.</Text>}
                     <Group gap='xs'>
-                        <Button variant='default' onClick={handleClose}>
+                        <Button variant='default' disabled={applying} onClick={handleClose}>
                             {result?.success ? 'Close' : 'Cancel'}
                         </Button>
                         {!result ? (

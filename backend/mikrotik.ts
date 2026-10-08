@@ -67,6 +67,7 @@ export async function callMikrotik(
         const opts: any = {
             method,
             headers,
+            signal: AbortSignal.timeout(15_000),
         };
 
         if (body) {
@@ -116,6 +117,7 @@ export async function testMikrotikConnection(config: {
         };
         const response = await fetch(`${config.baseUrl}/rest/system/identity`, {
             method: 'GET',
+            signal: AbortSignal.timeout(15_000),
             headers: {
                 Authorization: getBasicAuth(mikrotikConfig),
                 'Content-Type': 'application/json',

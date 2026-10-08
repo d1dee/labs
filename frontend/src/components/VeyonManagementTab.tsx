@@ -1,19 +1,18 @@
 import {
     createVeyonComputer,
     deleteVeyonComputer,
-    getVeyonInformation,
-    getVeyonStatus,
-    listVeyonComputers,
     powerOnVeyonComputer,
     sendVeyonCommand,
     setVeyonDemo,
     updateVeyonComputer,
     veyonFramebufferUrl,
+    type VeyonInformationEvent,
     type VeyonCommandAction,
     type VeyonComputer,
     type VeyonFeature,
     type VeyonInformation,
 } from '@/api/veyon';
+import { useApiStream } from '@/api/useApiStream';
 import { PageHero } from '@/components/ui/PageHero';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
@@ -73,7 +72,6 @@ import {
     IconMessage,
     IconPlus,
     IconPower,
-    IconRefresh,
     IconReload,
     IconScreenShare,
     IconTrash,
@@ -112,27 +110,6 @@ function featureName(feature: VeyonFeature) {
     return feature.displayName || feature.name || featureUid(feature) || 'Unknown feature';
 }
 
-async function loadInformationInBatches(computers: VeyonComputer[]) {
-    const entries: Array<[string, LiveState]> = [];
-    for (let index = 0; index < computers.length; index += 6) {
-        const batch = computers.slice(index, index + 6);
-        const results = await Promise.all(
-            batch.map(async (computer): Promise<[string, LiveState]> => {
-                try {
-                    return [
-                        computer.id,
-                        { state: 'online', information: await getVeyonInformation(computer.id) },
-                    ];
-                } catch (error) {
-                    return [computer.id, { state: 'offline', error: errorMessage(error) }];
-                }
-            }),
-        );
-        entries.push(...results);
-    }
-    return entries;
-}
-
 export default function VeyonManagementTab() {
     const [configured, setConfigured] = useState<boolean | null>(null);
     const [computers, setComputers] = useState<VeyonComputer[]>([]);
@@ -145,6 +122,10 @@ export default function VeyonManagementTab() {
     const [sessionFilter, setSessionFilter] = useState<string | null>(null);
     const [sort, setSort] = useState<SortState<ComputerSortKey> | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [refreshToken, setRefreshToken] = useState(0);
+    const directoryRef = useRef<VeyonComputer[]>([]);
+    const commandRefreshTimer = useRef<number | undefined>(undefined);
     const [editor, setEditor] = useState<EditorState>({ opened: false, computer: null });
     const [viewer, setViewer] = useState<VeyonComputer | null>(null);
     const [syncOpened, setSyncOpened] = useState(false);
@@ -182,70 +163,81 @@ export default function VeyonManagementTab() {
         (value) => value.state === 'online' && Boolean(value.information.user.login),
     ).length;
 
-    const load = async () => {
-        setLoading(true);
-        try {
-            const status = await getVeyonStatus();
-            setConfigured(status.configured);
-            if (!status.configured) return;
-            const response = await listVeyonComputers();
-            setComputers(response.computers);
-            setSelected((current) =>
-                current.filter((id) => response.computers.some((computer) => computer.id === id)),
-            );
-            setLive(
-                Object.fromEntries(response.computers.map((computer) => [computer.id, { state: 'loading' }])),
-            );
-            const entries = await loadInformationInBatches(response.computers);
-            startTransition(() => setLive(Object.fromEntries(entries)));
-        } catch (error) {
-            notifications.show({ color: 'red', title: 'Veyon unavailable', message: errorMessage(error) });
-        } finally {
+    const refreshStatus = useApiStream<{ configured: boolean }>('/api/veyon/status', (status) => {
+        setConfigured(status.configured);
+        if (!status.configured) {
             setLoading(false);
+            setLoadError(null);
         }
+    }, (error) => {
+        setLoadError(error.message);
+        setLoading(false);
+    });
+    const load = () => {
+        refreshStatus();
+        setRefreshToken((current) => current + 1);
     };
 
     useEffect(() => {
-        void load();
-    }, []);
-
-    const liveRef = useRef(live);
-    useEffect(() => {
-        liveRef.current = live;
-    }, [live]);
-
-    useEffect(() => {
-        if (!configured || loading || !computers.length) return;
+        if (!configured) return;
         let cancelled = false;
-        let timer: number;
-
-        const retryOffline = async () => {
-            for (const computer of computers) {
+        let source: EventSource | undefined;
+        let retryTimer: number | undefined;
+        const connect = async () => {
+            try {
+                source = new EventSource('/api/veyon/information/stream');
+                source.addEventListener('directory', (event) => {
+                    if (cancelled) return;
+                    const { computers: nextComputers } = JSON.parse((event as MessageEvent<string>).data) as { computers: VeyonComputer[] };
+                    const previousHosts = new Map(directoryRef.current.map((computer) => [computer.id, computer.host]));
+                    directoryRef.current = nextComputers;
+                    setComputers(nextComputers);
+                    setSelected((current) => current.filter((id) => nextComputers.some((computer) => computer.id === id)));
+                    setLive((current) => Object.fromEntries(nextComputers.map((computer) => [
+                        computer.id,
+                        previousHosts.get(computer.id) === computer.host && current[computer.id]
+                            ? current[computer.id] : { state: 'loading' },
+                    ])));
+                    setLoading(false);
+                    setLoadError(null);
+                });
+                source.addEventListener('information', (event) => {
+                    if (cancelled) return;
+                    const { computerId, ...state } = JSON.parse((event as MessageEvent<string>).data) as VeyonInformationEvent;
+                    startTransition(() => setLive((current) => computerId in current
+                        ? { ...current, [computerId]: state } : current));
+                });
+                source.addEventListener('unavailable', (event) => {
+                    if (cancelled) return;
+                    const { error } = JSON.parse((event as MessageEvent<string>).data) as { error: string };
+                    setLoadError(error);
+                    setLoading(false);
+                });
+                source.onerror = () => {
+                    if (cancelled) return;
+                    setLoadError('Live status connection interrupted. Reconnecting automatically; displayed statuses may be out of date.');
+                    setLoading(false);
+                    if (source?.readyState === EventSource.CLOSED) {
+                        window.clearTimeout(retryTimer);
+                        retryTimer = window.setTimeout(load, 10_000);
+                    }
+                };
+            } catch (error) {
                 if (cancelled) return;
-                if (liveRef.current[computer.id]?.state !== 'offline') continue;
-
-                let nextState: LiveState;
-                try {
-                    nextState = {
-                        state: 'online',
-                        information: await getVeyonInformation(computer.id),
-                    };
-                } catch (error) {
-                    nextState = { state: 'offline', error: errorMessage(error) };
-                }
-                if (cancelled) return;
-                setLive((current) => ({ ...current, [computer.id]: nextState }));
+                setLoadError(errorMessage(error));
+                setLoading(false);
+                retryTimer = window.setTimeout(() => void connect(), 10_000);
             }
-            // Wait after the pass finishes so slow requests cannot overlap retries.
-            if (!cancelled) timer = window.setTimeout(() => void retryOffline(), 15_000);
         };
-
-        timer = window.setTimeout(() => void retryOffline(), 15_000);
+        void connect();
         return () => {
             cancelled = true;
-            window.clearTimeout(timer);
+            source?.close();
+            window.clearTimeout(retryTimer);
         };
-    }, [configured, loading, computers]);
+    }, [configured, refreshToken]);
+
+    useEffect(() => () => window.clearTimeout(commandRefreshTimer.current), []);
 
     const runCommand = async (
         action: VeyonCommandAction,
@@ -273,8 +265,10 @@ export default function VeyonManagementTab() {
                     : `${result.results.length} computer${result.results.length === 1 ? '' : 's'} updated.`,
                 icon: failures.length ? <IconAlertCircle size={16} /> : <IconCheck size={16} />,
             });
+            load();
             if (['user-login', 'user-logoff', 'reboot', 'power-down'].includes(action)) {
-                window.setTimeout(() => void load(), 1200);
+                window.clearTimeout(commandRefreshTimer.current);
+                commandRefreshTimer.current = window.setTimeout(load, 1200);
             }
         } catch (error) {
             notifications.show({ color: 'red', title: 'Command failed', message: errorMessage(error) });
@@ -323,6 +317,7 @@ export default function VeyonManagementTab() {
                     await deleteVeyonComputer(computer.id);
                     setComputers((current) => current.filter((item) => item.id !== computer.id));
                     setSelected((current) => current.filter((id) => id !== computer.id));
+                    load();
                 } catch (error) {
                     notifications.show({ color: 'red', title: 'Remove failed', message: errorMessage(error) });
                 }
@@ -339,6 +334,10 @@ export default function VeyonManagementTab() {
         );
     }
 
+    if (configured === null && loadError) {
+        return <Alert color='red' title='Veyon unavailable' icon={<IconAlertCircle size={18} />}>{loadError} Retrying automatically.</Alert>;
+    }
+
     if (!configured) {
         return (
             <Alert color='yellow' title='Veyon is not configured' icon={<IconAlertCircle size={18} />}>
@@ -349,6 +348,7 @@ export default function VeyonManagementTab() {
 
     return (
         <Stack gap='lg'>
+            {loadError ? <Alert color='yellow' title='Live status unavailable' icon={<IconAlertCircle size={18} />}>{loadError}</Alert> : null}
             <PageHero
                 eyebrow='Veyon operations desk'
                 title='Computer management'
@@ -381,16 +381,6 @@ export default function VeyonManagementTab() {
                         >
                             Add computer
                         </Button>
-                        <ActionIcon
-                            variant='light'
-                            color='gray'
-                            size='lg'
-                            aria-label='Refresh computers'
-                            onClick={() => void load()}
-                            loading={loading}
-                        >
-                            <IconRefresh size={18} />
-                        </ActionIcon>
                     </>
                 }
                 metrics={[
@@ -408,6 +398,7 @@ export default function VeyonManagementTab() {
                     value.state === 'online' ? value.information.features : [],
                 )}
                 onCommand={runCommand}
+                onChanged={load}
                 onConfirm={confirmCommand}
                 onPowerOn={async () => {
                     const targets = computers.filter(
@@ -422,6 +413,7 @@ export default function VeyonManagementTab() {
                         title: failures ? 'Wake-on-LAN partially sent' : 'Wake-on-LAN sent',
                         message: `${targets.length - failures} of ${targets.length} packets dispatched.`,
                     });
+                    load();
                 }}
             />
 
@@ -431,7 +423,7 @@ export default function VeyonManagementTab() {
                         <div>
                             <Title order={4}>Live computers</Title>
                             <Text size='sm' c='dimmed'>
-                                Select targets first, then apply controls from the command deck.
+                                Statuses refresh automatically. Select targets, then apply controls from the command deck.
                             </Text>
                         </div>
                         <Group wrap='nowrap' gap='sm' w={{ base: '100%', sm: 300 }}>
@@ -677,6 +669,7 @@ function CommandDeck({
     selectedComputers,
     features,
     onCommand,
+    onChanged,
     onConfirm,
     onPowerOn,
 }: {
@@ -684,6 +677,7 @@ function CommandDeck({
     selectedComputers: VeyonComputer[];
     features: VeyonFeature[];
     onCommand: (action: VeyonCommandAction, args?: Record<string, unknown>, active?: boolean, uid?: string) => Promise<void>;
+    onChanged: () => void;
     onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
     onPowerOn: () => Promise<void>;
 }) {
@@ -911,6 +905,7 @@ function CommandDeck({
                                             windowed: demoWindowed === 'window',
                                             active: true,
                                         });
+                                        onChanged();
                                         notifications.show({
                                             color: result.failed ? 'orange' : 'teal',
                                             title: 'Demonstration started',
@@ -942,6 +937,7 @@ function CommandDeck({
                                             windowed: demoWindowed === 'window',
                                             active: false,
                                         });
+                                        onChanged();
                                         notifications.show({
                                             color: 'teal',
                                             title: 'Demonstration stopped',
@@ -1064,26 +1060,20 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
     // One backend polling worker per machine feeds this view; the browser
     // never polls Veyon directly and failed polls keep the last frame.
     const { frames, connected } = useVeyonScreenshots(computer ? [computer.id] : [], {
-        minFrameIntervalMs: 1000, width: 1280, quality: 75, priority: 'viewer',
+        minFrameIntervalMs: 10_000, width: 1280, quality: 75, priority: 'viewer',
     });
     const frame = computer ? frames[computer.id] : undefined;
 
     useEffect(() => {
-        if (!computer) return;
         setInformation(null);
         setError('');
-        let active = true;
-        getVeyonInformation(computer.id)
-            .then((value) => {
-                if (active) setInformation(value);
-            })
-            .catch((value) => {
-                if (active) setError(errorMessage(value));
-            });
-        return () => {
-            active = false;
-        };
-    }, [computer]);
+        setFailedImage(null);
+    }, [computer?.id]);
+    useApiStream<VeyonInformation>(computer ? `/api/veyon/computers/${encodeURIComponent(computer.id)}/information` : null,
+        (value) => {
+            setInformation(value);
+            setError('');
+        }, (value) => setError(value.message));
 
     if (!computer) return null;
     const failed = Boolean(frame?.consecutiveFailures || frame?.lastError);
@@ -1100,7 +1090,7 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
             ? Math.max(0, Math.round((Date.now() - frame.lastUpdated) / 1000))
             : null;
     return (
-        <Modal opened onClose={onClose} title={`Remote view · ${computer.name}`} size='calc(100vw - 48px)' centered>
+        <Modal opened onClose={onClose} closeButtonProps={{ 'aria-label': 'Close' }} title={`Remote view · ${computer.name}`} size='calc(100vw - 48px)' centered>
             <Stack>
                 <Group justify='space-between'>
                     <Group gap='xs'>

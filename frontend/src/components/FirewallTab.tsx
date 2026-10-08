@@ -5,12 +5,12 @@ import {
     LabStats,
 } from '@/api/firewall';
 import LabCard from '@/components/LabCard';
+import { useApiStream } from '@/api/useApiStream';
 import { PageHero } from '@/components/ui/PageHero';
-import { ActionIcon, Alert, Center, Grid, Loader, Stack, Text } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
-import { IconInfoCircle, IconRefresh, IconShieldCheck } from '@tabler/icons-react';
+import { Alert, Center, Grid, Loader, Stack, Text } from '@mantine/core';
+import { IconInfoCircle, IconShieldCheck } from '@tabler/icons-react';
 import dayjs from 'dayjs';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useState } from 'react';
 
 const FirewallTab: FC = () => {
     const [labs, setLabs] = useState<Lab[]>([]);
@@ -20,49 +20,22 @@ const FirewallTab: FC = () => {
     >({});
     const [loading, setLoading] = useState<boolean>(true);
     const [configMissing, setConfigMissing] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
+    const [lastRefresh, setLastRefresh] = useState<string>('');
 
-    useEffect(() => {
-        fetchLabs();
-        const interval = setInterval(
-            fetchLabs,
-            Number(import.meta.env.VITE_REFRESH_INTERVAL) || 15000,
-        );
-        return () => clearInterval(interval);
-    }, []);
-
-    const fetchLabs = async (): Promise<void> => {
-        try {
-            const data = await getLabsOverview();
-            setLabs(data.labs);
-            setLabStats(data.stats);
-            setLabHistory(data.history);
-            setConfigMissing(false);
-        } catch (err: any) {
-            if (err.code === 'CONFIG_MISSING') {
-                setConfigMissing(true);
-                return;
-            }
-            notifications.show({
-                color: 'error',
-                message:
-                    'Failed to fetch lab data. Please check your connection.',
-            });
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleToggle = (): void => {
-        // A single lab toggled — refetch the consolidated overview so both the
-        // changed stats and history refresh in one request.
-        fetchLabs().catch((err: any) => {
-            if (err.code === 'CONFIG_MISSING') {
-                setConfigMissing(true);
-            }
-            console.error('Failed to refresh labs:', err);
-        });
-    };
+    const refresh = useApiStream<Awaited<ReturnType<typeof getLabsOverview>>>('/api/labs/overview', (data) => {
+        setLabs(data.labs);
+        setLabStats(data.stats);
+        setLabHistory(data.history);
+        setConfigMissing(false);
+        setError(null);
+        setLastRefresh(dayjs().format('HH:mm:ss'));
+        setLoading(false);
+    }, (err) => {
+        setConfigMissing(err.code === 'CONFIG_MISSING');
+        setError(err.message);
+        setLoading(false);
+    });
 
     const activeLabs = labs.filter(
         (lab) => !labStats[lab.id]?.firewall.disabled,
@@ -80,7 +53,7 @@ const FirewallTab: FC = () => {
                         <Text>Loading lab data...</Text>
                     </Stack>
                 </Center>
-            ) : configMissing ? (
+            ) : configMissing && labs.length === 0 ? (
                 <Center py={60}>
                     <Stack align='center' gap='md' maw={500}>
                         <Alert
@@ -99,32 +72,23 @@ const FirewallTab: FC = () => {
                 </Center>
             ) : (
                 <>
+                    {error && <Alert color='red'>{error}</Alert>}
                     <PageHero
                         eyebrow='Network security'
                         title='Firewall & lab access'
                         description='Toggle per-lab internet access and watch live device counts across your MikroTik router.'
                         icon={<IconShieldCheck size={25} />}
-                        actions={
-                            <ActionIcon
-                                variant='light'
-                                color='gray'
-                                size='lg'
-                                aria-label='Refresh labs'
-                                onClick={() => void fetchLabs()}
-                            >
-                                <IconRefresh size={18} />
-                            </ActionIcon>
-                        }
                         metrics={[
                             { label: 'Total labs', value: labs.length },
                             { label: 'Active', value: activeLabs, accent: true },
                             { label: 'Blocked', value: blockedLabs, color: 'red.4' },
-                            { label: 'Last refresh', value: dayjs().format('HH:mm:ss') },
+                            { label: 'Last refresh', value: lastRefresh || '-' },
                         ]}
                     />
 
                     <Grid grow>
                         {labs
+                            .slice()
                             .sort((a, b) => a.name.localeCompare(b.name))
                             .map((lab) => (
                                 <LabCard
@@ -132,7 +96,7 @@ const FirewallTab: FC = () => {
                                     lab={lab}
                                     stats={labStats[lab.id]}
                                     history={labHistory[lab.id]}
-                                    onToggle={handleToggle}
+                                    onToggle={refresh}
                                 />
                             ))}
                     </Grid>

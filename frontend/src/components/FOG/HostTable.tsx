@@ -99,12 +99,18 @@ export function HostTable({
 
     const [selection, handlers] = useSelection({
         data: hostIds,
-        resetSelectionOnDataChange: true,
+        resetSelectionOnDataChange: false,
     });
 
     const [inventoryHost, setInventoryHost] = useState<FogHost | null>(null);
     const [inventoryOpened, { open: openInventory, close: closeInventory }] =
         useDisclosure(false);
+    const liveInventoryHost = allHosts.find((host) => host.id === inventoryHost?.id) ?? inventoryHost;
+
+    useEffect(() => {
+        const retained = selection.filter((id) => hostIds.includes(id));
+        if (retained.length !== selection.length) handlers.setSelection(retained);
+    }, [hostIds, selection, handlers]);
 
     useEffect(() => {
         setSelectedIds(loading || isPending ? [] : selection.filter((id) => hostIds.includes(id)));
@@ -485,11 +491,11 @@ export function HostTable({
                     <Modal
                         opened={inventoryOpened}
                         onClose={closeInventory}
-                        title={`Inventory: ${inventoryHost?.name || 'Host'}`}
+                        title={`Inventory: ${liveInventoryHost?.name || 'Host'}`}
                         size='sm'
                     >
-                        {inventoryHost ? (
-                            <InventoryDetails host={inventoryHost} />
+                        {liveInventoryHost ? (
+                            <InventoryDetails host={liveInventoryHost} />
                         ) : null}
                     </Modal>
 
