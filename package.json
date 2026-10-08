@@ -17,6 +17,8 @@
     },
     "dependencies": {
         "@better-auth/drizzle-adapter": "^1.6.10",
+        "@logtape/file": "^2.3.10",
+        "@logtape/logtape": "^2.3.10",
         "better-auth": "^1.6.10",
         "better-sqlite3": "^12.11.1",
         "drizzle-orm": "^0.45.2",

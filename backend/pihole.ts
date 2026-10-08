@@ -7,6 +7,7 @@ import { piholeConfig } from '../db/schema';
 export interface PiholeCredentials {
     url: string;
     password: string;
+    verifyTls?: boolean;
 }
 
 export interface PiholeSummary {
@@ -122,6 +123,8 @@ type PiholeResult<T> = {
 export class PiholeClient {
     private url: string;
     private password: string;
+    private verifyTls: boolean;
+    private passwordless = false;
     private sid: string | null = null;
     private csrf: string | null = null;
     /**
@@ -139,6 +142,7 @@ export class PiholeClient {
     constructor(creds: PiholeCredentials) {
         this.url = creds.url.replace(/\/$/, '');
         this.password = creds.password;
+        this.verifyTls = creds.verifyTls !== false;
     }
 
     get configured(): boolean {
@@ -149,6 +153,14 @@ export class PiholeClient {
         return `${this.url}/api${path}`;
     }
 
+    private request(path: string, opts: RequestInit = {}): Promise<Response> {
+        return fetch(this.piholeUrl(path), {
+            ...opts,
+            signal: opts.signal ?? AbortSignal.timeout(10_000),
+            tls: { rejectUnauthorized: this.verifyTls },
+        });
+    }
+
     private async auth(): Promise<{
         success: boolean;
         sid?: string;
@@ -156,21 +168,32 @@ export class PiholeClient {
         error?: string;
     }> {
         try {
-            const res = await fetch(this.piholeUrl('/auth'), {
+            const res = await this.request('/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: this.password }),
             });
             const json = (await res.json()) as {
-                session?: { valid?: boolean; sid?: string; csrf?: string };
+                session?: {
+                    valid?: boolean;
+                    sid?: string | null;
+                    csrf?: string | null;
+                    validity?: number;
+                };
                 error?: { message?: string };
             };
-            if (json.session?.valid && json.session.sid) {
-                this.sid = json.session.sid;
+            if (
+                res.ok && json.session?.valid &&
+                (json.session.sid ||
+                    (json.session.sid === null && json.session.validity === -1))
+            ) {
+                // Pi-hole returns a valid session with no SID when no password is set.
+                this.passwordless = !json.session.sid;
+                this.sid = json.session.sid || null;
                 this.csrf = json.session.csrf || null;
                 return {
                     success: true,
-                    sid: this.sid,
+                    sid: this.sid ?? undefined,
                     csrf: this.csrf ?? undefined,
                 };
             }
@@ -184,7 +207,7 @@ export class PiholeClient {
     }
 
     private async ensureAuth(): Promise<{ success: boolean; error?: string }> {
-        if (this.sid) return { success: true };
+        if (this.sid || this.passwordless) return { success: true };
         // Deduplicate concurrent auth attempts to avoid Pi-hole rate limits.
         if (!this.authPromise) {
             this.authPromise = this.auth().finally(() => {
@@ -214,22 +237,48 @@ export class PiholeClient {
         if (this.sid) headers['X-FTL-SID'] = this.sid;
         if (this.csrf) headers['X-FTL-CSRF'] = this.csrf;
 
-        const res = await fetch(this.piholeUrl(path), { ...opts, headers });
+        const sentSid = this.sid;
+        const res = await this.request(path, { ...opts, headers });
 
         // Re-authenticate once on session expiry
         if (res.status === 401) {
-            this.sid = null;
-            this.csrf = null;
+            if (this.sid === sentSid) {
+                this.sid = null;
+                this.csrf = null;
+                this.passwordless = false;
+            }
             const reauth = await this.ensureAuth();
             if (!reauth.success) {
                 throw new Error(reauth.error || 'Re-authentication failed');
             }
-            headers['X-FTL-SID'] = this.sid!;
+            delete headers['X-FTL-SID'];
+            delete headers['X-FTL-CSRF'];
+            if (this.sid) headers['X-FTL-SID'] = this.sid;
             if (this.csrf) headers['X-FTL-CSRF'] = this.csrf;
-            return fetch(this.piholeUrl(path), { ...opts, headers });
+            return this.request(path, { ...opts, headers });
         }
 
         return res;
+    }
+
+    async testConnection(): Promise<{ success: boolean; error?: string }> {
+        try {
+            const result = await this.getSummary();
+            return { success: result.success, error: result.error };
+        } finally {
+            if (this.sid) {
+                try {
+                    await this.request('/auth', {
+                        method: 'DELETE',
+                        headers: { 'X-FTL-SID': this.sid },
+                    });
+                } catch {
+                    // A failed cleanup must not hide the connection test result.
+                }
+                this.sid = null;
+                this.csrf = null;
+            }
+        }
     }
 
     // ---------- Stats ----------
@@ -248,11 +297,20 @@ export class PiholeClient {
     async getTopDomains(
         blocked = true,
         count = 10,
+        range?: { from: number; until: number },
     ): Promise<PiholeResult<PiholeTopDomains>> {
         if (!this.configured) return unconfigured();
         try {
+            const query = new URLSearchParams({ blocked: String(blocked), count: String(count) });
+            if (range) {
+                query.set('from', String(range.from));
+                query.set('until', String(range.until));
+            }
+            // Date ranges are only supported by Pi-hole's long-term database endpoint.
+            const path = range ? '/stats/database/top_domains' : '/stats/top_domains';
             const res = await this.piholeFetch(
-                `/stats/top_domains?blocked=${blocked}&count=${count}`,
+                `${path}?${query}`,
+                range ? { signal: AbortSignal.timeout(45_000) } : {},
             );
             if (!res.ok) return errorFrom(res);
             return {
@@ -501,8 +559,7 @@ async function errorFrom(res: Response): Promise<PiholeResult<never>> {
 
 /**
  * Resolve Pi-hole credentials for an organization.
- * Per-org DB configuration takes precedence over the global env fallback
- * (PIHOLE_URL / PIHOLE_PASSWORD).
+ * Credentials are stored per organization.
  */
 export async function getPiholeCredentials(
     organizationId: string,
@@ -511,7 +568,7 @@ export async function getPiholeCredentials(
         where: eq(piholeConfig.organizationId, organizationId),
     });
     if (row && row.url && row.password) {
-        return { url: row.url, password: row.password };
+        return { url: row.url, password: row.password, verifyTls: row.verifyTls };
     }
 }
 
@@ -519,7 +576,7 @@ export async function getPiholeCredentials(
 // password is compared to detect credential rotation.
 const clientCache = new Map<
     string,
-    { password: string; client: PiholeClient }
+    { password: string; verifyTls: boolean; client: PiholeClient }
 >();
 
 /**
@@ -534,12 +591,13 @@ export async function getPiholeClient(
     if (!creds) return new PiholeClient({ url: '', password: '' });
 
     const cached = clientCache.get(creds.url);
-    if (cached && cached.password === creds.password) {
+    const verifyTls = creds.verifyTls !== false;
+    if (cached && cached.password === creds.password && cached.verifyTls === verifyTls) {
         return cached.client;
     }
 
     const client = new PiholeClient(creds);
-    clientCache.set(creds.url, { password: creds.password, client });
+    clientCache.set(creds.url, { password: creds.password, verifyTls, client });
     return client;
 }
 
@@ -552,7 +610,7 @@ export async function isPiholeConfigured(
 
 /**
  * Read the stored per-organization Pi-hole configuration (raw, unmasked).
- * Returns null when no DB row exists (env fallback still applies).
+ * Returns undefined when no DB row exists.
  */
 export async function getPiholeConfigForOrg(organizationId: string) {
     return db.query.piholeConfig.findFirst({
@@ -571,24 +629,5 @@ export async function testPiholeConnection(
     if (!url || !creds.password) {
         return { success: false, error: 'URL and password are required' };
     }
-    try {
-        const res = await fetch(`${url}/api/auth`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: creds.password }),
-        });
-        const json = (await res.json()) as {
-            session?: { valid?: boolean };
-            error?: { message?: string };
-        };
-        if (json.session?.valid) return { success: true };
-        return {
-            success: false,
-            error:
-                json.error?.message ||
-                `Authentication failed (HTTP ${res.status})`,
-        };
-    } catch (err) {
-        return { success: false, error: String(err) };
-    }
+    return new PiholeClient(creds).testConnection();
 }

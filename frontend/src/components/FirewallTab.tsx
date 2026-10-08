@@ -5,19 +5,10 @@ import {
     LabStats,
 } from '@/api/firewall';
 import LabCard from '@/components/LabCard';
-import {
-    Alert,
-    Card,
-    Center,
-    Grid,
-    Group,
-    Loader,
-    SimpleGrid,
-    Stack,
-    Text,
-} from '@mantine/core';
+import { PageHero } from '@/components/ui/PageHero';
+import { ActionIcon, Alert, Center, Grid, Loader, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconInfoCircle } from '@tabler/icons-react';
+import { IconInfoCircle, IconRefresh, IconShieldCheck } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useEffect, useState } from 'react';
 
@@ -108,44 +99,29 @@ const FirewallTab: FC = () => {
                 </Center>
             ) : (
                 <>
-                    <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
-                        <Card withBorder>
-                            <Text size='sm' c='dimmed'>
-                                Total Labs
-                            </Text>
-                            <Text size='xl' fw={700}>
-                                {labs.length}
-                            </Text>
-                        </Card>
-                        <Card withBorder>
-                            <Text size='sm' c='dimmed'>
-                                Active Labs
-                            </Text>
-                            <Group justify='space-between'>
-                                <Text size='xl' fw={700} c='green'>
-                                    {activeLabs}
-                                </Text>
-                            </Group>
-                        </Card>
-                        <Card withBorder>
-                            <Text size='sm' c='dimmed'>
-                                Blocked Labs
-                            </Text>
-                            <Group justify='space-between'>
-                                <Text size='xl' fw={700} c='red'>
-                                    {blockedLabs}
-                                </Text>
-                            </Group>
-                        </Card>
-                        <Card withBorder>
-                            <Text size='sm' c='dimmed'>
-                                Last Refresh
-                            </Text>
-                            <Text size='xl' fw={700}>
-                                {dayjs().format('HH:mm:ss')}
-                            </Text>
-                        </Card>
-                    </SimpleGrid>
+                    <PageHero
+                        eyebrow='Network security'
+                        title='Firewall & lab access'
+                        description='Toggle per-lab internet access and watch live device counts across your MikroTik router.'
+                        icon={<IconShieldCheck size={25} />}
+                        actions={
+                            <ActionIcon
+                                variant='light'
+                                color='gray'
+                                size='lg'
+                                aria-label='Refresh labs'
+                                onClick={() => void fetchLabs()}
+                            >
+                                <IconRefresh size={18} />
+                            </ActionIcon>
+                        }
+                        metrics={[
+                            { label: 'Total labs', value: labs.length },
+                            { label: 'Active', value: activeLabs, accent: true },
+                            { label: 'Blocked', value: blockedLabs, color: 'red.4' },
+                            { label: 'Last refresh', value: dayjs().format('HH:mm:ss') },
+                        ]}
+                    />
 
                     <Grid grow>
                         {labs

@@ -1,4 +1,5 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { streamSSE, type SSEMessage } from 'hono/streaming';
 import { z } from 'zod';
 import type { VeyonSyncApplyResultItem } from '../../frontend/src/api/veyon';
 import { db } from '../../db/database';
@@ -10,10 +11,15 @@ import {
     VEYON_FEATURES,
     VeyonApiError,
 } from '../veyon';
+import { veyonPoller } from '../veyon-poller';
+import { createVeyonStreamWriter } from '../veyon-stream';
 import { buildVeyonSyncPlan, type VeyonSyncPlan } from '../veyon-sync';
+import { errorProperty, getLogger } from '../logger';
 import { createApp } from './context';
 
 export const veyonRouter = createApp();
+
+const veyonLogger = getLogger(['labs', 'veyon']);
 
 const hostSchema = z
     .string()
@@ -168,7 +174,9 @@ function apiError(c: any, error: unknown) {
             504,
         );
     }
-    console.error('Veyon request failed:', error);
+    veyonLogger.error('Veyon request failed: {error}', {
+        error: errorProperty(error),
+    });
     return c.json({ error: 'Veyon request failed', code: 'VEYON_ERROR' }, 502);
 }
 
@@ -369,6 +377,7 @@ veyonRouter.post('/veyon/sync/apply', async (c) => {
                                     ),
                                 ),
                             );
+                        veyonPoller.forget(organizationId, removal.computerId);
                     },
                 })),
             );
@@ -432,6 +441,7 @@ veyonRouter.put('/veyon/computers/:id', async (c) => {
             })
             .where(eq(veyonComputer.id, id))
             .returning();
+        if (computer) veyonPoller.updateComputer(auth.user.organizationId, computer);
         return c.json(computer);
     } catch (error) {
         return apiError(c, error);
@@ -450,6 +460,9 @@ veyonRouter.delete('/veyon/computers/:id', async (c) => {
         );
         await client?.close(computer.host);
         await db.delete(veyonComputer).where(eq(veyonComputer.id, id));
+        // Drop cached screenshots and stop any polling worker for the
+        // removed machine so nothing keeps polling a deleted computer.
+        veyonPoller.forget(auth.user.organizationId, id);
         return c.json({ success: true });
     } catch (error) {
         return apiError(c, error);
@@ -488,30 +501,42 @@ veyonRouter.get('/veyon/computers/:id/framebuffer', async (c) => {
         if (c.req.query('width')) query.set('width', c.req.query('width')!);
         if (c.req.query('height')) query.set('height', c.req.query('height')!);
         if (c.req.query('compression')) query.set('compression', c.req.query('compression')!);
-        const client = await getVeyonClient(auth.user.organizationId, auth.user.id);
-        // Observe client disconnects: the wall polls this route ~16×/s and
-        // abandoned requests must not keep an upstream fetch (or its 503
-        // retry) alive for the full timeout.
-        const upstreamSignal = () =>
-            AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(12_000)]);
+        const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(12_000)]);
+        const withinDeadline = <T>(operation: Promise<T>): Promise<T> =>
+            new Promise((resolve, reject) => {
+                const abort = () => reject(signal.reason);
+                signal.addEventListener('abort', abort, { once: true });
+                operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+                if (signal.aborted) abort();
+            });
+        const client = await withinDeadline(getVeyonClient(auth.user.organizationId, auth.user.id));
+        signal.throwIfAborted();
         let response: Response;
         try {
-            response = await client.framebuffer(computer.host, query, upstreamSignal());
+            response = await withinDeadline(client.framebuffer(computer.host, query, signal, veyonPoller.config.maxFrameBytes));
         } catch (error) {
-            // Veyon reports 503 while the VNC framebuffer initializes after a
-            // fresh connection; a single delayed retry usually succeeds —
-            // but never for a client that already went away.
+            // Only FramebufferNotAvailable (10) is transient initialization;
+            // UnsupportedImageFormat (9) is also HTTP 503 but must not retry.
             if (
                 !(error instanceof VeyonApiError) ||
-                error.status !== 503 ||
-                c.req.raw.signal.aborted
+                error.upstreamCode !== 10 ||
+                signal.aborted
             ) {
                 throw error;
             }
-            await new Promise((resolve) => setTimeout(resolve, 700));
-            response = await client.framebuffer(computer.host, query, upstreamSignal());
+            await new Promise<void>((resolve, reject) => {
+                const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+                const timer = setTimeout(finish, 700);
+                const abort = () => { clearTimeout(timer); reject(signal.reason); };
+                signal.addEventListener('abort', abort, { once: true });
+                if (signal.aborted) abort();
+            });
+            response = await withinDeadline(client.framebuffer(computer.host, query, signal, veyonPoller.config.maxFrameBytes));
         }
-        return new Response(response.body, {
+        const image = await withinDeadline(response.arrayBuffer());
+        signal.throwIfAborted();
+        if (!image.byteLength) throw new VeyonApiError('Veyon returned an empty screenshot', 502, 'VEYON_EMPTY_FRAME');
+        return new Response(image, {
             status: 200,
             headers: {
                 'Content-Type': response.headers.get('Content-Type') || 'image/jpeg',
@@ -537,6 +562,226 @@ veyonRouter.get('/veyon/computers/:id/features', async (c) => {
         if (!computer) return c.json({ error: 'Computer not found' }, 404);
         const client = await getVeyonClient(auth.user.organizationId, auth.user.id);
         return c.json(await client.features(computer.host));
+    } catch (error) {
+        return apiError(c, error);
+    }
+});
+
+// GET /api/veyon/screenshots/stream?ids=a,b,c — server-sent event stream of
+// live screenshots. One backend polling worker per managed machine feeds
+// every connected viewer, so N administrators watching M computers still
+// produce a single Veyon request stream per computer. Browsers connect with
+// a plain EventSource (same-origin cookie auth); polling starts when the
+// first viewer subscribes and stops shortly after the last one leaves.
+const MAX_STREAM_COMPUTERS = 64;
+const SSE_HEARTBEAT_MS = 15_000;
+const streamProfileSchema = z.object({
+    priority: z.enum(['grid', 'viewer']).default('grid'),
+    intervalMs: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(250).max(60_000)).optional(),
+    width: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(160).max(1_920)).optional(),
+    quality: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(100)).optional(),
+});
+
+veyonRouter.get('/veyon/screenshots/stream', async (c) => {
+    const auth = requireUser(c);
+    if (auth.response) return auth.response;
+    try {
+        const organizationId = auth.user.organizationId;
+        const profile = streamProfileSchema.parse(c.req.query());
+        const intervalMs = profile.intervalMs ?? (profile.priority === 'viewer' ? veyonPoller.config.viewerIntervalMs : veyonPoller.config.pollIntervalMs);
+        const refresh = c.req.query('refresh') === 'true';
+        const ids = [
+            ...new Set(
+                (c.req.query('ids') ?? '')
+                    .split(',')
+                    .map((id) => id.trim())
+                    .filter(Boolean),
+            ),
+        ];
+        if (ids.length === 0) {
+            return c.json({ error: 'At least one computer id is required' }, 400);
+        }
+        if (ids.length > MAX_STREAM_COMPUTERS) {
+            return c.json(
+                { error: `At most ${MAX_STREAM_COMPUTERS} computers can be streamed` },
+                400,
+            );
+        }
+        if (ids.some((id) => !idSchema.safeParse(id).success)) {
+            return c.json({ error: 'Invalid computer id' }, 400);
+        }
+        const computers = await db.query.veyonComputer.findMany({
+            where: and(
+                eq(veyonComputer.organizationId, organizationId),
+                inArray(veyonComputer.id, ids),
+            ),
+        });
+        if (computers.length !== ids.length) {
+            return c.json({ error: 'One or more computers were not found' }, 404);
+        }
+        const requestedIds = new Set(computers.map((computer) => computer.id));
+
+        return streamSSE(c, async (stream) => {
+            let closed = false;
+            let cleaned = false;
+            const subscribedIds = new Map<string, symbol>();
+            const resets = new Set<string>();
+            const lastFrameSent = new Map<string, number>();
+            const freshNeeded = new Set(refresh ? requestedIds : []);
+            const writer = createVeyonStreamWriter<SSEMessage[]>(
+                async (messages) => { for (const message of messages) await stream.writeSSE(message); },
+                (error) => {
+                    veyonLogger.warn('Screenshot stream write failed: {error}', {
+                        error: errorProperty(error),
+                    });
+                    stream.abort();
+                    cleanup();
+                },
+                30_000,
+                Math.max(veyonPoller.config.streamMaxPendingBytes, veyonPoller.config.maxFrameBytes),
+            );
+            const write = (key: string, message: () => SSEMessage, bytes = 0) => {
+                if (!closed && !stream.aborted) writer.enqueue(key, () => {
+                    const event = message();
+                    // A replacement state may coalesce a reset, but cannot
+                    // erase the required cache invalidation before delivery.
+                    if (!resets.delete(key) || event.event === 'reset') return [event];
+                    return [{ event: 'reset', data: JSON.stringify({ computerId: key }) }, event];
+                }, bytes);
+            };
+            const frameData = (
+                computerId: string,
+                state: {
+                    image: ArrayBuffer;
+                    mimeType: string;
+                    lastUpdated: number;
+                    stale: boolean;
+                    consecutiveFailures: number;
+                    initial?: boolean;
+                },
+            ) => {
+                lastFrameSent.set(computerId, Date.now());
+                if (state.stale) freshNeeded.add(computerId);
+                else if (!state.initial) freshNeeded.delete(computerId);
+                return JSON.stringify({
+                    computerId,
+                    image: Buffer.from(state.image).toString('base64'),
+                    mimeType: state.mimeType,
+                    lastUpdated: state.lastUpdated,
+                    stale: state.stale,
+                    consecutiveFailures: state.consecutiveFailures,
+                    initial: state.initial ?? false,
+                });
+            };
+
+            const cleanup = () => {
+                if (cleaned) return;
+                cleaned = true;
+                closed = true;
+                writer.close();
+                removeListener();
+                c.req.raw.signal.removeEventListener('abort', abort);
+                for (const [id, token] of subscribedIds) {
+                    veyonPoller.unsubscribe(organizationId, id, token);
+                }
+            };
+            const abort = () => {
+                stream.abort();
+                cleanup();
+            };
+            let removeListener: () => void = () => undefined;
+            stream.onAbort(cleanup);
+            c.req.raw.signal.addEventListener('abort', abort, { once: true });
+            if (c.req.raw.signal.aborted || stream.aborted) {
+                abort();
+                return;
+            }
+
+            // Attach the listener before subscribing so no frame event can
+            // slip past the initial snapshot below.
+            removeListener = veyonPoller.addListener((event) => {
+                if (
+                    event.organizationId !== organizationId ||
+                    !requestedIds.has(event.computerId)
+                ) {
+                    return;
+                }
+                if (event.type === 'reset') {
+                    lastFrameSent.delete(event.computerId);
+                    freshNeeded.add(event.computerId);
+                    resets.add(event.computerId);
+                    write(event.computerId, () => ({ event: 'reset', data: JSON.stringify({ computerId: event.computerId }) }));
+                } else if (event.type === 'frame') {
+                    if (!freshNeeded.has(event.computerId) && Date.now() - (lastFrameSent.get(event.computerId) ?? -Infinity) < intervalMs) return;
+                    write(event.computerId, () => ({
+                        event: 'frame',
+                        data: frameData(event.computerId, {
+                            ...event,
+                            stale: false,
+                            consecutiveFailures: 0,
+                        }),
+                    }), event.image.byteLength);
+                } else {
+                    freshNeeded.add(event.computerId);
+                    write(event.computerId, () => ({
+                        event: 'state',
+                        data: JSON.stringify({
+                            computerId: event.computerId,
+                            stale: event.stale,
+                            lastUpdated: event.lastUpdated,
+                            consecutiveFailures: event.consecutiveFailures,
+                            lastError: event.lastError,
+                        }),
+                    }));
+                }
+            });
+
+            // Hint browsers to reconnect quickly after dropped streams.
+            try {
+                write('hello', () => ({ event: 'hello', data: 'connected', retry: 3000 }));
+                for (const computer of computers) {
+                    if (closed || stream.aborted) break;
+                    const token = Symbol();
+                    const state = veyonPoller.subscribe(organizationId, computer, { ...profile, intervalMs, token, refresh });
+                    subscribedIds.set(computer.id, token);
+                    const image = state.image;
+                    if (image) {
+                        write(computer.id, () => ({
+                            event: 'frame',
+                            data: frameData(computer.id, {
+                                image,
+                                mimeType: state.mimeType,
+                                lastUpdated: state.lastUpdated ?? 0,
+                                stale: state.stale,
+                                consecutiveFailures: state.consecutiveFailures,
+                                initial: true,
+                            }),
+                        }), image.byteLength);
+                    } else {
+                        write(computer.id, () => ({
+                            event: 'state',
+                            data: JSON.stringify({
+                                computerId: computer.id,
+                                stale: state.stale,
+                                lastUpdated: state.lastUpdated,
+                                consecutiveFailures: state.consecutiveFailures,
+                                lastError: state.lastError,
+                                initial: true,
+                            }),
+                        }));
+                    }
+                }
+
+                // Heartbeats keep proxies from idling out the stream.
+                while (!closed && !stream.aborted) {
+                    await stream.sleep(SSE_HEARTBEAT_MS);
+                    if (closed || stream.aborted) break;
+                    write('heartbeat', () => ({ event: 'heartbeat', data: '' }));
+                }
+            } finally {
+                cleanup();
+            }
+        });
     } catch (error) {
         return apiError(c, error);
     }
@@ -685,6 +930,7 @@ veyonRouter.get('/veyon/connections', async (c) => {
     if (auth.response) return auth.response;
     return c.json({
         connections: listOpenConnections(auth.user.organizationId, auth.user.id),
+        pollers: veyonPoller.stats(auth.user.organizationId),
     });
 });
 
@@ -880,4 +1126,3 @@ veyonRouter.post('/veyon/computers/:id/power-on', async (c) => {
         return apiError(c, error);
     }
 });
-

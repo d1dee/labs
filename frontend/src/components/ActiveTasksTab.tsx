@@ -7,6 +7,8 @@ import {
     restartFogTask,
     type FogActiveTask,
 } from '@/api/fog';
+import { PageHero } from '@/components/ui/PageHero';
+import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import {
     Alert,
     Button,
@@ -15,7 +17,6 @@ import {
     Group,
     Loader,
     Select,
-    SimpleGrid,
     Stack,
     Text,
     TextInput,
@@ -76,6 +77,7 @@ const ActiveTasksTab: FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [stateFilter, setStateFilter] = useState<string | null>(null);
     const [typeFilter, setTypeFilter] = useState<string | null>(null);
+    const { opened, toggle, controlsId } = useMobileTableFilters();
 
     const fetchStatus = useCallback(async () => {
         try {
@@ -155,26 +157,28 @@ const ActiveTasksTab: FC = () => {
     const filteredTasks = useMemo(() => {
         let result = tasks;
         if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase();
+            const q = searchQuery.trim().toLowerCase();
             result = result.filter(
                 (t) =>
+                    String(t.id).includes(q) ||
                     (t.name || '').toLowerCase().includes(q) ||
                     (t.hostName || t.host?.name || '')
                         .toLowerCase()
                         .includes(q) ||
                     (t.typeName || t.type?.name || '')
                         .toLowerCase()
-                        .includes(q),
+                        .includes(q) ||
+                    (t.state?.name || 'Unknown').toLowerCase().includes(q),
             );
         }
         if (stateFilter) {
             result = result.filter(
-                (t) => String(t.stateID ?? t.state?.id) === stateFilter,
+                (t) => String(t.stateID ?? t.state?.id ?? 0) === stateFilter,
             );
         }
         if (typeFilter) {
             result = result.filter(
-                (t) => String(t.typeID ?? t.type?.id) === typeFilter,
+                (t) => String(t.typeID ?? t.type?.id ?? 0) === typeFilter,
             );
         }
         return result;
@@ -273,142 +277,107 @@ const ActiveTasksTab: FC = () => {
 
     return (
         <Stack gap='md'>
-            <Group justify='space-between'>
-                <Title order={4}>Active FOG Tasks</Title>
-                <Button
-                    leftSection={<IconRefresh size={14} />}
-                    color='blue'
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => {
-                        loadAll();
-                    }}
-                >
-                    Refresh
-                </Button>
-            </Group>
-
-            {/* Stats Cards */}
-            <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
-                <Card withBorder>
-                    <Text size='sm' c='dimmed' fw={600}>
-                        Total
-                    </Text>
-                    <Text size='xl' fw={700}>
-                        {stats.total}{' '}
-                    </Text>
-                </Card>
-                <Card withBorder>
-                    <Text size='sm' c='dimmed' fw={600}>
-                        Running
-                    </Text>
-                    <Text size='xl' fw={700} c='blue'>
-                        {stats.running}
-                    </Text>
-                </Card>
-                <Card withBorder>
-                    <Text size='sm' c='dimmed' fw={600}>
-                        Pending
-                    </Text>
-                    <Text size='xl' fw={700} c='yellow'>
-                        {stats.pending}
-                    </Text>
-                </Card>
-                <Card withBorder>
-                    <Text size='sm' c='dimmed' fw={600}>
-                        Completed
-                    </Text>
-                    <Text size='xl' fw={700} c='green'>
-                        {stats.completed}
-                    </Text>
-                </Card>
-            </SimpleGrid>
+            <PageHero
+                eyebrow='Deployment'
+                title='Active FOG tasks'
+                description='Track and manage currently running deployment tasks across hosts.'
+                icon={<IconTools size={25} />}
+                actions={
+                    <Button
+                        variant='light'
+                        color='teal'
+                        leftSection={<IconRefresh size={16} />}
+                        onClick={() => {
+                            loadAll();
+                        }}
+                        loading={loading}
+                    >
+                        Refresh
+                    </Button>
+                }
+                metrics={[
+                    { label: 'Total', value: stats.total },
+                    { label: 'Running', value: stats.running, accent: true },
+                    { label: 'Pending', value: stats.pending, color: 'yellow.4' },
+                    { label: 'Completed', value: stats.completed, color: 'green.4' },
+                ]}
+            />
 
             {/* Tasks Table */}
-            <Stack gap='md'>
-                <div>
-                    <Title order={5}>Task Details</Title>
-                    <Text size='sm' c='dimmed'>
-                        View and manage currently running FOG tasks.
-                    </Text>
-                </div>
+            <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
-                    <Card withBorder style={{ position: 'relative' }}>
-                        <Stack>
-                            <Card p='md' withBorder>
-                                <Stack gap='sm'>
-                                    <Group align='flex-end'>
-                                        <TextInput
-                                            label='Search'
-                                            placeholder='Search tasks...'
-                                            leftSection={
-                                                <IconSearch size={16} />
-                                            }
-                                            value={searchQuery}
-                                            onChange={(e) =>
-                                                setSearchQuery(
-                                                    e.currentTarget.value,
-                                                )
-                                            }
-                                            style={{ flex: 1 }}
-                                        />
-                                        <Select
-                                            placeholder='Filter by state'
-                                            data={stateOptions}
-                                            value={stateFilter}
-                                            onChange={setStateFilter}
-                                            clearable
-                                            style={{ width: 180 }}
-                                        />
-                                        <Select
-                                            placeholder='Filter by type'
-                                            data={typeOptions}
-                                            value={typeFilter}
-                                            onChange={setTypeFilter}
-                                            clearable
-                                            style={{ width: 180 }}
-                                        />
-                                    </Group>
-                                </Stack>
-                            </Card>
+                    <Group justify='space-between' align='flex-end'>
+                        <div>
+                            <Title order={4}>Task Details</Title>
+                            <Text size='sm' c='dimmed'>
+                                View and manage currently running FOG tasks.
+                            </Text>
+                        </div>
+                        <Group wrap='nowrap' w={{ base: '100%', sm: 300 }}>
+                        <TextInput
+                            aria-label='Search'
+                            placeholder='Search tasks...'
+                            leftSection={<IconSearch size={16} />}
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                            style={{ flex: 1, minWidth: 0 }}
+                        />
+                        <MobileFilterToggle
+                            opened={opened}
+                            onToggle={toggle}
+                            controlsId={controlsId}
+                            label='Toggle task filters'
+                        />
+                        </Group>
+                    </Group>
+                    <MobileFilterPanel id={controlsId} opened={opened}>
+                    <Group grow preventGrowOverflow={false} align='flex-end'>
+                        <Select
+                            miw={{ base: '100%', sm: 180 }}
+                            placeholder='Filter by state'
+                            label='State'
+                            data={stateOptions}
+                            value={stateFilter}
+                            onChange={setStateFilter}
+                            clearable
+                        />
+                        <Select
+                            miw={{ base: '100%', sm: 180 }}
+                            placeholder='Filter by type'
+                            label='Type'
+                            data={typeOptions}
+                            value={typeFilter}
+                            onChange={setTypeFilter}
+                            clearable
+                        />
+                    </Group>
+                    </MobileFilterPanel>
 
-                            <Stack gap='md'>
-                                {error && tasks.length === 0 ? (
-                                    <Text c='red' ta='center'>
-                                        {error}
-                                    </Text>
-                                ) : tasks.length === 0 ? (
-                                    <Stack align='center' gap='md' py='xl'>
-                                        <IconTools
-                                            size={48}
-                                            color='var(--mantine-color-gray-5)'
-                                        />
-                                        <Text c='dimmed' ta='center'>
-                                            No active tasks found.
-                                        </Text>
-                                    </Stack>
-                                ) : filteredTasks.length === 0 ? (
-                                    <Stack align='center' gap='md' py='xl'>
-                                        <IconSearch
-                                            size={48}
-                                            color='var(--mantine-color-gray-5)'
-                                        />
-                                        <Text c='dimmed' ta='center'>
-                                            No tasks match your filters.
-                                        </Text>
-                                    </Stack>
-                                ) : (
-                                    <ActiveTasksTable
-                                        loading={loading}
-                                        tasks={filteredTasks}
-                                        actioningTasks={actioningTasks}
-                                        onTaskAction={handleTaskAction}
-                                    />
-                                )}
-                            </Stack>
+                    {error && tasks.length === 0 ? (
+                        <Text c='red' ta='center'>
+                            {error}
+                        </Text>
+                    ) : tasks.length === 0 ? (
+                        <Stack align='center' gap='md' py='xl'>
+                            <IconTools
+                                size={48}
+                                color='var(--mantine-color-gray-5)'
+                            />
+                            <Text c='dimmed' ta='center'>
+                                No active tasks found.
+                            </Text>
                         </Stack>
-                    </Card>
+                    ) : (
+                        <ActiveTasksTable
+                            loading={loading}
+                            tasks={filteredTasks}
+                            filterKey={JSON.stringify([searchQuery, stateFilter, typeFilter])}
+                            actioningTasks={actioningTasks}
+                            onTaskAction={handleTaskAction}
+                        />
+                    )}
                 </Stack>
-            </Stack>
+            </Card>
         </Stack>
     );
 };

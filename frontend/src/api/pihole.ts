@@ -116,10 +116,11 @@ export async function getPiholeSummary(): Promise<PiholeSummary> {
 export async function getPiholeTopDomains(
     blocked = true,
     count = 10,
+    range?: { from: number; until: number },
 ): Promise<PiholeTopDomains> {
     return throwOnError(
         await $fetch<PiholeTopDomains>(
-            `/api/pihole/top-domains?blocked=${blocked}&count=${count}`,
+            `/api/pihole/top-domains?blocked=${blocked}&count=${count}${range ? `&from=${range.from}&until=${range.until}` : ''}`,
             { method: 'GET' },
         ),
         'Failed to fetch Pi-hole top domains',
@@ -288,6 +289,7 @@ export async function deletePiholeDnsItem(
 export interface PiholeSettingsConfig {
     configured: boolean;
     url: string;
+    verifyTls: boolean;
     /** Masked when read from the server. */
     password: string;
 }
@@ -304,11 +306,12 @@ export async function getPiholeSettings(): Promise<PiholeSettingsConfig> {
 export async function savePiholeSettings(
     url: string,
     password: string,
+    verifyTls = true,
 ): Promise<PiholeSettingsConfig> {
     return throwOnError(
         await $fetch<PiholeSettingsConfig>('/api/settings/pihole', {
             method: 'POST',
-            body: { url, password },
+            body: { url, password, verifyTls },
         }),
         'Failed to save Pi-hole settings',
     );

@@ -297,6 +297,7 @@ export interface FogSettingsConfig {
     url: string;
     /** Masked when read from the server. */
     apiToken: string;
+    /** Masked when read from the server; empty for FOG 1.6 bearer tokens. */
     userToken: string;
 }
 
@@ -312,12 +313,12 @@ export async function getFogSettings(): Promise<FogSettingsConfig> {
 export async function saveFogSettings(
     url: string,
     apiToken: string,
-    userToken: string,
+    userToken?: string,
 ): Promise<FogSettingsConfig> {
     return throwOnError(
         await $fetch<FogSettingsConfig>('/api/settings/fog', {
             method: 'POST',
-            body: { url, apiToken, userToken },
+            body: { url, apiToken, userToken: userToken ?? '' },
         }),
         'Failed to save FOG settings',
     );

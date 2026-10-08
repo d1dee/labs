@@ -228,6 +228,7 @@ export const piholeConfig = sqliteTable(
             .references(() => organization.id, { onDelete: 'cascade' }),
         url: text('url').notNull(),
         password: text('password').notNull(),
+        verifyTls: integer('verifyTls', { mode: 'boolean' }).notNull().default(true),
 
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .$defaultFn(() => new Date())

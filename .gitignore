@@ -17,3 +17,6 @@ frontend/node_modules/
 .vscode/
 .kilo
 backend/test-fog-api.ts
+logs/
+*.test.*
+backend/veyon.test.ts

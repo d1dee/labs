@@ -13,7 +13,8 @@ import {
     getFirewallConfigWithLabs,
     mapLabs,
 } from '../firewall-config';
-import { getFogConfigForOrg, testFogConnection } from '../fog';
+import { getFogConfigForOrg, isBearerToken, testFogConnection } from '../fog';
+import { errorProperty, getLogger } from '../logger';
 import { testMikrotikConnection } from '../mikrotik';
 import {
     assertValidPrivateKeyPem,
@@ -27,8 +28,11 @@ import {
     testPiholeConnection,
 } from '../pihole';
 import { createApp } from './context';
+import { veyonPoller } from '../veyon-poller';
 
 export const settingsRouter = createApp();
+
+const settingsLogger = getLogger(['labs', 'settings']);
 
 settingsRouter.post('/settings/mikrotik', async (c) => {
     const user = c.get('user');
@@ -104,7 +108,9 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
                 : undefined,
         });
     } catch (error) {
-        console.error('Failed to save firewall settings:', error);
+        settingsLogger.error('Failed to save firewall settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -180,7 +186,9 @@ settingsRouter.post('/settings/labs', async (c) => {
                 : undefined,
         });
     } catch (error) {
-        console.error('Failed to save firewall settings:', error);
+        settingsLogger.error('Failed to save firewall settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -226,7 +234,9 @@ settingsRouter.get('/settings/firewall', async (c) => {
             labs: mapLabs(storedConfig.labs),
         });
     } catch (error) {
-        console.error('Failed to load firewall settings:', error);
+        settingsLogger.error('Failed to load firewall settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -257,17 +267,21 @@ settingsRouter.get('/settings/pihole', async (c) => {
                 configured: false,
                 url: '',
                 password: '',
+                verifyTls: true,
             });
         }
 
         return c.json({
             configured: true,
             url: stored.url,
+            verifyTls: stored.verifyTls,
             // Mask the password so the secret is never exposed to the client
             password: new Array(stored.password.length).fill('*').join(''),
         });
     } catch (error) {
-        console.error('Failed to load Pi-hole settings:', error);
+        settingsLogger.error('Failed to load Pi-hole settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -293,6 +307,7 @@ settingsRouter.post('/settings/pihole', async (c) => {
             id: z.string().length(12).optional(),
             url: z.url(),
             password: z.string().min(1),
+            verifyTls: z.boolean().default(true),
         });
 
         const body = schema.parse(await c.req.json());
@@ -301,6 +316,7 @@ settingsRouter.post('/settings/pihole', async (c) => {
         const connectionTest = await testPiholeConnection({
             url: body.url,
             password: body.password,
+            verifyTls: body.verifyTls,
         });
 
         if (!connectionTest.success) {
@@ -322,6 +338,7 @@ settingsRouter.post('/settings/pihole', async (c) => {
                 organizationId: user.organizationId,
                 url: body.url,
                 password: body.password,
+                verifyTls: body.verifyTls,
                 updatedAt: new Date(),
             })
             .onConflictDoUpdate({
@@ -329,6 +346,7 @@ settingsRouter.post('/settings/pihole', async (c) => {
                 set: {
                     url: body.url,
                     password: body.password,
+                    verifyTls: body.verifyTls,
                     updatedAt: new Date(),
                 },
             })
@@ -340,13 +358,16 @@ settingsRouter.post('/settings/pihole', async (c) => {
             data: {
                 configured: true,
                 url: body.url,
+                verifyTls: body.verifyTls,
                 password: new Array(body.password.length)
                     .fill('*')
                     .join(''),
             },
         });
     } catch (error) {
-        console.error('Failed to save Pi-hole settings:', error);
+        settingsLogger.error('Failed to save Pi-hole settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -389,7 +410,9 @@ settingsRouter.get('/settings/fog', async (c) => {
             userToken: new Array(stored.userToken.length).fill('*').join(''),
         });
     } catch (error) {
-        console.error('Failed to load FOG settings:', error);
+        settingsLogger.error('Failed to load FOG settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -415,10 +438,23 @@ settingsRouter.post('/settings/fog', async (c) => {
             id: z.string().length(12).optional(),
             url: z.url(),
             apiToken: z.string().min(1),
-            userToken: z.string().min(1),
+            // Optional for FOG 1.6 bearer tokens (fog_ prefixed); legacy
+            // header auth still requires the per-user token.
+            userToken: z.string().optional().default(''),
         });
 
         const body = schema.parse(await c.req.json());
+
+        if (!isBearerToken(body.apiToken) && !body.userToken) {
+            return c.json(
+                {
+                    message:
+                        'A user token is required for legacy (non-bearer) API tokens. FOG 1.6 bearer tokens start with "fog_" and need no user token.',
+                    code: 'USER_TOKEN_REQUIRED',
+                },
+                400,
+            );
+        }
 
         // Verify connection to FOG with the provided credentials before saving
         const connectionTest = await testFogConnection({
@@ -474,7 +510,9 @@ settingsRouter.post('/settings/fog', async (c) => {
             },
         });
     } catch (error) {
-        console.error('Failed to save FOG settings:', error);
+        settingsLogger.error('Failed to save FOG settings: {error}', {
+            error: errorProperty(error),
+        });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -561,6 +599,7 @@ settingsRouter.post('/settings/veyon', async (c) => {
                 set: { ...credentials, updatedAt: new Date() },
             });
         clearVeyonConnections(user.organizationId);
+        veyonPoller.invalidateOrganization(user.organizationId);
         return c.json({
             success: true,
             configured: true,
@@ -570,7 +609,9 @@ settingsRouter.post('/settings/veyon', async (c) => {
             verifyTls: body.verifyTls,
         });
     } catch (error) {
-        console.error('Failed to save Veyon settings:', error);
+        settingsLogger.error('Failed to save Veyon settings: {error}', {
+            error: errorProperty(error),
+        });
         if (error instanceof VeyonApiError) {
             const status = error.status >= 400 && error.status <= 599 ? error.status : 400;
             return c.json({ error: error.message, code: error.code }, status as any);
@@ -596,5 +637,6 @@ settingsRouter.delete('/settings/veyon', async (c) => {
         .delete(veyonConfig)
         .where(eq(veyonConfig.organizationId, user.organizationId));
     clearVeyonConnections(user.organizationId);
+    veyonPoller.invalidateOrganization(user.organizationId);
     return c.json({ success: true, configured: false });
 });

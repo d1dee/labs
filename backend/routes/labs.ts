@@ -1,4 +1,3 @@
-import console from 'console';
 import { and, desc, eq, gte } from 'drizzle-orm';
 import process from 'process';
 import { setInterval } from 'timers';
@@ -10,6 +9,7 @@ import {
     isDemoUser,
     setDemoLabState,
 } from '../demo';
+import { errorProperty, getLogger } from '../logger';
 import {
     type ConfigLab,
     getFirewallConfigWithLabs,
@@ -25,6 +25,8 @@ import {
 import { type AppEnv, createApp } from './context';
 
 export const labsRouter = createApp();
+
+const snapshotLogger = getLogger(['labs', 'snapshots']);
 
 type LabUser = NonNullable<AppEnv['Variables']['user']>;
 
@@ -421,9 +423,11 @@ async function saveDataUsageSnapshot() {
                 }
             }
         }
-        console.log('✓ Data usage snapshots saved');
+        snapshotLogger.info('Data usage snapshots saved');
     } catch (error) {
-        console.error('Failed to save data usage snapshot:', error);
+        snapshotLogger.error('Failed to save data usage snapshot: {error}', {
+            error: errorProperty(error),
+        });
     }
 }
 

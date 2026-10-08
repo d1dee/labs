@@ -109,6 +109,30 @@ export interface VeyonSettings {
     verifyTls: boolean;
 }
 
+// Server-sent event payloads of GET /api/veyon/screenshots/stream. The
+// backend polls Veyon once per machine and fans frames out to every viewer.
+export interface VeyonScreenshotFrameEvent {
+    computerId: string;
+    /** Cached subscription snapshot, not a result of a fresh poll. */
+    initial?: boolean;
+    /** Base64-encoded screenshot bytes. */
+    image: string;
+    mimeType: string;
+    lastUpdated: number;
+    stale: boolean;
+    consecutiveFailures: number;
+}
+
+export interface VeyonScreenshotStateEvent {
+    computerId: string;
+    /** Cached subscription snapshot, not a result of a fresh poll. */
+    initial?: boolean;
+    stale: boolean;
+    lastUpdated: number | null;
+    consecutiveFailures: number;
+    lastError: string | null;
+}
+
 export type VeyonCommandAction =
     | 'screen-lock'
     | 'input-lock'
@@ -191,6 +215,21 @@ export function veyonFramebufferUrl(
     if (options.height) query.set('height', String(options.height));
     if (options.download) query.set('download', 'true');
     return `/api/veyon/computers/${id}/framebuffer?${query}`;
+}
+
+// Server-sent event stream of live screenshots for the given computers. The
+// backend owns all Veyon polling; browsers only receive pushed frames.
+export function veyonScreenshotStreamUrl(
+    computerIds: string[],
+    options: { intervalMs?: number | null; refresh?: boolean; width?: number; quality?: number; priority?: 'grid' | 'viewer' } = {},
+) {
+    const query = new URLSearchParams({ ids: [...new Set(computerIds)].sort().join(',') });
+    if (options.intervalMs != null) query.set('intervalMs', String(options.intervalMs));
+    if (options.refresh) query.set('refresh', 'true');
+    if (options.width != null) query.set('width', String(options.width));
+    if (options.quality != null) query.set('quality', String(options.quality));
+    if (options.priority) query.set('priority', options.priority);
+    return `/api/veyon/screenshots/stream?${query}`;
 }
 
 export async function sendVeyonCommand(input: {

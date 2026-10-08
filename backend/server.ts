@@ -1,10 +1,8 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import console from 'console';
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import * as path from 'path';
 import { db } from '../db/database';
 import { organization } from '../db/schema';
@@ -17,6 +15,14 @@ import { organizationsRouter } from './routes/organizations';
 import { piholeRouter } from './routes/pihole';
 import { settingsRouter } from './routes/settings';
 import { veyonRouter } from './routes/veyon';
+import { configureLogger, getLogger } from './logger';
+
+// Configure LogTape before handling any request so every logger in the
+// backend routes to the console and the rotating log file from the start.
+await configureLogger();
+
+const serverLogger = getLogger(['labs', 'server']);
+const httpLogger = getLogger(['labs', 'http']);
 
 // Globally accept self-signed certificates for outbound fetch requests
 // when MikroTik is configured with insecure TLS (self-signed routers).
@@ -40,8 +46,32 @@ if (process.env.MIKROTIK_INSECURE_FETCH === 'true') {
 // Define Hono app with typed variables for auth
 const app = new Hono<AppEnv>({});
 
-// Logger middleware
-app.use(logger());
+// HTTP request logging middleware. API traffic is logged at info, static
+// assets at debug, and 4xx/5xx responses are escalated to warning/error.
+app.use('*', async (c, next) => {
+    const startedAt = performance.now();
+    await next();
+    const durationMs = Math.round(performance.now() - startedAt);
+    const status = c.res.status;
+    const user = c.get('user');
+    const message = '{method} {path} -> {status} ({durationMs}ms)';
+    const properties = {
+        method: c.req.method,
+        path: c.req.path,
+        status,
+        durationMs,
+        ...(user ? { userId: user.id } : {}),
+    };
+    if (status >= 500) {
+        httpLogger.error(message, properties);
+    } else if (status >= 400) {
+        httpLogger.warn(message, properties);
+    } else if (c.req.path.startsWith('/api/')) {
+        httpLogger.info(message, properties);
+    } else {
+        httpLogger.debug(message, properties);
+    }
+});
 
 app.use(
     '*',
@@ -116,11 +146,11 @@ app.get('*', async (c, next) => {
 });
 
 serve({ fetch: app.fetch, port }, (info) => {
-    console.log(
-        `🚀 Teacher Dashboard running on http://localhost:${info.port}`,
-    );
-    console.log(`📝 Better Auth endpoints available at /api/auth/*`);
-    console.log(`   Sign in with username: POST /api/auth/sign-in/username`);
-    console.log(`   Session check: GET /api/auth/session`);
-    console.log(`   Sign out: POST /api/auth/sign-out`);
+    serverLogger.info('Teacher Dashboard running on http://localhost:{port}', {
+        port: info.port,
+    });
+    serverLogger.info('Better Auth endpoints available at /api/auth/*');
+    serverLogger.debug('Sign in with username: POST /api/auth/sign-in/username');
+    serverLogger.debug('Session check: GET /api/auth/session');
+    serverLogger.debug('Sign out: POST /api/auth/sign-out');
 });

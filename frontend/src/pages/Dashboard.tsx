@@ -16,6 +16,7 @@ import {
     Menu,
     Tabs,
     Text,
+    ThemeIcon,
     Title,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
@@ -127,7 +128,17 @@ const Dashboard: FC<DashboardProps> = ({
                             wrap='nowrap'
                         >
                             {mobileNav}
-                            <Title order={3}>Labs FCD</Title>
+                            <Group align='center' gap='sm' wrap='nowrap'>
+                                <ThemeIcon
+                                    size={36}
+                                    radius='md'
+                                    color='teal'
+                                    variant='light'
+                                >
+                                    <IconShieldCheck size={20} />
+                                </ThemeIcon>
+                                <Title order={3}>Labs FCD</Title>
+                            </Group>
                             {tabsList}
 
                             <Group gap='sm' wrap='nowrap'>

@@ -8,7 +8,11 @@ import type { FogHost, ListFogHosts } from '../frontend/src/api';
 export interface FogCredentials {
     url: string;
     apiToken: string;
-    userToken: string;
+    /**
+     * Per-user token. Required for FOG <= 1.5 header auth; unused when
+     * apiToken is a FOG 1.6 bearer token (fog_ prefixed).
+     */
+    userToken?: string;
 }
 
 export interface FogImage {
@@ -51,11 +55,99 @@ type FogResult<T> = {
     error?: string;
 };
 
+/**
+ * FOG 1.6 paged list envelope (DataTables style). FOG <= 1.5 returned
+ * `{ count, <class>: [...] }` instead; both shapes are handled by
+ * normalizeList().
+ */
+interface FogPageEnvelope {
+    data?: unknown[];
+    recordsTotal?: number;
+    recordsFiltered?: number;
+    recordsReturned?: number;
+    truncated?: boolean;
+    nextUrl?: string | null;
+    count?: number;
+    [key: string]: unknown;
+}
+
+// ===================== Auth =====================
+
+/**
+ * FOG 1.6 API tokens are issued from the user's API tab and carry a `fog_`
+ * prefix; they are sent as `Authorization: Bearer <token>` and need no
+ * user token. Older setups use the server-wide `fog-api-token` header plus
+ * a `fog-user-token` caller identity.
+ */
+export function isBearerToken(apiToken: string): boolean {
+    return apiToken.trimStart().startsWith('fog_');
+}
+
+/** True when the credentials carry everything their auth mode requires. */
+export function credentialsComplete(creds?: FogCredentials | null): boolean {
+    if (!creds?.url || !creds.apiToken) return false;
+    return isBearerToken(creds.apiToken) || Boolean(creds.userToken);
+}
+
+/** Build the auth headers for a set of FOG credentials. */
+function authHeaders(creds: FogCredentials): Record<string, string> {
+    if (isBearerToken(creds.apiToken)) {
+        return { Authorization: `Bearer ${creds.apiToken.trim()}` };
+    }
+    return {
+        'fog-api-token': creds.apiToken,
+        'fog-user-token': creds.userToken ?? '',
+    };
+}
+
+// ===================== List normalization =====================
+
+/**
+ * Normalize a FOG list response into `{ count, items }`. Accepts both the
+ * FOG 1.6 paged envelope (`data` + `recordsTotal`) and the <= 1.5 shape
+ * (`count` + class-named array, e.g. `hosts`).
+ */
+function normalizeList<T>(raw: unknown, legacyKey: string): { count: number; items: T[] } {
+    const envelope = (raw ?? {}) as FogPageEnvelope & Record<string, unknown>;
+    let items: T[];
+    if (Array.isArray(envelope.data)) {
+        items = envelope.data as T[];
+    } else if (Array.isArray(envelope[legacyKey])) {
+        items = envelope[legacyKey] as T[];
+    } else {
+        items = [];
+    }
+    const count =
+        typeof envelope.recordsTotal === 'number'
+            ? envelope.recordsTotal
+            : typeof envelope.count === 'number'
+              ? envelope.count
+              : items.length;
+    return { count, items };
+}
+
+/**
+ * FOG 1.6 list rows only expose `primac`; the full `macs` array is limited
+ * to single-host GETs. Synthesize `macs` from `primac` so table/filter
+ * consumers keep working without an N+1 fetch per host.
+ */
+function withSynthesizedMacs<T>(hosts: T[]): T[] {
+    return hosts.map((host) => {
+        const h = host as Record<string, unknown>;
+        if (!Array.isArray(h.macs) && typeof h.primac === 'string' && h.primac) {
+            return { ...h, macs: [h.primac] } as T;
+        }
+        return host;
+    });
+}
+
 // ===================== Client =====================
 
 /**
  * FOG API client bound to specific credentials. Token-auth based (no
- * sessions), so no auth caching is needed unlike Pi-hole.
+ * sessions), so no auth caching is needed unlike Pi-hole. Routes follow the
+ * FOG 1.6 OpenAPI document; legacy alias routes (/create, /edit, /delete,
+ * /active, /update) are avoided.
  */
 export class FogClient {
     private url: string;
@@ -65,11 +157,15 @@ export class FogClient {
     constructor(creds: FogCredentials) {
         this.url = creds.url.replace(/\/$/, '');
         this.apiToken = creds.apiToken;
-        this.userToken = creds.userToken;
+        this.userToken = creds.userToken ?? '';
     }
 
     get configured(): boolean {
-        return Boolean(this.url && this.apiToken && this.userToken);
+        return credentialsComplete({
+            url: this.url,
+            apiToken: this.apiToken,
+            userToken: this.userToken,
+        });
     }
 
     private fogUrl(path: string): string {
@@ -86,8 +182,11 @@ export class FogClient {
         }
 
         const headers: Record<string, string> = {
-            'fog-api-token': this.apiToken,
-            'fog-user-token': this.userToken,
+            ...authHeaders({
+                url: this.url,
+                apiToken: this.apiToken,
+                userToken: this.userToken,
+            }),
             'Content-Type': 'application/json',
         };
 
@@ -102,12 +201,16 @@ export class FogClient {
     /**
      * Parse a FOG response body as JSON. FOG returns HTML pages (login or
      * error pages) when the URL is wrong or tokens are rejected, so surface a
-     * human-readable message instead of a raw JSON SyntaxError.
+     * human-readable message instead of a raw JSON SyntaxError. FOG 1.6
+     * answers some mutations (task create, cancel, delete) with an empty
+     * body or the JSON string ""; both normalize to null.
      */
     private async readJson(res: Response): Promise<unknown> {
         const text = await res.text();
+        if (!text.trim()) return null;
         try {
-            return JSON.parse(text);
+            const parsed: unknown = JSON.parse(text);
+            return typeof parsed === 'string' && !parsed.trim() ? null : parsed;
         } catch {
             throw new Error(nonJsonMessage(this.url, res.status, text));
         }
@@ -154,7 +257,11 @@ export class FogClient {
                 : '/fog/host';
             const res = await this.fogRequest('GET', path);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as ListFogHosts;
+            const { count, items } = normalizeList<FogHost>(
+                await this.readJson(res),
+                'hosts',
+            );
+            const data: ListFogHosts = { count, hosts: withSynthesizedMacs(items) };
             return { success: true, data };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
@@ -178,7 +285,8 @@ export class FogClient {
     ): Promise<FogResult<FogHost>> {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('POST', '/fog/host/create', hostData);
+            // FOG 1.6 canonical create route (legacy alias: /fog/host/create)
+            const res = await this.fogRequest('POST', '/fog/host', hostData);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
@@ -193,7 +301,8 @@ export class FogClient {
     ): Promise<FogResult<FogHost>> {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('PUT', `/fog/host/${id}/edit`, updates);
+            // FOG 1.6 canonical update route (legacy alias: /fog/host/{id}/edit)
+            const res = await this.fogRequest('PUT', `/fog/host/${id}`, updates);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
@@ -205,7 +314,9 @@ export class FogClient {
     async deleteHost(id: number): Promise<FogResult<unknown>> {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('DELETE', `/fog/host/${id}/delete`);
+            // FOG 1.6 canonical delete route (legacy alias: /fog/host/{id}/delete).
+            // A 409 means another record still references this host.
+            const res = await this.fogRequest('DELETE', `/fog/host/${id}`);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
@@ -222,11 +333,11 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/image');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as {
-                count: number;
-                images: FogImage[];
-            };
-            return { success: true, data };
+            const { count, items } = normalizeList<FogImage>(
+                await this.readJson(res),
+                'images',
+            );
+            return { success: true, data: { count, images: items } };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
         }
@@ -239,11 +350,11 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/tasktype');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as {
-                count: number;
-                tasktypes: FogTaskType[];
-            };
-            return { success: true, data };
+            const { count, items } = normalizeList<FogTaskType>(
+                await this.readJson(res),
+                'tasktypes',
+            );
+            return { success: true, data: { count, tasktypes: items } };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
         }
@@ -256,11 +367,11 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/snapin');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as {
-                count: number;
-                snapins: FogSnapin[];
-            };
-            return { success: true, data };
+            const { count, items } = normalizeList<FogSnapin>(
+                await this.readJson(res),
+                'snapins',
+            );
+            return { success: true, data: { count, snapins: items } };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
         }
@@ -289,14 +400,18 @@ export class FogClient {
     ): Promise<FogResult<FogTaskResult>> {
         if (!this.configured) return unconfigured();
         try {
-            // Single Snapin task type is 13 - based on actual API response
+            // Single Snapin task type is 13. FOG 1.6 TaskRequest selects the
+            // snapin with deploySnapins; snapinID is kept for older servers.
+            const { snapinID: _ignored, ...rest } = options ?? {};
             const res = await this.fogRequest('POST', `/fog/host/${hostId}/task`, {
                 taskTypeID: 13, // Single Snapin task type
                 snapinID: snapinId,
-                ...options,
+                deploySnapins: snapinId,
+                ...rest,
             });
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            // FOG returns null on successful task creation
+            // FOG 1.6 answers queued task creation with an empty body (older
+            // versions returned null); normalize both to {}.
             const data = (await this.readJson(res)) as FogTaskResult | null;
             return { success: true, data: data ?? {} };
         } catch (err) {
@@ -316,7 +431,8 @@ export class FogClient {
                 ...options,
             });
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            // FOG returns null on successful task creation
+            // FOG 1.6 answers queued task creation with an empty body (older
+            // versions returned null); normalize both to {}.
             const data = (await this.readJson(res)) as FogTaskResult | null;
             return { success: true, data: data ?? {} };
         } catch (err) {
@@ -329,13 +445,14 @@ export class FogClient {
     > {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('GET', '/fog/task/active');
+            // FOG 1.6 canonical route (legacy alias: /fog/task/active)
+            const res = await this.fogRequest('GET', '/fog/task/current');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as {
-                count: number;
-                tasks: unknown[];
-            };
-            return { success: true, data };
+            const { count, items } = normalizeList<unknown>(
+                await this.readJson(res),
+                'tasks',
+            );
+            return { success: true, data: { count, tasks: items } };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
         }
@@ -344,6 +461,7 @@ export class FogClient {
     async cancelTask(taskId: number): Promise<FogResult<unknown>> {
         if (!this.configured) return unconfigured();
         try {
+            // A 409 means the task already finished (Complete/Canceled/Failed).
             const res = await this.fogRequest('DELETE', `/fog/task/${taskId}/cancel`);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             return { success: true };
@@ -355,7 +473,8 @@ export class FogClient {
     async forceTask(taskId: number): Promise<FogResult<unknown>> {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('PUT', `/fog/task/${taskId}/update`, {
+            // FOG 1.6 canonical update route (legacy alias: /fog/task/{id}/update)
+            const res = await this.fogRequest('PUT', `/fog/task/${taskId}`, {
                 isForced: 1,
             });
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
@@ -371,7 +490,8 @@ export class FogClient {
     ): Promise<FogResult<Record<string, unknown>>> {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('PUT', `/fog/task/${taskId}/update`, updates);
+            // FOG 1.6 canonical update route (legacy alias: /fog/task/{id}/update)
+            const res = await this.fogRequest('PUT', `/fog/task/${taskId}`, updates);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as Record<string, unknown> | null;
             return { success: true, data: data ?? {} };
@@ -449,11 +569,11 @@ export class FogClient {
         try {
             const res = await this.fogRequest('GET', '/fog/multicastsession/current');
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as {
-                count: number;
-                multicastsessions: unknown[];
-            };
-            return { success: true, data };
+            const { count, items } = normalizeList<unknown>(
+                await this.readJson(res),
+                'multicastsessions',
+            );
+            return { success: true, data: { count, multicastsessions: items } };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
         }
@@ -482,7 +602,7 @@ function nonJsonMessage(url: string, status: number, body: string): string {
 /** Friendly message for a non-OK FOG response without a usable JSON error. */
 function statusMessage(url: string, status: number, body: string): string {
     if (status === 401 || status === 403) {
-        return `FOG rejected the API credentials (HTTP ${status}). Please verify the API token and user token in the FOG settings.`;
+        return `FOG rejected the API credentials (HTTP ${status}). Please verify the API token (and user token for legacy auth) in the FOG settings. FOG 1.6 bearer tokens start with "fog_" and need no user token.`;
     }
     if (status === 404) {
         return `FOG endpoint not found at ${url} (HTTP 404). Please verify the FOG server URL in the FOG settings.`;
@@ -517,7 +637,9 @@ function errorMessage(err: unknown): string {
 // ===================== Credential resolution =====================
 
 /**
- * Resolve FOG credentials for an organization.
+ * Resolve FOG credentials for an organization. A FOG 1.6 bearer token
+ * (fog_ prefixed) only needs the URL + apiToken; legacy header auth also
+ * requires the per-user token.
  */
 export async function getFogCredentials(
     organizationId: string,
@@ -525,12 +647,13 @@ export async function getFogCredentials(
     const row = await db.query.fogConfig.findFirst({
         where: eq(fogConfig.organizationId, organizationId),
     });
-    if (row && row.url && row.apiToken && row.userToken) {
-        return {
+    if (row && row.url && row.apiToken) {
+        const creds: FogCredentials = {
             url: row.url,
             apiToken: row.apiToken,
-            userToken: row.userToken,
+            userToken: row.userToken || undefined,
         };
+        if (credentialsComplete(creds)) return creds;
     }
     return undefined;
 }
@@ -550,9 +673,9 @@ const clientCache = new Map<
 export async function getFogClient(organizationId: string): Promise<FogClient> {
     const creds = await getFogCredentials(organizationId);
 
-    if (!creds) return new FogClient({ url: '', apiToken: '', userToken: '' });
+    if (!creds) return new FogClient({ url: '', apiToken: '' });
 
-    const tokensKey = `${creds.apiToken}|${creds.userToken}`;
+    const tokensKey = `${creds.apiToken}|${creds.userToken ?? ''}`;
     const cached = clientCache.get(creds.url);
     if (cached && cached.tokens === tokensKey) {
         return cached.client;
@@ -581,22 +704,35 @@ export async function getFogConfigForOrg(organizationId: string) {
 }
 
 /**
- * Test a FOG connection by calling the system info endpoint. Used by the
+ * Test a FOG connection by calling an authenticated endpoint. FOG 1.6
+ * serves /fog/system/info without authentication, so it cannot validate
+ * tokens; a minimal paged host list request is used instead. Used by the
  * settings save flow to validate credentials before persisting.
  */
 export async function testFogConnection(
     creds: FogCredentials,
 ): Promise<{ success: boolean; error?: string }> {
     const url = creds.url.replace(/\/$/, '');
-    if (!url || !creds.apiToken || !creds.userToken) {
-        return { success: false, error: 'URL, API token, and user token are required' };
+    const normalized: FogCredentials = {
+        url,
+        apiToken: creds.apiToken,
+        userToken: creds.userToken,
+    };
+    if (!url || !creds.apiToken) {
+        return { success: false, error: 'URL and API token are required' };
+    }
+    if (!isBearerToken(creds.apiToken) && !creds.userToken) {
+        return {
+            success: false,
+            error:
+                'A user token is required for legacy (non-bearer) API tokens. FOG 1.6 bearer tokens start with "fog_" and need no user token.',
+        };
     }
     try {
-        const res = await fetch(`${url}/fog/system/info`, {
+        const res = await fetch(`${url}/fog/host?start=0&length=1`, {
             method: 'GET',
             headers: {
-                'fog-api-token': creds.apiToken,
-                'fog-user-token': creds.userToken,
+                ...authHeaders(normalized),
                 'Content-Type': 'application/json',
             },
         });

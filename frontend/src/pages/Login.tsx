@@ -9,9 +9,10 @@ import {
     Stack,
     Text,
     TextInput,
+    ThemeIcon,
     Title,
 } from '@mantine/core';
-import { IconAlertCircle } from '@tabler/icons-react';
+import { IconAlertCircle, IconShieldCheck } from '@tabler/icons-react';
 import { FC, FormEvent, useEffect, useState } from 'react';
 
 interface AppConfig {
@@ -106,18 +107,26 @@ const Login: FC = () => {
 
     return (
         <Container size={'xs'} my={40}>
-            <Paper radius='md' p='xl' withBorder>
+            <Paper radius='lg' p='xl' withBorder>
                 <Stack gap='lg'>
-                    <div>
-                        <Title order={2} ta='center' fw={700}>
+                    <Stack align='center' gap='xs'>
+                        <ThemeIcon size={56} radius='md' color='teal' variant='light'>
+                            <IconShieldCheck size={28} />
+                        </ThemeIcon>
+                        <Text tt='uppercase' size='xs' fw={700} c='teal' lts={1.4}>
                             Labs FCD
-                        </Title>
-                        <Text c='dimmed' size='sm' ta='center' mt={5}>
+                        </Text>
+                        <Title order={2} ta='center'>
                             {mode === 'login'
                                 ? 'Teacher Access Portal'
                                 : 'Create New Account'}
+                        </Title>
+                        <Text c='dimmed' size='sm' ta='center'>
+                            {mode === 'login'
+                                ? 'Sign in to manage your labs'
+                                : 'Register a new teacher account'}
                         </Text>
-                    </div>
+                    </Stack>
 
                     <form onSubmit={handleSubmit}>
                         <Stack gap='md'>

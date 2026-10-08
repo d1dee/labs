@@ -1,9 +1,10 @@
 import { type FogActiveTask, type FogTaskState } from '@/api/fog';
+import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
     Badge,
     Button,
-    Card,
+    Box,
     Checkbox,
     Group,
     Pagination,
@@ -41,14 +42,15 @@ const getStateIcon = (state?: FogTaskState) => {
     return IconClock;
 };
 
-const isTerminalState = (state?: FogTaskState): boolean => {
-    const id = state?.id ?? 0;
+const isTerminalState = (task: FogActiveTask): boolean => {
+    const id = task.stateID ?? task.state?.id ?? 0;
     return id === 4 || id >= 5;
 };
 
 interface ActiveTasksTableProps {
     loading: boolean;
     tasks: FogActiveTask[];
+    filterKey?: string;
     actioningTasks: Set<number>;
     onTaskAction: (
         taskId: number,
@@ -62,16 +64,42 @@ const PAGE_SIZE = 20;
 const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
     loading,
     tasks,
+    filterKey = '',
     actioningTasks,
     onTaskAction,
 }) => {
     const [page, setPage] = useState(1);
+    const [sort, setSort] = useState<SortState<'id' | 'task' | 'host' | 'type' | 'state' | 'progress'> | null>(null);
+    const [previousFilterKey, setPreviousFilterKey] = useState(filterKey);
+    if (previousFilterKey !== filterKey) {
+        setPreviousFilterKey(filterKey);
+        setPage(1);
+    }
+    const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+    const currentPage = Math.min(page, totalPages);
+    const sortedTasks = useMemo(() => {
+        if (!sort) return tasks;
+        const value = (task: FogActiveTask) => {
+            switch (sort.key) {
+                case 'id': return Number(task.id);
+                case 'task': return task.name || `Task #${task.id}`;
+                case 'host': return task.hostName || task.host?.name || `Host #${task.hostID || '?'}`;
+                case 'type': return task.typeName || task.type?.name || `Type ${task.typeID || '?'}`;
+                case 'state': return task.state?.name || 'Unknown';
+                case 'progress': {
+                    const percent = task.percent == null || String(task.percent).trim() === ''
+                        ? NaN : parseFloat(String(task.percent));
+                    return Number.isFinite(percent) ? percent : null;
+                }
+            }
+        };
+        return [...tasks].sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
+    }, [tasks, sort]);
 
     const paginatedTasks = useMemo(
-        () => tasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-        [tasks, page],
+        () => sortedTasks.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+        [sortedTasks, currentPage],
     );
-    const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
 
     const taskIds = useMemo(
         () => paginatedTasks.map((t) => t.id),
@@ -80,19 +108,19 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
 
     const [selection, handlers] = useSelection({
         data: taskIds,
-        resetSelectionOnDataChange: false,
+        resetSelectionOnDataChange: true,
     });
 
     const selectedTasks = paginatedTasks.filter((t) =>
         selection.includes(t.id),
     );
     const cancelableIds = selectedTasks
-        .filter((t) => !isTerminalState(t.state))
+        .filter((t) => !isTerminalState(t) && !actioningTasks.has(t.id))
         .map((t) => t.id);
     const forceableIds = selectedTasks
         .filter((t) => {
             const id = t.stateID ?? t.state?.id ?? 0;
-            return id === 1 || id === 2;
+            return (id === 1 || id === 2) && !actioningTasks.has(t.id);
         })
         .map((t) => t.id);
 
@@ -107,8 +135,8 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
     };
 
     useEffect(() => {
-        setPage(1);
-    }, [tasks.length]);
+        setPage((current) => Math.min(current, totalPages));
+    }, [totalPages]);
 
     return (
         <Stack gap='md'>
@@ -124,7 +152,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                             color='blue'
                             variant='light'
                             leftSection={<IconPlayerPlay size={14} />}
-                            disabled={forceableIds.length === 0}
+                            disabled={loading || forceableIds.length === 0}
                             onClick={handleBulkForce}
                         >
                             Force Start ({forceableIds.length})
@@ -134,7 +162,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                             color='red'
                             variant='light'
                             leftSection={<IconTrash size={14} />}
-                            disabled={cancelableIds.length === 0}
+                            disabled={loading || cancelableIds.length === 0}
                             onClick={handleBulkCancel}
                         >
                             Cancel ({cancelableIds.length})
@@ -142,14 +170,15 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                     </Group>
                 </Group>
             )}
-            <Card p={0} withBorder style={{ position: 'relative' }}>
-                <Table.ScrollContainer minWidth='100%'>
-                    <Table highlightOnHover withRowBorders stickyHeader>
+            <Box pos='relative'>
+                <Table.ScrollContainer minWidth={900}>
+                    <Table verticalSpacing='sm' highlightOnHover withRowBorders stickyHeader>
                         <Table.Thead>
                             <Table.Tr>
                                 <Table.Th>
                                     <Checkbox
                                         aria-label='Select all tasks'
+                                        disabled={loading || taskIds.length === 0}
                                         checked={handlers.isAllSelected()}
                                         indeterminate={handlers.isSomeSelected()}
                                         onChange={() => {
@@ -161,11 +190,17 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                         }}
                                     />
                                 </Table.Th>
-                                <Table.Th>Task</Table.Th>
-                                <Table.Th>Host</Table.Th>
-                                <Table.Th>Type</Table.Th>
-                                <Table.Th>State</Table.Th>
-                                <Table.Th>Progress</Table.Th>
+                                {([
+                                    ['id', 'ID'], ['task', 'Task'], ['host', 'Host'],
+                                    ['type', 'Type'], ['state', 'State'], ['progress', 'Progress'],
+                                ] as const).map(([key, label]) => (
+                                    <SortableTh key={key} label={label} active={sort?.key === key}
+                                        direction={sort?.direction ?? 'asc'} onSort={() => {
+                                            setSort(toggleTableSort(sort, key));
+                                            setPage(1);
+                                            handlers.resetSelection();
+                                        }} />
+                                ))}
                                 <Table.Th>Actions</Table.Th>
                             </Table.Tr>
                         </Table.Thead>
@@ -219,10 +254,16 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                       width={80}
                                                   />
                                               </Table.Td>
+                                              <Table.Td><Skeleton height={24} width={80} /></Table.Td>
+                                              <Table.Td><Skeleton height={24} width={80} /></Table.Td>
                                           </Table.Tr>
                                       ),
                                   )
-                                : paginatedTasks.map((task) => {
+                                : paginatedTasks.length === 0 ? (
+                                    <Table.Tr><Table.Td colSpan={8} ta='center' py='xl'>
+                                        <Text c='dimmed' size='sm'>No tasks match your filters.</Text>
+                                    </Table.Td></Table.Tr>
+                                ) : paginatedTasks.map((task) => {
                                       const StateIcon = getStateIcon(
                                           task.state,
                                       );
@@ -253,12 +294,13 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                             task.id,
                                                         )}
                                                         onChange={() =>
-                                                            handlers.select(
+                                                            handlers.toggle(
                                                                 task.id,
                                                             )
                                                         }
                                                     />
                                                 </Table.Td>
+                                                <Table.Td>{task.id}</Table.Td>
                                                 <Table.Td>
                                                     <Text size='sm' fw={500}>
                                                       {task.name ||
@@ -331,9 +373,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                               task.id,
                                                           )}
                                                           disabled={
-                                                              isTerminalState(
-                                                                  task.state,
-                                                              ) ||
+                                                              isTerminalState(task) ||
                                                               actioningTasks.has(
                                                                   task.id,
                                                               )
@@ -389,9 +429,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                               task.id,
                                                           )}
                                                           disabled={
-                                                              isTerminalState(
-                                                                  task.state,
-                                                              ) ||
+                                                              isTerminalState(task) ||
                                                               actioningTasks.has(
                                                                   task.id,
                                                               )
@@ -415,17 +453,17 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                         </Table.Tbody>
                     </Table>
                 </Table.ScrollContainer>
-            </Card>
+            </Box>
             {totalPages > 1 && (
                 <Group justify='space-between' align='center'>
                     <Text size='sm' c='dimmed'>
-                        {(page - 1) * PAGE_SIZE + 1}–
-                        {Math.min(page * PAGE_SIZE, tasks.length)} of{' '}
+                        {(currentPage - 1) * PAGE_SIZE + 1}–
+                        {Math.min(currentPage * PAGE_SIZE, tasks.length)} of{' '}
                         {tasks.length} tasks
                     </Text>
                     <Pagination
                         total={totalPages}
-                        value={page}
+                        value={currentPage}
                         onChange={setPage}
                     />
                 </Group>

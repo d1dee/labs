@@ -4,6 +4,7 @@ import {
     getPiholeDnsList,
     type PiholeDnsElement,
 } from '@/api/pihole';
+import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
     Badge,
@@ -146,6 +147,24 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
     const [refreshing, setRefreshing] = useState(false);
     const [formValues, setFormValues] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
+    const [search, setSearch] = useState('');
+    const [sort, setSort] = useState<SortState | null>(null);
+    const query = search.trim().toLowerCase();
+    const visibleItems = items.map((value) => ({ value, cells: config.splitValue(value) }))
+        .filter(({ cells }) => cells.some((cell) => (cell || 'default').toLowerCase().includes(query)));
+    if (sort) {
+        const index = config.columns.indexOf(sort.key);
+        const sortValue = (cells: string[]) => {
+            const cell = cells[index]?.trim();
+            if (!cell) return null;
+            if (sort.key === 'TTL') {
+                const ttl = Number(cell);
+                return Number.isFinite(ttl) ? ttl : null;
+            }
+            return cell;
+        };
+        visibleItems.sort((a, b) => compareTableValues(sortValue(a.cells), sortValue(b.cells), sort.direction));
+    }
 
     const fetchItems = useCallback(async () => {
         try {
@@ -228,135 +247,146 @@ const DnsListPanel: FC<{ config: DnsElementConfig }> = ({ config }) => {
     );
 
     return (
-        <Stack gap='md'>
-            <Group justify='space-between' align='flex-start'>
-                <Stack gap={2}>
-                    <Group gap='xs'>
-                        {config.icon}
-                        <Title order={5}>{config.title}</Title>
+        <Card withBorder radius='lg' p='md'>
+            <Stack gap='md'>
+                <Group justify='space-between' align='flex-end'>
+                    <Stack gap={2}>
+                        <Group gap='xs'>
+                            {config.icon}
+                            <Title order={4}>{config.title}</Title>
+                        </Group>
+                        <Text size='sm' c='dimmed'>
+                            {config.description}
+                        </Text>
+                    </Stack>
+                    <Group w={{ base: '100%', sm: 'auto' }}>
+                        <TextInput aria-label={`Search ${config.title}`} placeholder='Search all fields...'
+                            value={search} onChange={(event) => setSearch(event.currentTarget.value)}
+                            w={{ base: '100%', sm: 300 }} />
+                        <ActionIcon aria-label={`Refresh ${config.title}`} variant='subtle' onClick={refresh} loading={refreshing}>
+                            <IconRefresh size={18} />
+                        </ActionIcon>
                     </Group>
-                    <Text size='sm' c='dimmed'>
-                        {config.description}
-                    </Text>
-                </Stack>
-                <ActionIcon variant='subtle' onClick={refresh} loading={refreshing}>
-                    <IconRefresh size={18} />
-                </ActionIcon>
-            </Group>
+                </Group>
 
-            <Group align='flex-end' grow wrap='wrap'>
-                {config.addFields.map((field) => (
-                    <TextInput
-                        key={field.key}
-                        label={field.label}
-                        placeholder={field.placeholder}
-                        required={field.required}
-                        type={field.type ?? 'text'}
-                        value={formValues[field.key] ?? ''}
-                        onChange={(e) => {
-                            // Capture the value before the state updater runs —
-                            // React nulls currentTarget once the handler returns.
-                            const value = e.currentTarget.value;
-                            setFormValues((prev) => ({
-                                ...prev,
-                                [field.key]: value,
-                            }));
-                        }}
-                    />
-                ))}
-                <Box>
-                    <Button
-                        leftSection={<IconPlus size={16} />}
-                        onClick={handleAdd}
-                        loading={submitting}
-                        disabled={!addable}
-                    >
-                        Add
-                    </Button>
-                </Box>
-            </Group>
+                <Group align='flex-end' grow preventGrowOverflow={false} wrap='wrap'>
+                    {config.addFields.map((field) => (
+                        <TextInput
+                            miw={{ base: '100%', sm: 180 }}
+                            key={field.key}
+                            label={field.label}
+                            placeholder={field.placeholder}
+                            required={field.required}
+                            type={field.type ?? 'text'}
+                            value={formValues[field.key] ?? ''}
+                            onChange={(e) => {
+                                // Capture the value before the state updater runs —
+                                // React nulls currentTarget once the handler returns.
+                                const value = e.currentTarget.value;
+                                setFormValues((prev) => ({
+                                    ...prev,
+                                    [field.key]: value,
+                                }));
+                            }}
+                        />
+                    ))}
+                    <Box>
+                        <Button
+                            leftSection={<IconPlus size={16} />}
+                            onClick={handleAdd}
+                            loading={submitting}
+                            disabled={!addable}
+                        >
+                            Add
+                        </Button>
+                    </Box>
+                </Group>
 
-            {loading ? (
-                <Center py={40}>
-                    <Loader />
-                </Center>
-            ) : items.length === 0 ? (
-                <Card withBorder p='xl'>
-                    <Center>
+                {loading ? (
+                    <Center py={40}>
+                        <Loader />
+                    </Center>
+                ) : items.length === 0 ? (
+                    <Center py='xl'>
                         <Stack align='center' gap='sm'>
                             <Text c='dimmed'>
                                 No {config.title.toLowerCase()} configured.
                             </Text>
                         </Stack>
                     </Center>
-                </Card>
-            ) : (
-                <Card withBorder p={0}>
-                    <ScrollArea mah={420}>
-                        <Table highlightOnHover stickyHeader>
-                            <Table.Thead>
-                                <Table.Tr>
-                                    {config.columns.map((col) => (
-                                        <Table.Th key={col}>{col}</Table.Th>
-                                    ))}
-                                    <Table.Th style={{ textAlign: 'right' }}>
-                                        Actions
-                                    </Table.Th>
-                                </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                                {items.map((value) => {
-                                    const cells = config.splitValue(value);
-                                    return (
-                                        <Table.Tr key={value}>
-                                            {cells.map((cell, idx) => (
-                                                <Table.Td key={idx}>
-                                                    {cell ? (
-                                                        <Text
-                                                            size='sm'
-                                                            ff='monospace'
-                                                        >
-                                                            {cell}
-                                                        </Text>
-                                                    ) : (
-                                                        <Badge
-                                                            size='sm'
-                                                            variant='light'
-                                                            color='gray'
-                                                        >
-                                                            default
-                                                        </Badge>
-                                                    )}
-                                                </Table.Td>
-                                            ))}
-                                            <Table.Td
-                                                style={{ textAlign: 'right' }}
-                                            >
-                                                <Group
-                                                    gap='xs'
-                                                    justify='flex-end'
+                ) : (
+                    <Table.ScrollContainer minWidth={config.columns.length === 1 ? 400 : 600}>
+                        <ScrollArea mah={420}>
+                            <Table verticalSpacing='sm' highlightOnHover stickyHeader>
+                                <Table.Thead>
+                                    <Table.Tr>
+                                        {config.columns.map((col) => (
+                                            <SortableTh key={col} label={col} active={sort?.key === col}
+                                                direction={sort?.direction ?? 'asc'}
+                                                onSort={() => setSort((current) => toggleTableSort(current, col))} />
+                                        ))}
+                                        <Table.Th style={{ textAlign: 'right' }}>
+                                            Actions
+                                        </Table.Th>
+                                    </Table.Tr>
+                                </Table.Thead>
+                                <Table.Tbody>
+                                    {visibleItems.length === 0 ? (
+                                        <Table.Tr><Table.Td colSpan={config.columns.length + 1}><Text ta='center' c='dimmed'>No records match the current search.</Text></Table.Td></Table.Tr>
+                                    ) : null}
+                                    {visibleItems.map(({ value, cells }) => {
+                                        return (
+                                            <Table.Tr key={value}>
+                                                {cells.map((cell, idx) => (
+                                                    <Table.Td key={idx}>
+                                                        {cell ? (
+                                                            <Text
+                                                                size='sm'
+                                                                ff='monospace'
+                                                            >
+                                                                {cell}
+                                                            </Text>
+                                                        ) : (
+                                                            <Badge
+                                                                size='sm'
+                                                                variant='light'
+                                                                color='gray'
+                                                            >
+                                                                default
+                                                            </Badge>
+                                                        )}
+                                                    </Table.Td>
+                                                ))}
+                                                <Table.Td
+                                                    style={{ textAlign: 'right' }}
                                                 >
-                                                    <ActionIcon
-                                                        variant='subtle'
-                                                        color='red'
-                                                        onClick={() =>
-                                                            handleDelete(value)
-                                                        }
-                                                        title='Delete'
+                                                    <Group
+                                                        gap='xs'
+                                                        justify='flex-end'
                                                     >
-                                                        <IconTrash size={16} />
-                                                    </ActionIcon>
-                                                </Group>
-                                            </Table.Td>
-                                        </Table.Tr>
-                                    );
-                                })}
-                            </Table.Tbody>
-                        </Table>
-                    </ScrollArea>
-                </Card>
-            )}
-        </Stack>
+                                                        <ActionIcon
+                                                            variant='subtle'
+                                                            color='red'
+                                                            onClick={() =>
+                                                                handleDelete(value)
+                                                            }
+                                                            title='Delete'
+                                                            aria-label={`Delete ${value}`}
+                                                        >
+                                                            <IconTrash size={16} />
+                                                        </ActionIcon>
+                                                    </Group>
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        );
+                                    })}
+                                </Table.Tbody>
+                            </Table>
+                        </ScrollArea>
+                    </Table.ScrollContainer>
+                )}
+            </Stack>
+        </Card>
     );
 };
 

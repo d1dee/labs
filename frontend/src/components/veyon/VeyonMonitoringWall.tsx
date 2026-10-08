@@ -1,32 +1,32 @@
 import {
-    veyonFramebufferUrl,
     type VeyonCommandAction,
     type VeyonComputer,
 } from '@/api/veyon';
 import type { LiveState } from '@/components/VeyonManagementTab';
 import {
+    useVeyonScreenshots,
+    type VeyonScreenshotFrame,
+} from '@/components/veyon/useVeyonScreenshots';
+import {
     ActionIcon,
-    Alert,
     Box,
     Button,
+    Checkbox,
     Group,
     Modal,
-    MultiSelect,
     Paper,
+    Popover,
     SegmentedControl,
-    SimpleGrid,
     Stack,
     Text,
+    TextInput,
     ThemeIcon,
     Tooltip,
-    type StyleProp,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
-    IconAlertCircle,
     IconArrowsMaximize,
     IconArrowsMinimize,
-    IconCheck,
     IconEye,
     IconInfoCircle,
     IconLayoutGrid,
@@ -35,20 +35,16 @@ import {
     IconRefresh,
     IconUser,
 } from '@tabler/icons-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
-const MAX_TILES = 16;
-
-// Frames per wall are fetched through one shared scheduler: browsers cap
-// HTTP/1.1 at ~6 connections per origin, so unconstrained per-tile polling
-// causes head-of-line blocking and stale frames. Five concurrent fetches
-// keep the wall saturated while leaving a connection for control-plane calls.
-export const FRAME_CONCURRENCY = 5;
+const GRID_GAP = 12;
+const ROW_CHROME = 112;
+const MAX_ACTIVE = 64;
 
 const REFRESH_OPTIONS = [
-    { value: '1000', label: '1s' },
-    { value: '2000', label: '2s' },
     { value: '5000', label: '5s' },
+    { value: '10000', label: '10s' },
+    { value: '2000', label: '2s' },
     { value: 'paused', label: 'Paused' },
 ];
 
@@ -79,10 +75,14 @@ export default function VeyonMonitoringWall({
 }) {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [columns, setColumns] = useState('auto');
-    const [refresh, setRefresh] = useState('1000');
-    const [refreshSignal, setRefreshSignal] = useState(0);
-    const [capped, setCapped] = useState(false);
-    const scheduler = useMemo(() => new FrameScheduler(FRAME_CONCURRENCY), []);
+    const [refresh, setRefresh] = useState('5000');
+    const [search, setSearch] = useState('');
+    const [selectionSearch, setSelectionSearch] = useState('');
+    const [scrollTop, setScrollTop] = useState(0);
+    const [viewport, setViewport] = useState({ width: 1024, height: 600 });
+    const [activeIds, setActiveIds] = useState<string[]>([]);
+    const [pinnedId, setPinnedId] = useState<string | null>(null);
+    const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (!opened) return;
@@ -94,33 +94,91 @@ export default function VeyonMonitoringWall({
             : computers
                   .filter((computer) => live[computer.id]?.state === 'online')
                   .map((computer) => computer.id);
-        setSelectedIds(base.slice(0, MAX_TILES));
-        setCapped(base.length > MAX_TILES);
-        setRefreshSignal((current) => current + 1);
+        setSelectedIds([...new Set(base)]);
+        setSearch('');
+        setScrollTop(0);
     }, [opened]);
 
     const refreshMs = refresh === 'paused' ? null : Number(refresh);
 
-    const selectedComputers = computers.filter((computer) => selectedIds.includes(computer.id));
-    const selectData = useMemo(
-        () => computers.map((computer) => ({ value: computer.id, label: computer.name })),
-        [computers],
-    );
-    // Auto columns respond to the viewport: one column on phones up to the
-    // sqrt-based maximum (capped at 4) on wide screens.
-    const autoColumns = Math.min(
-        4,
-        Math.max(1, Math.ceil(Math.sqrt(selectedComputers.length))),
-    );
-    const gridCols: StyleProp<number> =
-        columns === 'auto'
-            ? {
-                  base: 1,
-                  sm: Math.min(2, autoColumns),
-                  lg: Math.min(3, autoColumns),
-                  xl: autoColumns,
-              }
-            : Number(columns);
+    const selectedSet = new Set(selectedIds);
+    const selectedComputers = computers.filter((computer) => selectedSet.has(computer.id));
+    const matchesSearch = (computer: VeyonComputer, query: string) =>
+        `${computer.name} ${computer.host} ${computer.location ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
+    const filteredComputers = selectedComputers.filter((computer) => matchesSearch(computer, search));
+    const availableColumns = viewport.width < 600 ? 1 : viewport.width < 900 ? 2 : viewport.width < 1200 ? 3 : 4;
+    const gridColumns = columns === 'auto'
+        ? Math.min(availableColumns, Math.max(1, Math.ceil(Math.sqrt(filteredComputers.length))))
+        : Number(columns);
+    const tileWidth = Math.max(1, (viewport.width - GRID_GAP * (gridColumns - 1)) / gridColumns);
+    const rowHeight = Math.ceil(Math.max(1, tileWidth - 22) * 9 / 16 + ROW_CHROME + GRID_GAP);
+    const rowCount = Math.ceil(filteredComputers.length / gridColumns);
+    const firstRow = Math.min(Math.max(0, rowCount - 1), Math.floor(scrollTop / rowHeight));
+    const endRow = Math.min(rowCount, Math.ceil((scrollTop + viewport.height) / rowHeight));
+    const startBufferedRow = Math.max(0, firstRow - 1);
+    const endBufferedRow = Math.min(rowCount, endRow + 1);
+    const bufferedComputers = filteredComputers.slice(startBufferedRow * gridColumns, endBufferedRow * gridColumns);
+    const mountedComputers = [...bufferedComputers];
+    const pinnedComputer = selectedComputers.find((computer) => computer.id === pinnedId);
+    if (pinnedComputer && !mountedComputers.some((computer) => computer.id === pinnedId)) mountedComputers.push(pinnedComputer);
+    const visibleComputers = filteredComputers.slice(firstRow * gridColumns, endRow * gridColumns);
+    // Prioritize what is actually visible before overscan when an extreme
+    // viewport exceeds the shared stream's active-machine bound.
+    const subscriptionKey = [...new Set([
+        ...(pinnedComputer ? [pinnedComputer.id] : []),
+        ...visibleComputers.map((computer) => computer.id),
+        ...bufferedComputers.map((computer) => computer.id),
+    ])].slice(0, MAX_ACTIVE).join(',');
+
+    useEffect(() => {
+        if (!opened) { setActiveIds([]); return; }
+        const timer = window.setTimeout(() => setActiveIds(subscriptionKey ? subscriptionKey.split(',') : []), 150);
+        return () => window.clearTimeout(timer);
+    }, [opened, subscriptionKey]);
+
+    useEffect(() => {
+        if (!opened || !viewportElement) return;
+        const element = viewportElement;
+        const measure = () => {
+            const width = element.clientWidth;
+            const height = element.clientHeight;
+            if (width > 0 && height > 0) setViewport({ width, height });
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [opened, viewportElement]);
+
+    useEffect(() => {
+        if (viewportElement) viewportElement.scrollTop = 0;
+        setScrollTop(0);
+    }, [search, columns, selectedIds, viewportElement]);
+
+    useEffect(() => {
+        const pinFullscreen = () => setPinnedId(document.fullscreenElement?.getAttribute('data-tile-id') ?? null);
+        document.addEventListener('fullscreenchange', pinFullscreen);
+        return () => document.removeEventListener('fullscreenchange', pinFullscreen);
+    }, []);
+
+    const { frames, connected, refreshOnce: refreshGrid } = useVeyonScreenshots(opened ? activeIds.filter((id) => id !== pinnedComputer?.id) : [], {
+        paused: refresh === 'paused',
+        minFrameIntervalMs: refreshMs,
+        width: gridColumns >= 3 ? 320 : 640,
+        quality: gridColumns >= 3 ? 50 : 65,
+        priority: 'grid',
+    });
+    const fullscreen = useVeyonScreenshots(opened && pinnedComputer ? [pinnedComputer.id] : [], {
+        paused: refresh === 'paused',
+        minFrameIntervalMs: 1000,
+        width: 1280,
+        quality: 75,
+        priority: 'viewer',
+    });
+    const refreshOnce = () => {
+        refreshGrid();
+        if (pinnedComputer) fullscreen.refreshOnce();
+    };
     const onlineCount = selectedComputers.filter(
         (computer) => live[computer.id]?.state === 'online',
     ).length;
@@ -135,11 +193,6 @@ export default function VeyonMonitoringWall({
         [onCommand],
     );
 
-    const handleSelectionChange = (value: string[]) => {
-        setSelectedIds(value.slice(0, MAX_TILES));
-        setCapped(value.length > MAX_TILES);
-    };
-
     const stopSession = () => {
         setRefresh('paused');
         if (document.fullscreenElement && document.exitFullscreen) {
@@ -149,20 +202,30 @@ export default function VeyonMonitoringWall({
     };
 
     return (
-        <Modal opened={opened} onClose={onClose} title='Live monitoring wall' fullScreen>
-            <Stack gap='md'>
-                <Group justify='space-between' wrap='wrap'>
+        <Modal opened={opened} onClose={onClose} title='Live monitoring wall' fullScreen
+            styles={{
+                content: { height: '100dvh', maxHeight: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+                header: { flexShrink: 0 },
+                body: { flex: 1, minHeight: 0, display: 'flex', overflow: 'auto' },
+            }}>
+            <Stack gap='md' style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+                <Group justify='space-between' wrap='wrap' style={{ flexShrink: 0 }}>
                     <Group gap='xs'>
                         <IconInfoCircle size={16} style={{ color: 'var(--mantine-color-gray-6)' }} />
                         <Text size='sm' c='dimmed'>
-                            {selectedComputers.length} visible · {onlineCount} online
+                             {selectedComputers.length} selected · {onlineCount} online · {visibleComputers.length} visible
+                            {refresh === 'paused'
+                                ? ' · paused'
+                                : !connected && !fullscreen.connected && selectedComputers.length > 0
+                                ? ' · reconnecting'
+                                : ''}
                         </Text>
                     </Group>
                     <Group gap='xs'>
                         <ActionIcon
                             variant='light'
                             aria-label='Refresh now'
-                            onClick={() => setRefreshSignal((current) => current + 1)}
+                            onClick={refreshOnce}
                         >
                             <IconRefresh size={16} />
                         </ActionIcon>
@@ -177,54 +240,37 @@ export default function VeyonMonitoringWall({
                     </Group>
                 </Group>
 
-                {capped ? (
-                    <Alert color='blue' icon={<IconAlertCircle size={16} />}>
-                        The wall shows at most {MAX_TILES} computers. Narrow the selection to
-                        monitor the rest.
-                    </Alert>
-                ) : null}
-
-                <Group justify='space-between' align='flex-end' wrap='wrap'>
-                    <MultiSelect
-                        label='Monitored computers'
-                        placeholder='Pick computers to monitor'
-                        data={selectData}
-                        renderOption={({ option, checked }) => {
-                            const online = live[option.value]?.state === 'online';
-                            return (
-                                <Group gap='xs' wrap='nowrap' flex='1'>
-                                    <Box
-                                        style={{
-                                            width: 8,
-                                            height: 8,
-                                            borderRadius: '50%',
-                                            flexShrink: 0,
-                                            background: online
-                                                ? 'var(--mantine-color-teal-5)'
-                                                : 'var(--mantine-color-gray-5)',
-                                        }}
-                                    />
-                                    <Text size='sm'>{option.label}</Text>
-                                    <Text size='xs' c='dimmed'>
-                                        {online ? 'online' : 'offline'}
-                                    </Text>
-                                    {checked ? (
-                                        <IconCheck
-                                            size={14}
-                                            style={{ marginInlineStart: 'auto' }}
-                                        />
-                                    ) : null}
-                                </Group>
-                            );
-                        }}
-                        value={selectedIds}
-                        onChange={handleSelectionChange}
-                        searchable
-                        clearable
-                        maxDropdownHeight={280}
-                        w={{ base: '100%', sm: 320 }}
-                        size='sm'
-                    />
+                <Group justify='space-between' align='flex-end' wrap='wrap' style={{ flexShrink: 0 }}>
+                    <Group gap='xs' align='flex-end' w={{ base: '100%', md: 'auto' }} style={{ flex: '1 1 auto', minWidth: 0 }}>
+                        <Popover width={320} position='bottom-start' shadow='md' withinPortal={false}>
+                            <Popover.Target>
+                                <Button variant='default' size='sm' aria-label='Choose monitored computers' style={{ flexShrink: 0 }}>
+                                    {selectedComputers.length} selected
+                                </Button>
+                            </Popover.Target>
+                            <Popover.Dropdown>
+                                <Stack gap='sm'>
+                                    <TextInput label='Find computers to select' value={selectionSearch}
+                                        onChange={(event) => setSelectionSearch(event.currentTarget.value)} />
+                                    <Button variant='subtle' size='xs' onClick={() => setSelectedIds([])}>Clear selection</Button>
+                                    <Box style={{ maxHeight: 280, overflowY: 'auto' }}>
+                                        <Stack gap='xs'>
+                                            {computers.filter((computer) => matchesSearch(computer, selectionSearch)).map((computer) => (
+                                                <Checkbox key={computer.id} label={computer.name} checked={selectedSet.has(computer.id)}
+                                                    onChange={(event) => {
+                                                        const checked = event.currentTarget.checked;
+                                                        setSelectedIds((ids) => checked ? [...ids, computer.id] : ids.filter((id) => id !== computer.id));
+                                                    }} />
+                                            ))}
+                                        </Stack>
+                                    </Box>
+                                </Stack>
+                            </Popover.Dropdown>
+                        </Popover>
+                        <Button variant='light' size='sm' style={{ flexShrink: 0 }} onClick={() => setSelectedIds(computers.map((computer) => computer.id))}>Select all</Button>
+                        <TextInput aria-label='Search computers' placeholder='Search name, host or location...' value={search}
+                            onChange={(event) => setSearch(event.currentTarget.value)} size='sm' style={{ flex: 1, minWidth: 180 }} />
+                    </Group>
                     <Stack gap={4}>
                         <Text size='xs' c='dimmed' fw={600}>
                             Columns
@@ -249,364 +295,111 @@ export default function VeyonMonitoringWall({
                     </Stack>
                 </Group>
 
-                {selectedComputers.length ? (
-                    <SimpleGrid
-                        cols={gridCols}
-                        spacing={{ base: 'xs', sm: 'sm' }}
+                <Box ref={setViewportElement} data-testid='monitoring-viewport'
+                    data-selected-count={selectedComputers.length} data-filtered-count={filteredComputers.length}
+                    data-visible-count={visibleComputers.length} data-mounted-count={mountedComputers.length}
+                    data-active-count={opened ? activeIds.length : 0} data-grid-columns={gridColumns} data-row-height={rowHeight}
+                    onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+                    style={{ flex: 1, minHeight: 300, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
+                {mountedComputers.length ? (
+                    <Box
                         data-cols={columns === 'auto' ? 'auto' : Number(columns)}
+                        style={{ height: rowCount * rowHeight, position: 'relative' }}
                     >
-                        {selectedComputers.map((computer) => (
+                        {mountedComputers.map((computer) => {
+                            const index = filteredComputers.findIndex((item) => item.id === computer.id);
+                            return <Box key={computer.id} style={{
+                                position: 'absolute', top: Math.floor(Math.max(0, index) / gridColumns) * rowHeight,
+                                left: (Math.max(0, index) % gridColumns) * (tileWidth + GRID_GAP),
+                                width: tileWidth, height: rowHeight - GRID_GAP,
+                            }}>
                             <WallTile
-                                key={computer.id}
                                 computer={computer}
                                 live={live[computer.id]}
-                                refreshMs={refreshMs}
-                                refreshSignal={refreshSignal}
-                                scheduler={scheduler}
+                                frame={computer.id === pinnedComputer?.id ? fullscreen.frames[computer.id] : frames[computer.id]}
+                                streaming={(computer.id === pinnedComputer?.id ? fullscreen.connected : connected) && refresh !== 'paused'}
+                                transportStale={!(computer.id === pinnedComputer?.id ? fullscreen.connected : connected) && refresh !== 'paused'}
                                 onOpenViewer={handleOpenViewer}
                                 onCommand={handleCommand}
                             />
-                        ))}
-                    </SimpleGrid>
+                            </Box>;
+                        })}
+                    </Box>
                 ) : (
                     <Stack align='center' py={80} gap='sm'>
                         <ThemeIcon variant='light' color='gray' size={56} radius='xl'>
                             <IconLayoutGrid size={28} />
                         </ThemeIcon>
-                        <Text fw={600}>No computers on the wall</Text>
+                        <Text fw={600}>{selectedComputers.length ? 'No matching computers' : 'No computers on the wall'}</Text>
                         <Text size='sm' c='dimmed'>
-                            Pick computers above to start live monitoring.
+                            {selectedComputers.length ? 'Change the search to find a selected computer.' : 'Pick computers above to start live monitoring.'}
                         </Text>
                     </Stack>
                 )}
+                </Box>
             </Stack>
         </Modal>
     );
 }
 
-const MAX_BACKOFF_MS = 8_000;
-const MIN_BACKOFF_MS = 500;
-const INITIAL_JITTER_MS = 250;
-const FRAME_TIMEOUT_MS = 15_000;
-const DEFAULT_FRAME_WIDTH = 640;
-const MIN_FRAME_WIDTH = 160;
-const MAX_FRAME_WIDTH = 1920;
-const FRAME_WIDTH_STEP = 160;
-
-function quantizeFrameWidth(cssWidth: number) {
-    const scale = Math.min(window.devicePixelRatio || 1, 2);
-    const stepped = Math.ceil((cssWidth * scale) / FRAME_WIDTH_STEP) * FRAME_WIDTH_STEP;
-    return Math.min(MAX_FRAME_WIDTH, Math.max(MIN_FRAME_WIDTH, stepped));
-}
-
-type FrameJob = () => Promise<void>;
-
-interface FrameJobHandle {
-    done: Promise<void>;
-    cancel: () => void;
-}
-
-interface QueuedFrameJob {
-    start: () => void;
-    settle: () => void;
-    cancelled: boolean;
-}
-
-class FrameScheduler {
-    private active = 0;
-    private readonly queue: QueuedFrameJob[] = [];
-
-    constructor(private readonly limit: number) {}
-
-    run(job: FrameJob): FrameJobHandle {
-        let settle!: () => void;
-        const done = new Promise<void>((resolve) => {
-            settle = resolve;
-        });
-        const entry: QueuedFrameJob = {
-            cancelled: false,
-            settle,
-            start: () => {
-                this.active += 1;
-                job().finally(() => {
-                    this.active -= 1;
-                    settle();
-                    this.drain();
-                });
-            },
-        };
-        if (this.active < this.limit) {
-            entry.start();
-        } else {
-            this.queue.push(entry);
-        }
-        return {
-            done,
-            cancel: () => {
-                const index = this.queue.indexOf(entry);
-                if (index === -1) return;
-                entry.cancelled = true;
-                this.queue.splice(index, 1);
-                settle();
-            },
-        };
-    }
-
-    private drain() {
-        while (this.active < this.limit) {
-            const next = this.queue.shift();
-            if (!next) return;
-            if (!next.cancelled) next.start();
-        }
-    }
-}
-
+// Double-buffered tile: the previous frame stays visible until the next one
+// arrives, and failed polls only mark the frame stale instead of blanking.
 const TileImage = memo(function TileImage({
     computerId,
     computerName,
-    refreshMs,
-    refreshSignal,
-    scheduler,
-    offlineError,
+    frame,
+    fullscreen,
+    transportStale,
     onImageError,
 }: {
     computerId: string;
     computerName: string;
-    refreshMs: number | null;
-    refreshSignal: number;
-    scheduler: FrameScheduler;
-    offlineError: string | null;
+    frame: VeyonScreenshotFrame | undefined;
+    fullscreen: boolean;
+    transportStale: boolean;
     onImageError: (failed: boolean) => void;
 }) {
-    // Frames are fetched as blobs and double-buffered: the previous frame
-    // stays visible until the next one is fully downloaded, so the tile
-    // never blanks and load latency no longer inflates the refresh period.
-    const [objectUrl, setObjectUrl] = useState<string | null>(null);
-    const [failed, setFailed] = useState(false);
-    const [firstLoadDone, setFirstLoadDone] = useState(false);
-    const [frameWidth, setFrameWidth] = useState(DEFAULT_FRAME_WIDTH);
-
-    const boxRef = useRef<HTMLDivElement>(null);
-    const mountedRef = useRef(true);
-    const timerRef = useRef<number | null>(null);
-    const inflightRef = useRef(false);
-    const reloadRequestedRef = useRef(false);
-    const abortRef = useRef<AbortController | null>(null);
-    const jobRef = useRef<FrameJobHandle | null>(null);
-    const urlRef = useRef<string | null>(null);
-    const failuresRef = useRef(0);
-    const refreshMsRef = useRef(refreshMs);
-    const frameWidthRef = useRef(DEFAULT_FRAME_WIDTH);
-    const firstSignalRef = useRef(true);
-    const firstWidthRef = useRef(true);
-    const loadFrameRef = useRef<() => void>(() => undefined);
-
-    const clearTimer = useCallback(() => {
-        if (timerRef.current !== null) {
-            window.clearTimeout(timerRef.current);
-            timerRef.current = null;
-        }
-    }, []);
-
-    const scheduleNext = useCallback(
-        (startedAt: number) => {
-            clearTimer();
-            if (!mountedRef.current) return;
-            const interval = refreshMsRef.current;
-            if (interval === null) return;
-            // Fixed-rate scheduling measured from submission so slow frames
-            // do not push the period out: each tile is capped at one frame
-            // per interval. Failures back off exponentially.
-            const delay =
-                failuresRef.current > 0
-                    ? Math.min(
-                          Math.max(interval, MIN_BACKOFF_MS) *
-                              2 ** Math.min(failuresRef.current - 1, 2),
-                          MAX_BACKOFF_MS,
-                      )
-                    : Math.max(interval - (performance.now() - startedAt), 0);
-            timerRef.current = window.setTimeout(() => {
-                timerRef.current = null;
-                loadFrameRef.current();
-            }, delay);
-        },
-        [clearTimer],
-    );
-
-    const loadFrame = useCallback(() => {
-        if (!mountedRef.current || inflightRef.current) return;
-        inflightRef.current = true;
-        const startedAt = performance.now();
-        const handle = scheduler.run(async () => {
-            if (!mountedRef.current) return;
-            const controller = new AbortController();
-            abortRef.current = controller;
-            // Manual timeout instead of AbortSignal.any/timeout: works in every
-            // browser (and jsdom) and lets us tell stalls from deliberate aborts.
-            let timedOut = false;
-            const timeout = window.setTimeout(() => {
-                timedOut = true;
-                controller.abort();
-            }, FRAME_TIMEOUT_MS);
-            try {
-                const response = await fetch(
-                    veyonFramebufferUrl(computerId, { width: frameWidthRef.current }),
-                    { signal: controller.signal },
-                );
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const blob = await response.blob();
-                if (!mountedRef.current) return;
-                const next = URL.createObjectURL(blob);
-                const previous = urlRef.current;
-                urlRef.current = next;
-                setObjectUrl(next);
-                if (previous) URL.revokeObjectURL(previous);
-                failuresRef.current = 0;
-                setFailed(false);
-                setFirstLoadDone(true);
-            } catch {
-                if (!mountedRef.current) return;
-                // Deliberate abort (pause/unmount): not a host failure.
-                if (controller.signal.aborted && !timedOut) return;
-                failuresRef.current += 1;
-                setFirstLoadDone(true);
-                // Keep the last good frame visible on transient errors; only
-                // surface the overlay when there is nothing to show or the
-                // host keeps failing.
-                setFailed(urlRef.current === null || failuresRef.current >= 3);
-            } finally {
-                window.clearTimeout(timeout);
-                abortRef.current = null;
-            }
-        });
-        jobRef.current = handle;
-        void handle.done.then(() => {
-            jobRef.current = null;
-            inflightRef.current = false;
-            if (!mountedRef.current) return;
-            if (reloadRequestedRef.current) {
-                reloadRequestedRef.current = false;
-                clearTimer();
-                loadFrameRef.current();
-                return;
-            }
-            scheduleNext(startedAt);
-        });
-    }, [computerId, scheduler, scheduleNext, clearTimer]);
-
-    loadFrameRef.current = loadFrame;
-
-    // Request frames at the tile's rendered resolution: small wall tiles skip
-    // the encode/transfer/decode cost of oversized JPEGs, while a fullscreened
-    // tile upgrades toward full resolution.
-    useEffect(() => {
-        const element = boxRef.current;
-        const ObserverCtor = window.ResizeObserver;
-        if (!element || !ObserverCtor) return;
-        const observer = new ObserverCtor((entries) => {
-            const width = entries[0]?.contentRect.width ?? 0;
-            if (!width) return;
-            const next = quantizeFrameWidth(width);
-            if (next === frameWidthRef.current) return;
-            frameWidthRef.current = next;
-            setFrameWidth(next);
-        });
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, []);
+    const [failedImage, setFailedImage] = useState<string | null>(null);
+    const hasImage = Boolean(frame?.image);
+    const imageFailed = Boolean(frame?.image && failedImage === frame.image);
+    // Only surface the full overlay when there is nothing to show or the
+    // host keeps failing; a transient failure keeps the last frame with a
+    // stale badge instead.
+    const failing = (frame?.consecutiveFailures ?? 0) >= 3;
+    const overlay =
+        !hasImage || failing || imageFailed ? 'Screen unavailable' : null;
 
     useEffect(() => {
-        if (firstWidthRef.current) {
-            firstWidthRef.current = false;
-            return;
-        }
-        if (refreshMsRef.current === null) return;
-        clearTimer();
-        if (inflightRef.current) {
-            reloadRequestedRef.current = true;
-            return;
-        }
-        loadFrameRef.current();
-    }, [frameWidth, clearTimer]);
-
-    useEffect(() => {
-        mountedRef.current = true;
-        failuresRef.current = 0;
-        // Stagger initial submissions so tiles do not all queue at once.
-        timerRef.current = window.setTimeout(
-            () => {
-                timerRef.current = null;
-                loadFrameRef.current();
-            },
-            Math.floor(Math.random() * INITIAL_JITTER_MS),
-        );
-        return () => {
-            mountedRef.current = false;
-            clearTimer();
-            jobRef.current?.cancel();
-            abortRef.current?.abort();
-            if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-            urlRef.current = null;
-        };
-    }, [computerId, clearTimer]);
-
-    useEffect(() => {
-        const wasPaused = refreshMsRef.current === null;
-        refreshMsRef.current = refreshMs;
-        if (refreshMs === null) {
-            clearTimer();
-            jobRef.current?.cancel();
-            abortRef.current?.abort();
-            return;
-        }
-        // Resuming from paused: pull a frame immediately.
-        if (wasPaused && !inflightRef.current) {
-            clearTimer();
-            loadFrameRef.current();
-        }
-    }, [refreshMs, clearTimer]);
-
-    useEffect(() => {
-        if (firstSignalRef.current) {
-            firstSignalRef.current = false;
-            return;
-        }
-        clearTimer();
-        if (inflightRef.current) {
-            reloadRequestedRef.current = true;
-            return;
-        }
-        loadFrameRef.current();
-    }, [refreshSignal, clearTimer]);
-
-    useEffect(() => {
-        onImageError(failed);
-    }, [failed, onImageError]);
+        onImageError(!hasImage || failing || imageFailed);
+    }, [hasImage, failing, imageFailed, onImageError]);
 
     return (
         <Box
-            ref={boxRef}
+            data-computer-id={computerId}
             style={{
                 position: 'relative',
-                aspectRatio: '16 / 9',
+                aspectRatio: fullscreen ? undefined : '16 / 9',
+                flex: fullscreen ? 1 : undefined,
+                minHeight: 0,
                 overflow: 'hidden',
                 borderRadius: 'var(--mantine-radius-sm)',
                 background: 'var(--mantine-color-dark-8)',
             }}
         >
             <img
-                src={objectUrl ?? undefined}
+                src={frame?.image ?? undefined}
+                onError={() => setFailedImage(frame?.image ?? null)}
                 alt={`Screen of ${computerName}`}
-                aria-busy={!firstLoadDone}
+                aria-busy={!hasImage}
                 decoding='async'
                 style={{
                     display: 'block',
                     width: '100%',
                     height: '100%',
-                    objectFit: 'cover',
+                    objectFit: 'contain',
                 }}
             />
-            {failed || offlineError !== null ? (
+            {overlay !== null ? (
                 <Box
                     style={{
                         position: 'absolute',
@@ -619,7 +412,22 @@ const TileImage = memo(function TileImage({
                     }}
                 >
                     <Text size='xs' c='white' ta='center' lineClamp={2}>
-                        {offlineError !== null ? offlineError : 'Screen unavailable'}
+                        {overlay}
+                    </Text>
+                </Box>
+            ) : (frame?.stale || transportStale) && hasImage ? (
+                <Box
+                    style={{
+                        position: 'absolute',
+                        top: 6,
+                        right: 6,
+                        padding: '2px 8px',
+                        borderRadius: 'var(--mantine-radius-sm)',
+                        background: 'rgba(0, 0, 0, 0.55)',
+                    }}
+                >
+                    <Text size='xs' c='white'>
+                        Stale
                     </Text>
                 </Box>
             ) : null}
@@ -630,17 +438,17 @@ const TileImage = memo(function TileImage({
 const WallTile = memo(function WallTile({
     computer,
     live,
-    refreshMs,
-    refreshSignal,
-    scheduler,
+    frame,
+    streaming,
+    transportStale,
     onOpenViewer,
     onCommand,
 }: {
     computer: VeyonComputer;
     live?: LiveState;
-    refreshMs: number | null;
-    refreshSignal: number;
-    scheduler: FrameScheduler;
+    frame: VeyonScreenshotFrame | undefined;
+    streaming: boolean;
+    transportStale: boolean;
     onOpenViewer: (computer: VeyonComputer) => void;
     onCommand: (computerId: string, action: VeyonCommandAction) => void | Promise<void>;
 }) {
@@ -661,15 +469,15 @@ const WallTile = memo(function WallTile({
     const handleImageError = useCallback((failed: boolean) => setImageFailed(failed), []);
 
     const information = live?.state === 'online' ? live.information : null;
-    const online = live?.state === 'online' && !imageFailed;
-    const offlineError = live?.state === 'offline' ? live.error : null;
+    const online = streaming && Boolean(frame?.image) &&
+        !frame?.stale && !frame?.consecutiveFailures && !frame?.lastError && !imageFailed;
 
     const toggleFullscreen = async () => {
         try {
             if (document.fullscreenElement) {
                 if (document.exitFullscreen) await document.exitFullscreen();
             } else if (tileRef.current?.requestFullscreen) {
-                await tileRef.current.requestFullscreen();
+                await tileRef.current?.requestFullscreen();
             } else {
                 notifications.show({
                     color: 'orange',
@@ -688,6 +496,8 @@ const WallTile = memo(function WallTile({
 
     return (
         <Paper
+            data-tile-id={computer.id}
+            style={{ height: '100%', minWidth: 0, overflow: 'hidden' }}
             withBorder
             radius='md'
             p='xs'
@@ -695,10 +505,10 @@ const WallTile = memo(function WallTile({
             tabIndex={0}
             aria-label={`Monitoring tile for ${computer.name}`}
             onKeyDown={(event) => {
-                if (event.key === 'Enter') onOpenViewer(computer);
+                if (event.key === 'Enter' && event.target === event.currentTarget) onOpenViewer(computer);
             }}
         >
-            <Stack gap='xs'>
+            <Stack gap='xs' style={{ height: '100%', minHeight: 0 }}>
                 <Group justify='space-between' wrap='nowrap' gap='xs'>
                     <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
                         <Box
@@ -763,10 +573,9 @@ const WallTile = memo(function WallTile({
                 <TileImage
                     computerId={computer.id}
                     computerName={computer.name}
-                    refreshMs={refreshMs}
-                    refreshSignal={refreshSignal}
-                    scheduler={scheduler}
-                    offlineError={offlineError}
+                    frame={frame}
+                    fullscreen={isFullscreen}
+                    transportStale={transportStale}
                     onImageError={handleImageError}
                 />
                 {information?.user.login ? (

@@ -8,7 +8,7 @@ import {
     isDemoUser,
     updateDemoFogHost,
 } from '../demo';
-import { getFogClient, getFogCredentials } from '../fog';
+import { credentialsComplete, getFogClient, getFogCredentials } from '../fog';
 import { createApp } from './context';
 
 export const fogRouter = createApp();
@@ -25,7 +25,7 @@ fogRouter.get('/fog/status', async (c) => {
 
     const creds = await getFogCredentials(user.organizationId);
     return c.json({
-        configured: Boolean(creds?.url && creds?.apiToken && creds?.userToken),
+        configured: credentialsComplete(creds),
         url: creds?.url || null,
     });
 });
@@ -475,7 +475,8 @@ fogRouter.post('/fog/hosts/:id/snapin-task', async (c) => {
             return c.json({ success: true, id: 0, name: 'Demo Snapin Task' });
         }
 
-        const result = await client.createSnapinTask(hostId, body.snapinID, body);
+        const { snapinID, ...options } = body;
+        const result = await client.createSnapinTask(hostId, snapinID, options);
         if (!result.success) {
             return c.json({ error: result.error }, 500);
         }

@@ -12,24 +12,23 @@ import {
     type FogSnapin,
     type FogTaskType,
 } from '@/api/fog';
+import { PageHero } from '@/components/ui/PageHero';
 import {
     Alert,
     Button,
-    Card,
     Center,
     Group,
     Loader,
     Select,
-    SimpleGrid,
     Stack,
     Text,
-    Title,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import {
     IconAlertCircle,
     IconCheck,
+    IconPackage,
     IconRefresh,
     IconX,
 } from '@tabler/icons-react';
@@ -57,7 +56,7 @@ function ManagementTab() {
 
     const selectedHosts = useMemo(
         () => allHosts.filter((v) => selectedIds.includes(v.id)),
-        [selectedIds],
+        [allHosts, selectedIds],
     );
 
     const fetchStatus = async () => {
@@ -289,77 +288,43 @@ function ManagementTab() {
 
     return (
         <Stack gap='md'>
-            <Stack>
-                <Group justify='space-between'>
-                    <Title order={4}>Host Overview</Title>{' '}
+            <PageHero
+                eyebrow='Deployment'
+                title='FOG host overview'
+                description='Manage registered hosts, images and snapins for network deployment.'
+                icon={<IconPackage size={25} />}
+                actions={
                     <Button
-                        radius='md'
-                        leftSection={<IconRefresh size={14} />}
+                        variant='light'
+                        color='teal'
+                        leftSection={<IconRefresh size={16} />}
                         onClick={loadAll}
                         loading={loading}
                     >
                         Refresh
                     </Button>
-                </Group>
-                <SimpleGrid cols={{ base: 2, md: 4 }} spacing='md'>
-                    <Card withBorder>
-                        <Text size='sm' c='dimmed'>
-                            Total Hosts
-                        </Text>
-                        <Text size='xl' fw={700}>
-                            {allHosts.length}
-                        </Text>
-                    </Card>
-                    <Card withBorder>
-                        <Text size='sm' c='dimmed'>
-                            Models
-                        </Text>
-                        <Stack gap={2} mt={4}>
-                            <Text size='xl' fw={700}>
-                                {topModels.length}
-                            </Text>
-                        </Stack>
-                    </Card>
-                    <Card withBorder>
-                        <Text size='sm' c='dimmed'>
-                            Images
-                        </Text>
-                        <Text size='xl' fw={700} c='teal'>
-                            {images.length}
-                        </Text>
-                    </Card>
-                    <Card withBorder>
-                        <Text size='sm' c='dimmed'>
-                            Snapins
-                        </Text>
-                        <Text size='xl' fw={700}>
-                            {snapinCount}
-                        </Text>
-                    </Card>
-                </SimpleGrid>
-            </Stack>
+                }
+                metrics={[
+                    { label: 'Total hosts', value: allHosts.length },
+                    { label: 'Models', value: topModels.length },
+                    { label: 'Images', value: images.length, accent: true },
+                    { label: 'Snapins', value: snapinCount },
+                ]}
+            />
 
             <Stack>
-                <div>
-                    <Title order={5}>Registered Hosts</Title>
-                    <Text size='sm' c='dimmed'>
-                        Select one or more hosts to perform actions.
-                    </Text>
-                </div>
-                {selectedIds.length > 0 && (
-                    <SelectedHostCard
-                        key={cardKey}
-                        hosts={selectedHosts}
-                        images={images}
-                        snapins={snapins}
-                        taskTypes={taskTypes}
-                        deployTaskTypeId={deployTaskTypeId}
-                        captureTaskTypeId={captureTaskTypeId}
-                        onHostsDeleted={handleHostsDeleted}
-                        onHostUpdated={handleHostUpdated}
-                        onClose={() => setSelectedIds([])}
-                    />
-                )}
+                <SelectedHostCard
+                    key={cardKey}
+                    hosts={selectedHosts}
+                    images={images}
+                    snapins={snapins}
+                    taskTypes={taskTypes}
+                    deployTaskTypeId={deployTaskTypeId}
+                    captureTaskTypeId={captureTaskTypeId}
+                    onHostsDeleted={handleHostsDeleted}
+                    onHostUpdated={handleHostUpdated}
+                    onClose={() => setSelectedIds([])}
+                />
                 <HostTable
                     allHosts={allHosts}
                     setSelectedIds={setSelectedIds}

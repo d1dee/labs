@@ -1,4 +1,5 @@
 import type { FogHost, ListFogHosts } from '@/api/fog';
+import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
     Badge,
@@ -48,6 +49,7 @@ export function HostTable({
 }: HostTableProps) {
     const {
         filters,
+        deferredFilters,
         setFilter,
         clearFilters,
         isPending,
@@ -60,13 +62,35 @@ export function HostTable({
     } = useHostFilters(allHosts);
 
     const [page, setPage] = useState(1);
+    const [sort, setSort] = useState<SortState<'id' | 'name' | 'image' | 'inventory' | 'status'> | null>(null);
+    const [previousFilters, setPreviousFilters] = useState(deferredFilters);
+    if (previousFilters !== deferredFilters) {
+        setPreviousFilters(deferredFilters);
+        setPage(1);
+    }
     const PAGE_SIZE = 20;
+    const totalPages = Math.max(1, Math.ceil(filteredHosts.length / PAGE_SIZE));
+    const currentPage = Math.min(page, totalPages);
+    const sortedHosts = useMemo(() => {
+        if (!sort) return filteredHosts;
+        const value = (host: FogHost) => {
+            switch (sort.key) {
+                case 'id': return Number(host.id);
+                case 'name': return host.name;
+                case 'image': return host.imagename || null;
+                case 'inventory': return host.inventory
+                    ? `${host.inventory.sysman || 'Unknown'} / ${host.inventory.sysproduct || 'Unknown'}`
+                    : null;
+                case 'status': return host.pingstatustext || 'unknown';
+            }
+        };
+        return [...filteredHosts].sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
+    }, [filteredHosts, sort]);
 
     const paginatedHosts = useMemo(
-        () => filteredHosts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-        [filteredHosts, page],
+        () => sortedHosts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+        [sortedHosts, currentPage],
     );
-    const totalPages = Math.max(1, Math.ceil(filteredHosts.length / PAGE_SIZE));
 
     const hostIds = useMemo(
         () => paginatedHosts.map((v) => v.id),
@@ -83,17 +107,16 @@ export function HostTable({
         useDisclosure(false);
 
     useEffect(() => {
-        setSelectedIds(selection);
-    }, [selection.join()]);
+        setSelectedIds(loading || isPending ? [] : selection.filter((id) => hostIds.includes(id)));
+    }, [selection.join(), hostIds, setSelectedIds, loading, isPending]);
 
     useEffect(() => {
-        setPage(1);
-    }, [filteredHosts.length]);
+        setPage((current) => Math.min(current, totalPages));
+    }, [totalPages]);
 
     return (
-        <Stack gap='md'>
-            <Card p='md' withBorder style={{ position: 'relative' }}>
-                <Stack>
+            <Card withBorder radius='lg' p='md'>
+                <Stack gap='md'>
                     <HostFilterPanel
                         filters={filters}
                         setFilter={setFilter}
@@ -111,7 +134,7 @@ export function HostTable({
 
                     {/* Table */}
 
-                    <Card p={0} withBorder style={{ position: 'relative' }}>
+                    <Box pos='relative'>
                         {loading && (
                             <Overlay
                                 color='var(--mantine-color-body)'
@@ -122,13 +145,14 @@ export function HostTable({
                                 <Loader />
                             </Overlay>
                         )}
-                        <Table.ScrollContainer minWidth='100%'>
-                            <Table highlightOnHover withRowBorders stickyHeader>
+                        <Table.ScrollContainer minWidth={760}>
+                            <Table verticalSpacing='sm' highlightOnHover withRowBorders stickyHeader>
                                 <Table.Thead>
                                     <Table.Tr>
                                         <Table.Th>
                                             <Checkbox
                                                 aria-label='Select all rows'
+                                                disabled={loading || isPending || hostIds.length === 0}
                                                 checked={handlers.isAllSelected()}
                                                 indeterminate={handlers.isSomeSelected()}
                                                 onChange={() => {
@@ -144,11 +168,17 @@ export function HostTable({
                                                 }}
                                             />
                                         </Table.Th>
-                                        <Table.Th>ID</Table.Th>
-                                        <Table.Th>Name</Table.Th>
-                                        <Table.Th>Image</Table.Th>
-                                        <Table.Th>Brand / Model</Table.Th>
-                                        <Table.Th>Status</Table.Th>
+                                        {([
+                                            ['id', 'ID'], ['name', 'Name'], ['image', 'Image'],
+                                            ['inventory', 'Brand / Model'], ['status', 'Status'],
+                                        ] as const).map(([key, label]) => (
+                                            <SortableTh key={key} label={label} active={sort?.key === key}
+                                                direction={sort?.direction ?? 'asc'} onSort={() => {
+                                                    setSort(toggleTableSort(sort, key));
+                                                    setPage(1);
+                                                    handlers.resetSelection();
+                                                }} />
+                                        ))}
                                         <Table.Th>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
@@ -237,7 +267,7 @@ export function HostTable({
                                                     cursor: 'pointer',
                                                 }}
                                                 onClick={() =>
-                                                    handlers.select(host.id)
+                                                    handlers.toggle(host.id)
                                                 }
                                             >
                                                 <Table.Td
@@ -251,7 +281,7 @@ export function HostTable({
                                                             host.id,
                                                         )}
                                                         onChange={() =>
-                                                            handlers.select(
+                                                            handlers.toggle(
                                                                 host.id,
                                                             )
                                                         }
@@ -450,7 +480,7 @@ export function HostTable({
                                 </Table.Tbody>
                             </Table>
                         </Table.ScrollContainer>
-                    </Card>
+                    </Box>
 
                     <Modal
                         opened={inventoryOpened}
@@ -466,20 +496,19 @@ export function HostTable({
                     {totalPages > 1 && (
                         <Group justify='space-between' align='center'>
                             <Text size='sm' c='dimmed'>
-                                {(page - 1) * PAGE_SIZE + 1}–
-                                {Math.min(page * PAGE_SIZE, filteredHosts.length)}{' '}
+                                {(currentPage - 1) * PAGE_SIZE + 1}–
+                                {Math.min(currentPage * PAGE_SIZE, filteredHosts.length)}{' '}
                                 of {filteredHosts.length} hosts
                             </Text>
                             <Pagination
                                 total={totalPages}
-                                value={page}
+                                value={currentPage}
                                 onChange={setPage}
                             />
                         </Group>
                     )}
                 </Stack>
             </Card>
-        </Stack>
     );
 }
 

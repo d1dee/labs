@@ -4,7 +4,6 @@ import {
     Badge,
     Button,
     Card,
-    Divider,
     Group,
     Menu,
     ScrollArea,
@@ -56,12 +55,12 @@ export function SelectedHostCard({
     /** Which action panel is currently active (null = hidden) */
     const [activeAction, setActiveAction] = useState<string | null>(null);
 
-    if (hosts.length === 0) return null;
-
+    const hasHosts = hosts.length > 0;
     const isBulk = hosts.length > 1;
 
     // Toggle active action (opens if different/closed, closes if same)
     const handleToggleAction = (action: string) => {
+        if (!hasHosts) return;
         setActiveAction((prev) => (prev === action ? null : action));
     };
 
@@ -94,35 +93,39 @@ export function SelectedHostCard({
     // ──────────────────────────────────────────────
     //  Header summary
     // ──────────────────────────────────────────────
-    const headerTitle = isBulk
-        ? `${hosts.length} hosts selected`
-        : hosts[0].name;
-    const headerSub = isBulk
-        ? hosts
-              .slice(0, 3)
-              .map((h) => h.name)
-              .join(', ') +
-          (hosts.length > 3 ? `, +${hosts.length - 3} more` : '')
-        : hosts[0].imagename
-          ? `Image: ${hosts[0].imagename}`
-          : 'No image assigned';
+    const headerTitle = !hasHosts
+        ? 'Select hosts to enable actions'
+        : isBulk
+          ? `${hosts.length} hosts selected`
+          : hosts[0].name;
+    const headerSub = !hasHosts
+        ? ''
+        : isBulk
+          ? hosts
+                .slice(0, 3)
+                .map((h) => h.name)
+                .join(', ') +
+            (hosts.length > 3 ? `, +${hosts.length - 3} more` : '')
+          : hosts[0].imagename
+            ? `Image: ${hosts[0].imagename}`
+            : 'No image assigned';
 
     return (
-        <Card withBorder p='md'>
-            <Stack gap='md'>
+        <Card withBorder p='sm'>
+            <Stack gap='xs'>
                 {/* ── Header ── */}
                 <Group justify='space-between' wrap='nowrap'>
-                    <div style={{ minWidth: 0 }}>
-                        <Title order={5} style={{ wordBreak: 'break-word' }}>
-                            {headerTitle}
+                    <Stack gap={0} style={{ minWidth: 0 }}>
+                        <Title order={4}>
+                            Command deck
                         </Title>
-                        <Text size='sm' c='dimmed' truncate>
-                            {headerSub}
+                        <Text size='sm' c='dimmed' truncate title={headerSub}>
+                            {headerTitle}
                         </Text>
-                    </div>
+                    </Stack>
                     <Group gap='xs' wrap='nowrap'>
-                        {!isBulk && (
-                            <Badge size='lg' variant='outline'>
+                        {hasHosts && !isBulk && (
+                            <Badge size='sm' variant='outline'>
                                 ID: {hosts[0].id}
                             </Badge>
                         )}
@@ -130,6 +133,7 @@ export function SelectedHostCard({
                             variant='subtle'
                             color='gray'
                             onClick={onClose}
+                            disabled={!hasHosts}
                             aria-label='Dismiss selection'
                         >
                             <IconX size={16} />
@@ -137,13 +141,12 @@ export function SelectedHostCard({
                     </Group>
                 </Group>
 
-                <Divider />
-
                 {/* ── Action buttons toolbar ── */}
                 <Group gap='xs' wrap='wrap'>
                     {deployTaskType && (
                         <Button
                             size='sm'
+                            disabled={!hasHosts}
                             variant={
                                 activeAction === `task-${deployTaskType.id}`
                                     ? 'filled'
@@ -161,6 +164,7 @@ export function SelectedHostCard({
 
                     <Button
                         size='sm'
+                        disabled={!hasHosts}
                         variant={activeAction === 'snapin' ? 'filled' : 'light'}
                         color='indigo'
                         leftSection={<IconPlayerPlay size={14} />}
@@ -171,6 +175,7 @@ export function SelectedHostCard({
 
                     <Button
                         size='sm'
+                        disabled={!hasHosts}
                         variant={activeAction === 'image' ? 'filled' : 'light'}
                         color='blue'
                         leftSection={<IconDatabase size={14} />}
@@ -189,6 +194,7 @@ export function SelectedHostCard({
                         <Menu.Target>
                             <Button
                                 size='sm'
+                                disabled={!hasHosts}
                                 variant='default'
                                 aria-label='More actions'
                                 leftSection={<IconDots size={16} />}
@@ -200,6 +206,7 @@ export function SelectedHostCard({
                         <Menu.Dropdown>
                             <Menu.Label>Actions</Menu.Label>
                             <Menu.Item
+                                disabled={!hasHosts}
                                 color='red'
                                 leftSection={<IconTrash size={14} />}
                                 onClick={() => handleToggleAction('delete')}
@@ -209,6 +216,7 @@ export function SelectedHostCard({
 
                             {captureTaskType && (
                                 <Menu.Item
+                                    disabled={!hasHosts}
                                     leftSection={<IconPlayerPlay size={14} />}
                                     onClick={() =>
                                         handleToggleAction(
@@ -229,6 +237,7 @@ export function SelectedHostCard({
                                     {extraTaskTypes.map((tt) => (
                                         <Menu.Item
                                             key={tt.id}
+                                            disabled={!hasHosts}
                                             leftSection={<IconPlayerPlay size={14} />}
                                             onClick={() =>
                                                 handleToggleAction(`task-${tt.id}`)
@@ -244,7 +253,7 @@ export function SelectedHostCard({
                 </Group>
 
                 {/* ── Active Action Panel ── */}
-                {activeAction && (
+                {hasHosts && activeAction && (
                     <Card p='sm' mt='xs' withBorder>
                         <Group justify='space-between' mb='sm'>
                             <Text fw={600} size='sm'>

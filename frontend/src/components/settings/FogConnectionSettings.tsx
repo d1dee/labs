@@ -35,10 +35,15 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved }) => {
     }, []);
 
     const handleSave = async () => {
-        if (!url.trim() || !apiToken.trim() || !userToken.trim()) return;
+        if (!url.trim() || !apiToken.trim()) return;
+        if (!bearerMode && !userToken.trim()) return;
         setSaving(true);
         try {
-            await saveFogSettings(url.trim(), apiToken, userToken);
+            await saveFogSettings(
+                url.trim(),
+                apiToken.trim(),
+                bearerMode ? '' : userToken,
+            );
             notifications.show({
                 title: 'Success',
                 message: 'FOG connection saved and verified.',
@@ -60,7 +65,11 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved }) => {
         }
     };
 
-    const ready = url.trim() && apiToken.trim() && userToken.trim();
+    // FOG 1.6 bearer tokens (fog_ prefixed) authenticate on their own; the
+    // user token is only needed for legacy fog-api-token header auth.
+    const bearerMode = apiToken.trimStart().startsWith('fog_');
+    const ready =
+        url.trim() && apiToken.trim() && (bearerMode || userToken.trim());
 
     return (
         <Card withBorder p='md'>
@@ -76,18 +85,22 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved }) => {
                 />
                 <TextInput
                     label='API Token'
-                    placeholder='fog-api-token'
+                    description='FOG 1.6: bearer token from the user API tab (starts with "fog_")'
+                    placeholder='fog_… or legacy fog-api-token'
                     value={apiToken}
                     onChange={(e) => setApiToken(e.currentTarget.value)}
                     required
                 />
-                <TextInput
-                    label='User Token'
-                    placeholder='fog-user-token'
-                    value={userToken}
-                    onChange={(e) => setUserToken(e.currentTarget.value)}
-                    required
-                />
+                {!bearerMode && (
+                    <TextInput
+                        label='User Token'
+                        description='Required for legacy (non-bearer) API tokens'
+                        placeholder='fog-user-token'
+                        value={userToken}
+                        onChange={(e) => setUserToken(e.currentTarget.value)}
+                        required
+                    />
+                )}
                 <Group gap='xs' mt='xs'>
                     <Button
                         onClick={handleSave}

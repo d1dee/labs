@@ -1,16 +1,17 @@
 import type { FogHost } from '@/api/fog';
+import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import {
     ActionIcon,
     Button,
-    Card,
+    Box,
     Group,
     Select,
     Stack,
     Text,
     TextInput,
-    Tooltip,
+    Title,
 } from '@mantine/core';
-import { IconAdjustments, IconSearch, IconX } from '@tabler/icons-react';
+import { IconSearch, IconX } from '@tabler/icons-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 
 export interface Filters {
@@ -30,8 +31,9 @@ export const EMPTY_FILTERS: Filters = {
 };
 
 function matchesSearch(host: FogHost, term: string): boolean {
-    const t = term.toLowerCase();
+    const t = term.trim().toLowerCase();
     return (
+        String(host.id).includes(t) ||
         host.name?.toLowerCase().includes(t) ||
         host.macs?.some((m) => m.toLowerCase().includes(t)) ||
         host.imagename?.toLowerCase().includes(t) ||
@@ -39,6 +41,7 @@ function matchesSearch(host: FogHost, term: string): boolean {
         host.inventory?.sysproduct?.toLowerCase().includes(t) ||
         host.inventory?.cpuversion?.toLowerCase().includes(t) ||
         host.ip?.toLowerCase().includes(t) ||
+        (host.pingstatustext || 'unknown').toLowerCase().includes(t) ||
         false
     );
 }
@@ -87,7 +90,7 @@ export function useHostFilters(allHosts: FogHost[]): UseHostFiltersResult {
     );
     const statusOptions = useMemo(() => {
         const seen = new Set(
-            allHosts.map((h) => h.pingstatustext ?? 'unknown'),
+            allHosts.map((h) => h.pingstatustext || 'unknown'),
         );
         return [...seen].sort().map((v) => ({ value: v, label: v }));
     }, [allHosts]);
@@ -106,7 +109,7 @@ export function useHostFilters(allHosts: FogHost[]): UseHostFiltersResult {
                 return false;
             if (
                 deferredFilters.status &&
-                (host.pingstatustext ?? 'unknown') !== deferredFilters.status
+                (host.pingstatustext || 'unknown') !== deferredFilters.status
             )
                 return false;
             if (
@@ -172,15 +175,21 @@ export function HostFilterPanel({
     manufacturerOptions,
     modelOptions,
 }: HostFilterPanelProps) {
-    const [showFilters, setShowFilters] = useState(false);
+    const { opened, toggle, controlsId } = useMobileTableFilters();
 
     return (
-        <Card p='md' withBorder>
-            <Stack gap='sm'>
-                <Group align='flex-end'>
+            <Stack gap='md'>
+                <Group justify='space-between' align='flex-end'>
+                    <Box>
+                        <Title order={4}>Registered Hosts</Title>
+                        <Text size='sm' c='dimmed'>
+                            Select one or more hosts to perform actions.
+                        </Text>
+                    </Box>
+                    <Group align='flex-end' wrap='nowrap' w={{ base: '100%', sm: 300 }}>
                     <TextInput
-                        label='Search'
-                        placeholder='Name, MAC, image, manufacturer, model, IP…'
+                        aria-label='Search'
+                        placeholder='Search ID, name, MAC, image, manufacturer, model, IP, status...'
                         value={filters.search}
                         onChange={(e) =>
                             setFilter('search', e.currentTarget.value)
@@ -190,6 +199,7 @@ export function HostFilterPanel({
                             filters.search ? (
                                 <ActionIcon
                                     size='xs'
+                                    aria-label='Clear host search'
                                     variant='subtle'
                                     onClick={() => setFilter('search', '')}
                                 >
@@ -197,21 +207,20 @@ export function HostFilterPanel({
                                 </ActionIcon>
                             ) : undefined
                         }
-                        style={{ flex: 1 }}
+                        style={{ flex: 1, minWidth: 0 }}
                     />
-                    <Tooltip label='Filters'>
-                        <ActionIcon
-                            size='lg'
-                            variant={showFilters ? 'filled' : 'default'}
-                            onClick={() => setShowFilters((v) => !v)}
-                        >
-                            <IconAdjustments size={18} />
-                        </ActionIcon>
-                    </Tooltip>
+                    <MobileFilterToggle
+                        opened={opened}
+                        onToggle={toggle}
+                        controlsId={controlsId}
+                        label='Toggle host filters'
+                    />
+                    </Group>
                 </Group>
-                {showFilters && (
-                    <Group grow align='flex-end'>
+                <MobileFilterPanel id={controlsId} opened={opened}>
+                    <Group grow preventGrowOverflow={false} align='flex-end'>
                         <Select
+                            miw={{ base: '100%', sm: 180 }}
                             label='Image'
                             placeholder='All images'
                             data={imageOptions}
@@ -222,6 +231,7 @@ export function HostFilterPanel({
                             nothingFoundMessage='No images'
                         />
                         <Select
+                            miw={{ base: '100%', sm: 180 }}
                             label='Status'
                             placeholder='All statuses'
                             data={statusOptions}
@@ -230,6 +240,7 @@ export function HostFilterPanel({
                             clearable
                         />
                         <Select
+                            miw={{ base: '100%', sm: 180 }}
                             label='Manufacturer'
                             placeholder='All manufacturers'
                             data={manufacturerOptions}
@@ -240,6 +251,7 @@ export function HostFilterPanel({
                             nothingFoundMessage='No manufacturers'
                         />
                         <Select
+                            miw={{ base: '100%', sm: 180 }}
                             label='Model'
                             placeholder='All models'
                             data={modelOptions}
@@ -250,7 +262,7 @@ export function HostFilterPanel({
                             nothingFoundMessage='No models'
                         />
                     </Group>
-                )}
+                </MobileFilterPanel>
                 {hasActiveFilters && (
                     <Group justify='space-between'>
                         <Text size='sm' c='dimmed'>
@@ -274,6 +286,5 @@ export function HostFilterPanel({
                     </Text>
                 )}
             </Stack>
-        </Card>
     );
 }

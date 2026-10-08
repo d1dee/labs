@@ -1,5 +1,5 @@
 import { getPiholeSettings, savePiholeSettings } from '@/api/pihole';
-import { Button, Card, Group, Stack, TextInput, Title } from '@mantine/core';
+import { Button, Card, Checkbox, Group, Stack, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
 import { type FC, useEffect, useState } from 'react';
@@ -11,12 +11,16 @@ interface Props {
 export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
     const [url, setUrl] = useState('');
     const [password, setPassword] = useState('');
+    const [verifyTls, setVerifyTls] = useState(true);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         getPiholeSettings()
-            .then((cfg) => setUrl(cfg.url))
+            .then((cfg) => {
+                setUrl(cfg.url);
+                setVerifyTls(cfg.verifyTls ?? true);
+            })
             .catch(() => {
                 /* not configured yet */
             })
@@ -27,7 +31,7 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
         if (!url.trim() || !password.trim()) return;
         setSaving(true);
         try {
-            await savePiholeSettings(url.trim(), password);
+            await savePiholeSettings(url.trim(), password, verifyTls);
             notifications.show({
                 title: 'Success',
                 message: 'Pi-hole connection saved and verified.',
@@ -68,6 +72,17 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved }) => {
                     onChange={(e) => setPassword(e.currentTarget.value)}
                     required
                 />
+                <Checkbox
+                    label='Verify the Pi-hole TLS certificate'
+                    checked={verifyTls}
+                    onChange={(event) => setVerifyTls(event.currentTarget.checked)}
+                    disabled={loading}
+                />
+                {!verifyTls && (
+                    <Text size='sm' c='orange'>
+                        Warning: Disabling TLS certificate verification allows attackers to impersonate your Pi-hole server and steal your password.
+                    </Text>
+                )}
                 <Group gap='xs' mt='xs'>
                     <Button
                         onClick={handleSave}

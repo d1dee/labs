@@ -14,8 +14,12 @@ import {
     type VeyonFeature,
     type VeyonInformation,
 } from '@/api/veyon';
+import { PageHero } from '@/components/ui/PageHero';
+import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
+import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import VeyonMonitoringWall from '@/components/veyon/VeyonMonitoringWall';
 import VeyonSyncModal from '@/components/veyon/VeyonSyncModal';
+import { useVeyonScreenshots } from '@/components/veyon/useVeyonScreenshots';
 import {
     ActionIcon,
     Alert,
@@ -25,7 +29,6 @@ import {
     Button,
     Card,
     Checkbox,
-    Divider,
     Group,
     Image,
     Loader,
@@ -34,6 +37,7 @@ import {
     Paper,
     PasswordInput,
     ScrollArea,
+    Scroller,
     Select,
     SegmentedControl,
     SimpleGrid,
@@ -54,6 +58,7 @@ import {
     IconBrandWindows,
     IconBrowser,
     IconCheck,
+    IconChevronDown,
     IconCloud,
     IconCloudDownload,
     IconCommand,
@@ -74,6 +79,7 @@ import {
     IconTrash,
     IconUser,
     IconUserOff,
+    IconX,
 } from '@tabler/icons-react';
 import {
     startTransition,
@@ -92,6 +98,7 @@ export type LiveState =
     | { state: 'offline'; error: string };
 
 type EditorState = { opened: boolean; computer: VeyonComputer | null };
+type ComputerSortKey = 'name' | 'location' | 'user' | 'status';
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
@@ -132,6 +139,11 @@ export default function VeyonManagementTab() {
     const [live, setLive] = useState<Record<string, LiveState>>({});
     const [selected, setSelected] = useState<string[]>([]);
     const [search, setSearch] = useState('');
+    const mobileFilters = useMobileTableFilters();
+    const [statusFilter, setStatusFilter] = useState<string | null>(null);
+    const [locationFilter, setLocationFilter] = useState<string | null>(null);
+    const [sessionFilter, setSessionFilter] = useState<string | null>(null);
+    const [sort, setSort] = useState<SortState<ComputerSortKey> | null>(null);
     const [loading, setLoading] = useState(true);
     const [editor, setEditor] = useState<EditorState>({ opened: false, computer: null });
     const [viewer, setViewer] = useState<VeyonComputer | null>(null);
@@ -140,14 +152,30 @@ export default function VeyonManagementTab() {
     const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
     const filteredComputers = useMemo(
-        () =>
-            computers.filter((computer) =>
-                [computer.name, computer.host, computer.location ?? '']
-                    .join(' ')
-                    .toLowerCase()
-                    .includes(deferredSearch),
-            ),
-        [computers, deferredSearch],
+        () => {
+            const rows = computers.filter((computer) => {
+                const state = live[computer.id];
+                const user = state?.state === 'online' ? state.information.user : null;
+                const session = user ? (user.login ? 'logged-in' : 'no-user') : 'unavailable';
+                return (!statusFilter || (state?.state ?? 'offline') === statusFilter)
+                    && (!locationFilter || JSON.stringify(computer.location || '') === locationFilter)
+                    && (!sessionFilter || session === sessionFilter)
+                    && [computer.name, computer.host, computer.location ?? '', user?.login ?? '', user?.fullName ?? '']
+                        .join(' ').toLowerCase().includes(deferredSearch);
+            });
+            if (!sort) return rows;
+            const value = (computer: VeyonComputer) => {
+                const state = live[computer.id];
+                if (sort.key === 'status') return state?.state ?? 'offline';
+                if (sort.key === 'user') {
+                    return state?.state === 'online' && state.information.user.login
+                        ? state.information.user.fullName || state.information.user.login : null;
+                }
+                return computer[sort.key] || null;
+            };
+            return rows.sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
+        },
+        [computers, deferredSearch, live, statusFilter, locationFilter, sessionFilter, sort],
     );
     const onlineCount = Object.values(live).filter((value) => value.state === 'online').length;
     const loggedInCount = Object.values(live).filter(
@@ -180,6 +208,44 @@ export default function VeyonManagementTab() {
     useEffect(() => {
         void load();
     }, []);
+
+    const liveRef = useRef(live);
+    useEffect(() => {
+        liveRef.current = live;
+    }, [live]);
+
+    useEffect(() => {
+        if (!configured || loading || !computers.length) return;
+        let cancelled = false;
+        let timer: number;
+
+        const retryOffline = async () => {
+            for (const computer of computers) {
+                if (cancelled) return;
+                if (liveRef.current[computer.id]?.state !== 'offline') continue;
+
+                let nextState: LiveState;
+                try {
+                    nextState = {
+                        state: 'online',
+                        information: await getVeyonInformation(computer.id),
+                    };
+                } catch (error) {
+                    nextState = { state: 'offline', error: errorMessage(error) };
+                }
+                if (cancelled) return;
+                setLive((current) => ({ ...current, [computer.id]: nextState }));
+            }
+            // Wait after the pass finishes so slow requests cannot overlap retries.
+            if (!cancelled) timer = window.setTimeout(() => void retryOffline(), 15_000);
+        };
+
+        timer = window.setTimeout(() => void retryOffline(), 15_000);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [configured, loading, computers]);
 
     const runCommand = async (
         action: VeyonCommandAction,
@@ -283,32 +349,13 @@ export default function VeyonManagementTab() {
 
     return (
         <Stack gap='lg'>
-            <Paper
-                p={{ base: 'md', md: 'xl' }}
-                radius='lg'
-                style={{
-                    color: 'white',
-                    background:
-                        'linear-gradient(125deg, var(--mantine-color-dark-8) 0%, var(--mantine-color-teal-9) 145%)',
-                    overflow: 'hidden',
-                }}
-            >
-                <Group justify='space-between' align='flex-start'>
-                    <Group align='flex-start'>
-                        <ThemeIcon size={46} radius='md' color='teal' variant='light'>
-                            <IconScreenShare size={25} />
-                        </ThemeIcon>
-                        <div>
-                            <Text tt='uppercase' size='xs' fw={700} c='teal.2' lts={1.4}>
-                                Veyon operations desk
-                            </Text>
-                            <Title order={2} c='white'>Computer management</Title>
-                            <Text c='gray.4' size='sm' maw={620}>
-                                Monitor active sessions and dispatch classroom controls through the organization proxy.
-                            </Text>
-                        </div>
-                    </Group>
-                    <Group gap='xs'>
+            <PageHero
+                eyebrow='Veyon operations desk'
+                title='Computer management'
+                description='Monitor active sessions and dispatch classroom controls through the organization proxy.'
+                icon={<IconScreenShare size={25} />}
+                actions={
+                    <>
                         <Button
                             variant='light'
                             color='teal'
@@ -344,15 +391,39 @@ export default function VeyonManagementTab() {
                         >
                             <IconRefresh size={18} />
                         </ActionIcon>
-                    </Group>
-                </Group>
-                <SimpleGrid cols={{ base: 2, sm: 4 }} mt='xl'>
-                    <Metric label='Directory' value={computers.length} />
-                    <Metric label='Online' value={onlineCount} accent />
-                    <Metric label='Users active' value={loggedInCount} />
-                    <Metric label='Selected' value={selected.length} />
-                </SimpleGrid>
-            </Paper>
+                    </>
+                }
+                metrics={[
+                    { label: 'Directory', value: computers.length },
+                    { label: 'Online', value: onlineCount, accent: true },
+                    { label: 'Users active', value: loggedInCount },
+                    { label: 'Selected', value: selected.length },
+                ]}
+            />
+
+            <CommandDeck
+                selectedCount={selected.length}
+                selectedComputers={computers.filter((computer) => selected.includes(computer.id))}
+                features={Object.values(live).flatMap((value) =>
+                    value.state === 'online' ? value.information.features : [],
+                )}
+                onCommand={runCommand}
+                onConfirm={confirmCommand}
+                onPowerOn={async () => {
+                    const targets = computers.filter(
+                        (computer) => selected.includes(computer.id) && computer.macAddress,
+                    );
+                    const results = await Promise.allSettled(
+                        targets.map((computer) => powerOnVeyonComputer(computer.id)),
+                    );
+                    const failures = results.filter((result) => result.status === 'rejected').length;
+                    notifications.show({
+                        color: failures ? 'orange' : 'teal',
+                        title: failures ? 'Wake-on-LAN partially sent' : 'Wake-on-LAN sent',
+                        message: `${targets.length - failures} of ${targets.length} packets dispatched.`,
+                    });
+                }}
+            />
 
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
@@ -363,13 +434,31 @@ export default function VeyonManagementTab() {
                                 Select targets first, then apply controls from the command deck.
                             </Text>
                         </div>
-                        <TextInput
-                            placeholder='Filter name, host, room...'
-                            value={search}
-                            onChange={(event) => setSearch(event.currentTarget.value)}
-                            w={{ base: '100%', sm: 300 }}
-                        />
+                        <Group wrap='nowrap' gap='sm' w={{ base: '100%', sm: 300 }}>
+                            <TextInput
+                                aria-label='Search computers'
+                                placeholder='Search name, host, location, user...'
+                                value={search}
+                                onChange={(event) => setSearch(event.currentTarget.value)}
+                                style={{ flex: 1, minWidth: 0 }}
+                            />
+                            <MobileFilterToggle opened={mobileFilters.opened} onToggle={mobileFilters.toggle}
+                                controlsId={mobileFilters.controlsId} label='Toggle computer filters' />
+                        </Group>
                     </Group>
+                    <MobileFilterPanel opened={mobileFilters.opened} id={mobileFilters.controlsId}>
+                    <Group grow preventGrowOverflow={false} align='flex-end'>
+                        <Select miw={{ base: '100%', sm: 180 }} label='Status' placeholder='All statuses' clearable
+                            value={statusFilter} onChange={setStatusFilter}
+                            data={[{ value: 'online', label: 'Online' }, { value: 'offline', label: 'Offline' }, { value: 'loading', label: 'Loading' }]} />
+                        <Select miw={{ base: '100%', sm: 180 }} label='Location' placeholder='All locations' clearable searchable
+                            value={locationFilter} onChange={setLocationFilter}
+                            data={[...new Set(computers.map((computer) => computer.location || ''))].sort().map((location) => ({ value: JSON.stringify(location), label: location || 'Unassigned' }))} />
+                        <Select miw={{ base: '100%', sm: 180 }} label='User session' placeholder='All sessions' clearable
+                            value={sessionFilter} onChange={setSessionFilter}
+                            data={[{ value: 'logged-in', label: 'Logged in' }, { value: 'no-user', label: 'No user (online)' }, { value: 'unavailable', label: 'Session unavailable' }]} />
+                    </Group>
+                    </MobileFilterPanel>
                     {computers.length ? (
                         <Table.ScrollContainer minWidth={760}>
                             <Table verticalSpacing='sm' highlightOnHover>
@@ -402,14 +491,21 @@ export default function VeyonManagementTab() {
                                                 }}
                                             />
                                         </Table.Th>
-                                        <Table.Th>Computer</Table.Th>
-                                        <Table.Th>Location</Table.Th>
-                                        <Table.Th>User session</Table.Th>
-                                        <Table.Th>Status</Table.Th>
+                                        {([
+                                            ['name', 'Computer'], ['location', 'Location'],
+                                            ['user', 'User session'], ['status', 'Status'],
+                                        ] as const).map(([key, label]) => (
+                                            <SortableTh key={key} label={label} active={sort?.key === key}
+                                                direction={sort?.direction ?? 'asc'}
+                                                onSort={() => setSort((current) => toggleTableSort(current, key))} />
+                                        ))}
                                         <Table.Th ta='right'>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
+                                    {filteredComputers.length === 0 ? (
+                                        <Table.Tr><Table.Td colSpan={6}><Text ta='center' c='dimmed'>No computers match the current filters.</Text></Table.Td></Table.Tr>
+                                    ) : null}
                                     {filteredComputers.map((computer) => (
                                         <ComputerRow
                                             key={computer.id}
@@ -443,30 +539,6 @@ export default function VeyonManagementTab() {
                 </Stack>
             </Card>
 
-            <CommandDeck
-                selectedCount={selected.length}
-                selectedComputers={computers.filter((computer) => selected.includes(computer.id))}
-                features={Object.values(live).flatMap((value) =>
-                    value.state === 'online' ? value.information.features : [],
-                )}
-                onCommand={runCommand}
-                onConfirm={confirmCommand}
-                onPowerOn={async () => {
-                    const targets = computers.filter(
-                        (computer) => selected.includes(computer.id) && computer.macAddress,
-                    );
-                    const results = await Promise.allSettled(
-                        targets.map((computer) => powerOnVeyonComputer(computer.id)),
-                    );
-                    const failures = results.filter((result) => result.status === 'rejected').length;
-                    notifications.show({
-                        color: failures ? 'orange' : 'teal',
-                        title: failures ? 'Wake-on-LAN partially sent' : 'Wake-on-LAN sent',
-                        message: `${targets.length - failures} of ${targets.length} packets dispatched.`,
-                    });
-                }}
-            />
-
             <ComputerEditor
                 state={editor}
                 onClose={() => setEditor({ opened: false, computer: null })}
@@ -497,15 +569,6 @@ export default function VeyonManagementTab() {
                 onCommand={handleWallCommand}
             />
         </Stack>
-    );
-}
-
-function Metric({ label, value, accent = false }: { label: string; value: number; accent?: boolean }) {
-    return (
-        <Box style={{ borderLeft: `2px solid ${accent ? 'var(--mantine-color-teal-4)' : 'rgba(255,255,255,.18)'}` }} pl='sm'>
-            <Text size='xs' c='gray.4' tt='uppercase' lts={0.8}>{label}</Text>
-            <Text size='xl' fw={700} c={accent ? 'teal.2' : 'white'}>{value}</Text>
-        </Box>
     );
 }
 
@@ -624,7 +687,7 @@ function CommandDeck({
     onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
     onPowerOn: () => Promise<void>;
 }) {
-    const [mode, setMode] = useState('message');
+    const [mode, setMode] = useState<string | null>(null);
     const [text, setText] = useState('');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -650,43 +713,62 @@ function CommandDeck({
     );
 
     return (
-        <Card withBorder radius='lg' p={{ base: 'md', md: 'lg' }}>
-            <Stack gap='lg'>
+        <Card withBorder radius='lg' p='sm' miw={0}>
+            <Stack gap='xs'>
                 <Group justify='space-between'>
-                    <div>
+                    <Stack gap={0}>
                         <Title order={4}>Command deck</Title>
                         <Text size='sm' c='dimmed'>
                             {selectedCount ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed` : 'Select computers to enable controls'}
                         </Text>
-                    </div>
-                    <Badge size='lg' variant='dot' color={selectedCount ? 'teal' : 'gray'}>{selectedCount} selected</Badge>
+                    </Stack>
+                    <Badge variant='dot' color={selectedCount ? 'teal' : 'gray'}>{selectedCount} selected</Badge>
                 </Group>
 
-                <SimpleGrid cols={{ base: 2, sm: 4, lg: 8 }} spacing='xs'>
-                    <ControlButton label='Lock screens' icon={IconLock} disabled={disabled} onClick={() => void onCommand('screen-lock')} />
-                    <ControlButton label='Unlock' icon={IconLockOpen} disabled={disabled} onClick={() => void onCommand('screen-lock', {}, false)} />
-                    <ControlButton label='Lock input' icon={IconKey} disabled={disabled} onClick={() => void onCommand('input-lock')} />
-                    <ControlButton label='Unlock input' icon={IconBolt} disabled={disabled} onClick={() => void onCommand('input-lock', {}, false)} />
-                    <ControlButton label='Wake' icon={IconPower} disabled={disabled || !selectedComputers.some((computer) => computer.macAddress)} onClick={() => void onPowerOn()} />
-                    <ControlButton label='Log off' icon={IconUserOff} disabled={disabled} color='orange' onClick={() => onConfirm('Log off users', 'Unsaved work may be lost on all selected computers.', 'user-logoff', 'orange')} />
-                    <ControlButton label='Restart' icon={IconReload} disabled={disabled} color='orange' onClick={() => onConfirm('Restart computers', 'Restart all selected computers now? Unsaved work may be lost.', 'reboot', 'orange')} />
-                    <ControlButton label='Shut down' icon={IconPower} disabled={disabled} color='red' onClick={() => onConfirm('Shut down computers', 'Power down all selected computers now? Unsaved work may be lost.', 'power-down')} />
-                </SimpleGrid>
+                <Scroller
+                    startControlProps={{ 'aria-label': 'Scroll actions left' }}
+                    endControlProps={{ 'aria-label': 'Scroll actions right' }}
+                >
+                    <Group gap='xs' wrap='nowrap'>
+                        <LockControl label='Screen lock' icon={IconLock} unlockIcon={IconLockOpen} disabled={disabled}
+                            onLock={() => void onCommand('screen-lock')} onUnlock={() => void onCommand('screen-lock', {}, false)} />
+                        <LockControl label='Input lock' icon={IconKey} unlockIcon={IconBolt} disabled={disabled}
+                            onLock={() => void onCommand('input-lock')} onUnlock={() => void onCommand('input-lock', {}, false)} />
+                        <ControlButton label='Wake' icon={IconPower} disabled={disabled || !selectedComputers.some((computer) => computer.macAddress)} onClick={() => void onPowerOn()} />
+                        <ControlButton label='Log off' icon={IconUserOff} disabled={disabled} color='orange' onClick={() => onConfirm('Log off users', 'Unsaved work may be lost on all selected computers.', 'user-logoff', 'orange')} />
+                        <ControlButton label='Restart' icon={IconReload} disabled={disabled} color='orange' onClick={() => onConfirm('Restart computers', 'Restart all selected computers now? Unsaved work may be lost.', 'reboot', 'orange')} />
+                        <ControlButton label='Shut down' icon={IconPower} disabled={disabled} color='red' onClick={() => onConfirm('Shut down computers', 'Power down all selected computers now? Unsaved work may be lost.', 'power-down')} />
+                        <Menu position='bottom-start' shadow='md'>
+                            <Menu.Target>
+                                <Button size='sm' variant='default' disabled={disabled}
+                                    rightSection={<IconChevronDown size={14} />} style={{ flexShrink: 0 }}>
+                                    More
+                                </Button>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                                {([
+                                    ['message', 'Message', IconMessage],
+                                    ['login', 'Sign in', IconUser],
+                                    ['program', 'Program', IconCommand],
+                                    ['website', 'Website', IconBrowser],
+                                    ['plugin', 'Plugin', IconBrandWindows],
+                                    ['demo', 'Demo', IconScreenShare],
+                                ] as const).map(([value, label, Icon]) => (
+                                    <Menu.Item key={value} leftSection={<Icon size={16} />}
+                                        onClick={() => setMode(value)}>{label}</Menu.Item>
+                                ))}
+                            </Menu.Dropdown>
+                        </Menu>
+                    </Group>
+                </Scroller>
 
-                <Divider />
-                <SegmentedControl
-                    value={mode}
-                    onChange={setMode}
-                    fullWidth
-                    data={[
-                        { value: 'message', label: 'Message' },
-                        { value: 'login', label: 'Sign in' },
-                        { value: 'program', label: 'Program' },
-                        { value: 'website', label: 'Website' },
-                        { value: 'plugin', label: 'Plugin' },
-                        { value: 'demo', label: 'Demo' },
-                    ]}
-                />
+                {mode && !disabled ? (
+                    <Stack gap='xs'>
+                        <Group justify='flex-end'>
+                            <ActionIcon variant='subtle' color='gray' aria-label='Close command panel' onClick={() => setMode(null)}>
+                                <IconX size={16} />
+                            </ActionIcon>
+                        </Group>
                 {mode === 'message' ? (
                     <CommandForm title='Send a text message' icon={IconMessage}>
                         <Textarea label='Message' value={text} onChange={(event) => setText(event.currentTarget.value)} minRows={3} placeholder='Message shown on selected screens' />
@@ -879,16 +961,39 @@ function CommandDeck({
                         </Group>
                     </CommandForm>
                 ) : null}
+                    </Stack>
+                ) : null}
             </Stack>
         </Card>
     );
 }
 
+function LockControl({ label, icon: Icon, unlockIcon: UnlockIcon, disabled, onLock, onUnlock }: {
+    label: string; icon: typeof IconLock; unlockIcon: typeof IconLock; disabled: boolean;
+    onLock: () => void; onUnlock: () => void;
+}) {
+    return (
+        <Menu position='bottom-start' shadow='md'>
+            <Menu.Target>
+                <Button size='sm' variant='light' color='teal' disabled={disabled}
+                    leftSection={<Icon size={16} />}
+                    rightSection={<IconChevronDown size={14} />}
+                    style={{ flexShrink: 0 }}>
+                    {label}
+                </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+                <Menu.Item leftSection={<Icon size={16} />} onClick={onLock}>Lock</Menu.Item>
+                <Menu.Item leftSection={<UnlockIcon size={16} />} onClick={onUnlock}>Unlock</Menu.Item>
+            </Menu.Dropdown>
+        </Menu>
+    );
+}
+
 function ControlButton({ label, icon: Icon, onClick, disabled, color = 'teal' }: { label: string; icon: typeof IconLock; onClick: () => void; disabled: boolean; color?: string }) {
     return (
-        <Button h={72} variant='light' color={color} disabled={disabled} onClick={onClick} styles={{ label: { flexDirection: 'column', gap: 5 } }}>
-            <Icon size={20} />
-            <Text size='xs' fw={600}>{label}</Text>
+        <Button size='sm' variant='light' color={color} disabled={disabled} onClick={onClick} style={{ flexShrink: 0 }} leftSection={<Icon size={16} />}>
+            {label}
         </Button>
     );
 }
@@ -952,34 +1057,61 @@ function ComputerEditor({ state, onClose, onSaved }: { state: EditorState; onClo
 }
 
 function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; onClose: () => void }) {
-    const [imageUrl, setImageUrl] = useState('');
     const [information, setInformation] = useState<VeyonInformation | null>(null);
     const [error, setError] = useState('');
+    const [failedImage, setFailedImage] = useState<string | null>(null);
+
+    // One backend polling worker per machine feeds this view; the browser
+    // never polls Veyon directly and failed polls keep the last frame.
+    const { frames, connected } = useVeyonScreenshots(computer ? [computer.id] : [], {
+        minFrameIntervalMs: 1000, width: 1280, quality: 75, priority: 'viewer',
+    });
+    const frame = computer ? frames[computer.id] : undefined;
 
     useEffect(() => {
         if (!computer) return;
+        setInformation(null);
+        setError('');
         let active = true;
-        const refresh = () => {
-            if (active) setImageUrl(veyonFramebufferUrl(computer.id, { width: 1280 }));
-        };
-        getVeyonInformation(computer.id).then(setInformation).catch((value) => setError(errorMessage(value)));
-        refresh();
-        const interval = window.setInterval(refresh, 1500);
+        getVeyonInformation(computer.id)
+            .then((value) => {
+                if (active) setInformation(value);
+            })
+            .catch((value) => {
+                if (active) setError(errorMessage(value));
+            });
         return () => {
             active = false;
-            window.clearInterval(interval);
-            setInformation(null);
-            setError('');
         };
     }, [computer]);
 
     if (!computer) return null;
+    const failed = Boolean(frame?.consecutiveFailures || frame?.lastError);
+    const stale = Boolean(frame?.image && (frame.stale || failed || !connected));
+    const unavailable = Boolean((!frame?.image && error) || (frame?.image && failedImage === frame.image));
+    const status = unavailable ? 'Unavailable'
+        : stale ? 'Stale'
+        : failed ? 'Unavailable'
+        : !connected ? 'Connecting'
+        : !frame?.image ? 'Waiting'
+        : 'Live';
+    const staleSeconds =
+        frame?.lastUpdated != null
+            ? Math.max(0, Math.round((Date.now() - frame.lastUpdated) / 1000))
+            : null;
     return (
         <Modal opened onClose={onClose} title={`Remote view · ${computer.name}`} size='calc(100vw - 48px)' centered>
             <Stack>
                 <Group justify='space-between'>
                     <Group gap='xs'>
-                        <Badge color={error ? 'red' : 'teal'} variant='dot'>{error ? 'Unavailable' : 'Live · 1.5 s'}</Badge>
+                        <Badge color={status === 'Unavailable' ? 'red' : stale ? 'orange' : status === 'Live' ? 'teal' : 'gray'} variant='dot'>{status}</Badge>
+                        {stale && frame?.image ? (
+                            <Tooltip label={frame.lastError ?? 'Last screenshot is being kept while retries back off'}>
+                                <Text size='sm' c='dimmed'>
+                                    {staleSeconds != null ? `last frame ${staleSeconds}s ago` : 'last frame kept'}
+                                </Text>
+                            </Tooltip>
+                        ) : null}
                         {information?.user.login ? <Text size='sm' c='dimmed'>{information.user.fullName || information.user.login}</Text> : null}
                     </Group>
                     <Group gap='xs'>
@@ -988,7 +1120,7 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
                 </Group>
                 {error ? <Alert color='red'>{error}</Alert> : null}
                 <ScrollArea bg='dark.9' style={{ borderRadius: 'var(--mantine-radius-md)' }}>
-                    <Image src={imageUrl} alt={`Live screen of ${computer.name}`} fit='contain' mah='72vh' fallbackSrc='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="450"%3E%3Crect width="100%25" height="100%25" fill="%23252b32"/%3E%3C/svg%3E' />
+                    <Image src={frame?.image ?? undefined} onError={() => setFailedImage(frame?.image ?? null)} alt={`Live screen of ${computer.name}`} fit='contain' mah='72vh' fallbackSrc='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="450"%3E%3Crect width="100%25" height="100%25" fill="%23252b32"/%3E/svg%3E' />
                 </ScrollArea>
                 {information ? (
                     <SimpleGrid cols={{ base: 1, sm: 3 }}>

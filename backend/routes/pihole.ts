@@ -75,10 +75,33 @@ piholeRouter.get('/pihole/top-domains', async (c) => {
         return c.json({ error: 'You must join an organization first' }, 403);
     }
 
-    const count = parseInt(c.req.query('count') || '10', 10);
-    const blocked = c.req.query('blocked') !== 'false';
+    const countValue = c.req.query('count') ?? '10';
+    const count = Number(countValue);
+    const blockedValue = c.req.query('blocked') ?? 'true';
+    if (
+        !/^\d+$/.test(countValue) || !Number.isSafeInteger(count) || count < 1 || count > 100 ||
+        !['true', 'false'].includes(blockedValue)
+    ) {
+        return c.json({ error: 'count must be an integer from 1 to 100 and blocked must be true or false' }, 400);
+    }
+    const fromValue = c.req.query('from');
+    const untilValue = c.req.query('until');
+    let range: { from: number; until: number } | undefined;
+    if (fromValue !== undefined || untilValue !== undefined) {
+        const from = Number(fromValue);
+        const until = Number(untilValue);
+        if (
+            fromValue === undefined || untilValue === undefined ||
+            !/^\d+$/.test(fromValue) || !/^\d+$/.test(untilValue) ||
+            !Number.isSafeInteger(from) || !Number.isSafeInteger(until) || from > until
+        ) {
+            return c.json({ error: 'from and until must be non-negative Unix timestamps with from <= until' }, 400);
+        }
+        range = { from, until };
+    }
+    const blocked = blockedValue === 'true';
     const client = await getPiholeClient(user.organizationId);
-    const result = await client.getTopDomains(blocked, count);
+    const result = await client.getTopDomains(blocked, count, range);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }

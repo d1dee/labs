@@ -70,5 +70,13 @@ if (!veyonComputerColumns.some((column) => column.name === 'fogHostId')) {
     sqliteDb.run('ALTER TABLE veyonComputer ADD COLUMN fogHostId INTEGER');
 }
 
+// Existing installations keep certificate verification enabled during upgrade.
+const piholeColumns = sqliteDb
+    .query('PRAGMA table_info(piholeConfig)')
+    .all() as Array<{ name: string }>;
+if (piholeColumns.length && !piholeColumns.some((column) => column.name === 'verifyTls')) {
+    sqliteDb.run('ALTER TABLE piholeConfig ADD COLUMN verifyTls INTEGER NOT NULL DEFAULT 1');
+}
+
 // Create Drizzle database instance with Better Auth schema
 export const db = drizzle({ client: sqliteDb, schema });

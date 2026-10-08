@@ -1,6 +1,10 @@
+// LogTape must be configured before anything else logs; keep this first.
+import './lib/logger';
+
 import '@mantine/charts/styles.css';
-import { createTheme, MantineProvider } from '@mantine/core';
+import { Badge, Button, Card, createTheme, MantineProvider, Paper } from '@mantine/core';
 import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import '@mantine/notifications/styles.css';
@@ -9,49 +13,26 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
+// Central palette mirrors the Veyon operations desk: a dark hero gradient
+// accented with teal. Teal is the primary color so every default Button,
+// Badge and focus ring across the app shares the same accent, and the same
+// system + monospace font stacks and large card radii propagate everywhere.
 const theme = createTheme({
+    primaryColor: 'teal',
     defaultRadius: 'md',
-    colors: {
-        accent: [
-            '#e6fff5',
-            '#ccffeb',
-            '#99ffd6',
-            '#66ffc2',
-            '#33ffad',
-            '#00e5a0',
-            '#00c98c',
-            '#00a876',
-            '#008761',
-            '#00664c',
-        ],
-        'accent-secondary': [
-            '#e6f8fd',
-            '#ccf1fb',
-            '#99e3f7',
-            '#66d5f3',
-            '#33c7ef',
-            '#00b4d8',
-            '#009bb9',
-            '#00829a',
-            '#00697b',
-            '#00505c',
-        ],
+    fontFamily:
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif',
+    fontFamilyMonospace:
+        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    headings: {
+        fontFamily: 'inherit',
+        fontWeight: '700',
     },
-
-    other: {
-        landing: {
-            bg: '#0a0c0f',
-            bgElevated: '#111419',
-            bgCard: '#161920',
-            bgCardHover: '#1c2029',
-            fg: '#e8eaed',
-            fgMuted: '#8b90a0',
-            fgDim: '#555a6e',
-            accentGlow: 'rgba(0, 229, 160, 0.15)',
-            accentGlowStrong: 'rgba(0, 229, 160, 0.3)',
-            border: 'rgba(255, 255, 255, 0.06)',
-            borderAccent: 'rgba(0, 229, 160, 0.2)',
-        },
+    components: {
+        Button: Button.extend({ defaultProps: { radius: 'md' } }),
+        Card: Card.extend({ defaultProps: { radius: 'lg' } }),
+        Paper: Paper.extend({ defaultProps: { radius: 'lg' } }),
+        Badge: Badge.extend({ defaultProps: { radius: 'md' } }),
     },
 });
 
