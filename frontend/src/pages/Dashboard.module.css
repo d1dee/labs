@@ -1,0 +1,52 @@
+@media (max-width: 61.99em) {
+    .tabsList {
+        position: fixed;
+        inset: auto 0 0;
+        height: var(--app-shell-footer-height);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        padding-left: env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
+        flex-wrap: nowrap;
+        background: var(--mantine-color-body);
+        border-top: 1px solid var(--mantine-color-default-border);
+    }
+
+    .tabsList::before {
+        display: none;
+    }
+
+    .tab {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 72px;
+        padding: 8px 2px;
+        flex-direction: column;
+        justify-content: center;
+        gap: 6px;
+        border-bottom: 0;
+        border-top: 3px solid transparent;
+        border-radius: 0;
+    }
+
+    .tab[data-active] {
+        border-top-color: var(--tabs-color);
+        color: var(--tabs-color);
+        background: var(--mantine-color-default-hover);
+    }
+
+    .tab:focus-visible {
+        outline: 2px solid var(--mantine-primary-color-filled);
+        outline-offset: -4px;
+    }
+
+    .tabLabel {
+        white-space: normal;
+        text-align: center;
+        font-size: 10px;
+        line-height: 1.2;
+    }
+
+    .tabSection {
+        margin: 0;
+    }
+}

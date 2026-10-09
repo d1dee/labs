@@ -48,7 +48,7 @@ export function PageHero({
             <Group justify='space-between' align='flex-start'>
                 <Group align='flex-start'>
                     {icon ? (
-                        <ThemeIcon size={46} radius='md' color={iconColor} variant='light'>
+                        <ThemeIcon visibleFrom='md' aria-hidden='true' size={46} radius='md' color={iconColor} variant='light'>
                             {icon}
                         </ThemeIcon>
                     ) : null}

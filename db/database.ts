@@ -78,5 +78,14 @@ if (piholeColumns.length && !piholeColumns.some((column) => column.name === 'ver
     sqliteDb.run('ALTER TABLE piholeConfig ADD COLUMN verifyTls INTEGER NOT NULL DEFAULT 1');
 }
 
+const labColumns = sqliteDb.query('PRAGMA table_info(lab)').all() as Array<{ name: string }>;
+if (labColumns.length && !labColumns.some((column) => column.name === 'interface')) {
+    sqliteDb.run('ALTER TABLE lab ADD COLUMN interface TEXT');
+}
+
+// Preserve username access for accounts created with the old synthetic email flow.
+// New signups cannot use this domain, and real addresses still require verification.
+sqliteDb.run("UPDATE user SET emailVerified = 1 WHERE lower(email) LIKE '%@local.lan' AND emailVerified = 0");
+
 // Create Drizzle database instance with Better Auth schema
 export const db = drizzle({ client: sqliteDb, schema });

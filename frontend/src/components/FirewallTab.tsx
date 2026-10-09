@@ -7,12 +7,14 @@ import {
 import LabCard from '@/components/LabCard';
 import { useApiStream } from '@/api/useApiStream';
 import { PageHero } from '@/components/ui/PageHero';
+import { orderLabs, useLabOrder } from '@/lib/lab-order';
 import { Alert, Center, Grid, Loader, Stack, Text } from '@mantine/core';
 import { IconInfoCircle, IconShieldCheck } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
 
 const FirewallTab: FC = () => {
+    const { order } = useLabOrder();
     const [labs, setLabs] = useState<Lab[]>([]);
     const [labStats, setLabStats] = useState<Record<string, LabStats>>({});
     const [labHistory, setLabHistory] = useState<
@@ -87,9 +89,7 @@ const FirewallTab: FC = () => {
                     />
 
                     <Grid grow>
-                        {labs
-                            .slice()
-                            .sort((a, b) => a.name.localeCompare(b.name))
+                        {orderLabs(labs, order)
                             .map((lab) => (
                                 <LabCard
                                     key={lab.id}

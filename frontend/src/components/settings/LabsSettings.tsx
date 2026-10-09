@@ -42,6 +42,7 @@ const labSchema = z.object({
     ruleId: z.string().min(1, 'Firewall ID is required'),
     dhcpServer: z.string(),
     subnet: z.string(),
+    interface: z.string().trim().max(128),
     key: z.string(),
 });
 
@@ -77,6 +78,7 @@ const toFormLab = (lab: Lab) => ({
     ruleId: lab.ruleId ?? '',
     dhcpServer: lab.dhcpServer ?? '',
     subnet: lab.subnet ?? '',
+    interface: lab.interface ?? '',
     key: randomId(),
 });
 
@@ -208,10 +210,12 @@ export function LabsSettings({
                 body: JSON.stringify({
                     id: firewallConfig?.id,
                     labs: values.labs.map((lab) => ({
+                        id: lab.id,
                         firewallId: lab.ruleId,
                         name: lab.name,
                         subnet: lab.subnet,
                         dhcpServer: lab.dhcpServer,
+                        interface: lab.interface,
                     })),
                 }),
             });
@@ -268,6 +272,7 @@ export function LabsSettings({
                                     ruleId: '',
                                     dhcpServer: '',
                                     subnet: '',
+                                    interface: '',
                                     key: randomId(),
                                 },
                                 0,
@@ -344,6 +349,7 @@ export function LabsSettings({
                                         cols={{ base: 1, sm: 2 }}
                                         mt='md'
                                     >
+                                        <LabField label='Interface' value={lab.interface} />
                                         <LabField
                                             label='Subnet / IP range'
                                             value={lab.subnet}
@@ -388,9 +394,16 @@ export function LabsSettings({
                                             )
                                         }
                                         onDetails={(currentIndex, details) => {
-                                            form.setFieldValue(`labs.${currentIndex}.subnet`, details.subnet ?? '');
-                                            form.setFieldValue(`labs.${currentIndex}.dhcpServer`, details.dhcpServer ?? '');
+                                            form.setValues({ labs: form.getValues().labs.map((item, itemIndex) => itemIndex === currentIndex
+                                                ? { ...item, subnet: details.subnet ?? '', dhcpServer: details.dhcpServer ?? '' }
+                                                : item) });
                                         }}
+                                    />
+                                    <TextInput
+                                        label='Lab Interface'
+                                        placeholder='vlan10 or bridge-lab'
+                                        description='Exact MikroTik interface name. Usage includes received and transmitted bytes since its counters were reset.'
+                                        {...form.getInputProps(`labs.${index}.interface`)}
                                     />
                                     <TextInput
                                         label='DHCP Server'

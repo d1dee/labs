@@ -13,6 +13,7 @@ export interface Lab {
     dhcpServer: string;
     subnet: string;
     ruleId: string;
+    interface?: string;
 }
 
 export interface FirewallConfig {

@@ -6,6 +6,7 @@ export interface Lab {
     pool: string;
     subnet: string;
     ruleId: string;
+    interface?: string;
 }
 
 export interface LabStats {
@@ -19,10 +20,12 @@ export interface LabStats {
         disabled: boolean;
         comment: string;
         status: 'active' | 'blocked';
-        usageMB: number;
+        usageMB: number | null;
+        usageSource?: 'interface' | 'firewall';
     };
     devices: {
-        connected: number;
+        connected: number | null;
+        source?: 'arp' | 'dhcp' | 'unavailable';
         dhcpServer: string;
     };
     timestamp: string;

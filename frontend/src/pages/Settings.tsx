@@ -2,6 +2,7 @@ import { FogConnectionSettings } from '@/components/settings/FogConnectionSettin
 import { OrganizationSettings } from '@/components/settings/OrganizationSettings';
 import { PiholeSettings } from '@/components/settings/PiholeSettings';
 import { VeyonConnectionSettings } from '@/components/settings/VeyonConnectionSettings';
+import { UserSettings } from '@/components/settings/UserSettings';
 import { useSessionContext } from '@/context/SessionContext';
 import { Modal, Stack, Tabs, Text, Title } from '@mantine/core';
 import { FC, useState } from 'react';
@@ -35,6 +36,7 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
             <Stack pos='relative'>
                 <Tabs value={activeTab} onChange={setActiveTab} keepMounted keepMountedMode='display-none'>
                     <Tabs.List>
+                        <Tabs.Tab value='user'>User</Tabs.Tab>
                         <Tabs.Tab value='organization'>Organization</Tabs.Tab>
                         <Tabs.Tab value='firewall' disabled={!organization}>
                             Firewall
@@ -43,6 +45,9 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
                         <Tabs.Tab value='fog'>FOG</Tabs.Tab>
                         <Tabs.Tab value='veyon'>Veyon</Tabs.Tab>
                     </Tabs.List>
+                    <Tabs.Panel value='user' pt='md'>
+                        <UserSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'user'} />
+                    </Tabs.Panel>
                     <Tabs.Panel value='organization' pt='md'>
                         <OrganizationSettings enabled={opened && activeTab === 'organization'} />
                     </Tabs.Panel>

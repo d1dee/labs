@@ -26,7 +26,7 @@ const AppContent: FC = () => {
         return <LoadingOverlay visible>Loading...</LoadingOverlay>;
     }
 
-    if (!isAuthenticated) {
+    if (!isAuthenticated || new URLSearchParams(window.location.search).get('auth') === 'reset') {
         return <Login />;
     }
 

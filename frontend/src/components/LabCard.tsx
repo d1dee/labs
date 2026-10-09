@@ -161,10 +161,10 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
 
                     <div>
                         <Text size='sm' c='dimmed'>
-                            Connected Devices
+                            {stats.devices.source === 'dhcp' ? 'Bound DHCP Devices (estimate)' : 'Online Devices'}
                         </Text>
                         <Text fw={500} size='sm' ff='monospace'>
-                            {stats.devices.connected}
+                            {stats.devices.connected ?? 'Unavailable'}
                         </Text>
                     </div>
 
@@ -179,10 +179,10 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
 
                     <div>
                         <Text size='sm' c='dimmed'>
-                            Firewall Usage
+                            {lab.interface ? `Interface Usage (${lab.interface})` : 'Firewall Usage'}
                         </Text>
                         <Text fw={500} size='sm' ff='monospace'>
-                            {stats.firewall.usageMB.toFixed(2)} MB
+                            {stats.firewall.usageMB == null ? 'Unavailable' : `${stats.firewall.usageMB.toFixed(2)} MB`}
                         </Text>
                     </div>
 

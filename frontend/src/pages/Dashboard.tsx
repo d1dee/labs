@@ -9,7 +9,6 @@ import {
     Anchor,
     AppShell,
     Avatar,
-    Burger,
     Button,
     Container,
     Group,
@@ -19,7 +18,6 @@ import {
     ThemeIcon,
     Title,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
 import {
     IconExclamationCircle,
     IconDeviceDesktop,
@@ -34,6 +32,7 @@ import {
 import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
 import FirewallTab from '../components/FirewallTab';
+import classes from './Dashboard.module.css';
 
 const navTabs = [
     { value: 'firewall', label: 'Firewall', Icon: IconShieldCheck },
@@ -57,53 +56,18 @@ const Dashboard: FC<DashboardProps> = ({
     const { user, organization } = useSessionContext();
     const userName = user?.name || user?.username || 'Teacher';
     const [activeTab, setActiveTab] = useState<string | null>('firewall');
-    const [
-        mobileNavOpened,
-        { toggle: toggleMobileNav, close: closeMobileNav },
-    ] = useDisclosure(false);
-
-    const selectMobileTab = (value: string) => {
-        setActiveTab(value);
-        closeMobileNav();
-    };
-
-    const mobileNav = (
-        <Menu
-            shadow='md'
-            width={200}
-            position='bottom-start'
-            opened={mobileNavOpened}
-            onClose={closeMobileNav}
-        >
-            <Menu.Target>
-                <Burger
-                    opened={mobileNavOpened}
-                    onClick={toggleMobileNav}
-                    hiddenFrom='md'
-                    aria-label='Toggle navigation'
-                />
-            </Menu.Target>
-            <Menu.Dropdown>
-                {navTabs.map((tab) => (
-                    <Menu.Item
-                        key={tab.value}
-                        leftSection={<tab.Icon size={16} />}
-                        onClick={() => selectMobileTab(tab.value)}
-                    >
-                        {tab.label}
-                    </Menu.Item>
-                ))}
-            </Menu.Dropdown>
-        </Menu>
-    );
-
     const tabsList = (
-        <Tabs.List visibleFrom='md' grow>
+        <Tabs.List className={classes.tabsList} aria-label='Main navigation' grow>
             {navTabs.map((tab) => (
                 <Tabs.Tab
                     key={tab.value}
                     value={tab.value}
-                    leftSection={<tab.Icon size={16} />}
+                    leftSection={<tab.Icon size={16} aria-hidden='true' />}
+                    classNames={{
+                        tab: classes.tab,
+                        tabLabel: classes.tabLabel,
+                        tabSection: classes.tabSection,
+                    }}
                 >
                     {tab.label}
                 </Tabs.Tab>
@@ -115,7 +79,7 @@ const Dashboard: FC<DashboardProps> = ({
         <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
             <AppShell
                 header={{ height: 60 }}
-                footer={{ height: 48 }}
+                footer={{ height: { base: 'calc(72px + env(safe-area-inset-bottom, 0px))', md: 48 } }}
                 padding='md'
             >
                 <AppShell.Header>
@@ -127,7 +91,6 @@ const Dashboard: FC<DashboardProps> = ({
                             gap='md'
                             wrap='nowrap'
                         >
-                            {mobileNav}
                             <Group align='center' gap='sm' wrap='nowrap'>
                                 <ThemeIcon
                                     size={36}
@@ -251,8 +214,8 @@ const Dashboard: FC<DashboardProps> = ({
                     </Container>
                 </AppShell.Main>
 
-                <AppShell.Footer>
-                    <Container size='xl' h='100%'>
+                <AppShell.Footer visibleFrom='md'>
+                    <Container size='xl' h='100%' visibleFrom='md'>
                         <Text size='sm' c='dimmed' ta='center' lh='48px'>
                             Crafted with care:{' '}
                             <Anchor

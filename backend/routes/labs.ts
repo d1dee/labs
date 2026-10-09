@@ -16,7 +16,9 @@ import {
     mapLabs,
 } from '../firewall-config';
 import {
-    getDHCPLeases,
+    getInterfaceUsage,
+    getOnlineDevices,
+    parseByteCounter,
     getLabDetailsByRuleId,
     getRuleStatus,
     resolveSubnetAndDhcpServer,
@@ -62,32 +64,30 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
         }
     }
 
-    // Get DHCP leases to estimate connected devices
-    const leasesResponse = await getDHCPLeases(
-        organizationId,
-        dhcpServer,
-    );
+    // Prefer recent ARP reachability, with scoped bound leases as an estimate.
+    const [devices, totalBytes] = await Promise.all([
+        getOnlineDevices(organizationId, { interface: lab.interface, subnet, dhcpServer }),
+        lab.interface ? getInterfaceUsage(organizationId, lab.interface)
+            : Promise.resolve(ruleResponse.success ? parseByteCounter(ruleResponse.data?.bytes) : null),
+    ]);
 
     const stats = {
         lab: {
             id: lab.id,
             name: lab.name,
             subnet,
+            interface: lab.interface || '',
         },
         firewall: {
             ruleId: lab.ruleId,
             disabled: ruleDisabled,
             comment: ruleResponse.data?.comment,
             status: ruleDisabled ? 'blocked' : 'active',
-            usageMB: parseFloat(
-                (
-                    parseInt(ruleResponse.data?.bytes || '0', 10) /
-                    (1024 * 1024)
-                ).toFixed(2),
-            ),
+            usageMB: totalBytes === null ? null : Number((totalBytes / (1024 * 1024)).toFixed(2)),
+            usageSource: lab.interface ? 'interface' : 'firewall',
         },
         devices: {
-            connected: leasesResponse.data?.length,
+            ...devices,
             dhcpServer,
         },
         timestamp: new Date().toISOString(),
@@ -406,12 +406,11 @@ async function saveDataUsageSnapshot() {
             const labs = mapLabs(storedConfig.labs);
 
             for (const lab of labs) {
-                const ruleResponse = await getRuleStatus(
-                    storedConfig.organizationId,
-                    lab.ruleId,
-                );
-                if (ruleResponse.success && ruleResponse.data?.bytes) {
-                    const totalBytes = ruleResponse.data.bytes;
+                const ruleResponse = lab.interface ? null : await getRuleStatus(storedConfig.organizationId, lab.ruleId);
+                const totalBytes = lab.interface
+                    ? await getInterfaceUsage(storedConfig.organizationId, lab.interface)
+                    : ruleResponse?.success ? parseByteCounter(ruleResponse.data?.bytes) : null;
+                if (totalBytes !== null) {
                     const usageMB = Math.round(
                         Number(totalBytes) / (1024 * 1024),
                     );

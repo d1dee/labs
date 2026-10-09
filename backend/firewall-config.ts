@@ -8,6 +8,7 @@ export interface ConfigLab {
     ruleId: string;
     dhcpServer: string;
     subnet: string;
+    interface?: string;
 }
 
 export function mapLabs(labs: typeof lab.$inferSelect[]): ConfigLab[] {
@@ -17,6 +18,7 @@ export function mapLabs(labs: typeof lab.$inferSelect[]): ConfigLab[] {
         ruleId: l.ruleId ?? '',
         dhcpServer: l.dhcpServer ?? '',
         subnet: l.subnet ?? '',
+        interface: l.interface ?? '',
     }));
 }
 

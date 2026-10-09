@@ -350,6 +350,7 @@ export const lab = sqliteTable(
         name: text('name').notNull(),
         ruleId: text('ruleId'),
         dhcpServer: text('dhcpServer'),
+        interface: text('interface'),
         subnet: text('subnet'),
         description: text('description'),
         createdAt: integer('createdAt', { mode: 'timestamp' })

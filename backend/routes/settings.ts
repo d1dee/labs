@@ -1,8 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import z from 'zod';
 import { db } from '../../db/database';
 import {
     firewallConfig,
+    dataUsageHistory,
     fogConfig,
     lab,
     piholeConfig,
@@ -130,11 +131,13 @@ settingsRouter.post('/settings/labs', async (c) => {
             id: z.string().length(12).optional(),
             labs: z.array(
                 z.object({
+                    id: z.string().optional(),
                     firewallId: z.string(),
                     name: z.string(),
                     description: z.string().optional(),
                     subnet: z.string().optional(),
                     dhcpServer: z.string().optional(),
+                    interface: z.string().trim().max(128).optional(),
                 }),
             ),
         });
@@ -154,22 +157,36 @@ settingsRouter.post('/settings/labs', async (c) => {
             return c.json({ error: 'Configuration not found' }, 404);
         }
 
-        await db
-            .delete(lab)
-            .where(eq(lab.firewallConfigId, existingConfig.id));
-
-        if (body.labs.length > 0) {
-            await db.insert(lab).values(
-                body.labs.map((l) => ({
+        const existingIds = new Set(existingConfig.labs.map((item) => item.id));
+        const submittedIds = body.labs.flatMap((item) => item.id ? [item.id] : []);
+        if (submittedIds.some((id) => !existingIds.has(id)) || new Set(submittedIds).size !== submittedIds.length) {
+            return c.json({ error: 'Invalid or duplicate lab ID' }, 400);
+        }
+        db.transaction((tx) => {
+            const removedIds = [...existingIds].filter((id) => !submittedIds.includes(id));
+            if (removedIds.length) tx.delete(lab).where(inArray(lab.id, removedIds)).run();
+            for (const l of body.labs) {
+                const values = {
                     firewallConfigId: existingConfig.id,
                     name: l.name,
                     ruleId: l.firewallId,
                     description: l.description ?? null,
                     subnet: l.subnet ?? null,
                     dhcpServer: l.dhcpServer ?? null,
-                })),
-            );
-        }
+                    interface: l.interface || null,
+                    updatedAt: new Date(),
+                };
+                if (l.id) {
+                    const old = existingConfig.labs.find((item) => item.id === l.id)!;
+                    if ((old.interface || '') !== (l.interface || '') || (!l.interface && old.ruleId !== l.firewallId)) {
+                        tx.delete(dataUsageHistory).where(eq(dataUsageHistory.labId, l.id)).run();
+                    }
+                    tx.update(lab).set(values).where(eq(lab.id, l.id)).run();
+                } else {
+                    tx.insert(lab).values(values).run();
+                }
+            }
+        });
 
         const configWithLabs = await getFirewallConfigByIdWithLabs(
             existingConfig.id,
@@ -186,6 +203,7 @@ settingsRouter.post('/settings/labs', async (c) => {
                 : undefined,
         });
     } catch (error) {
+        if (error instanceof z.ZodError) return c.json({ error: 'Invalid lab configuration' }, 400);
         settingsLogger.error('Failed to save firewall settings: {error}', {
             error: errorProperty(error),
         });
