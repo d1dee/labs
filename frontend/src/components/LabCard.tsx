@@ -50,9 +50,10 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
             });
         } catch (err) {
             console.error(err);
+            onToggle(lab.id);
             notifications.show({
                 title: 'Error',
-                message: `Failed to toggle lab ${lab.name}`,
+                message: err instanceof Error ? err.message : `Failed to toggle lab ${lab.name}`,
                 color: 'red',
                 icon: <IconX size={16} />,
                 autoClose: 5000,
@@ -146,7 +147,10 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
                         </Text>
                     </div>
 
-                    <NetworkAccessTimeline history={history} />
+                    <NetworkAccessTimeline
+                        history={history}
+                        currentStatus={{ enabled: !isDisabled, timestamp: stats.timestamp }}
+                    />
                 </Stack>
 
                 <Button

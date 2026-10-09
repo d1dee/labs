@@ -16,6 +16,7 @@ import { useApiStream } from '@/api/useApiStream';
 import { PageHero } from '@/components/ui/PageHero';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
+import { TablePagination, useTablePagination } from '@/components/ui/TablePagination';
 import VeyonMonitoringWall from '@/components/veyon/VeyonMonitoringWall';
 import VeyonSyncModal from '@/components/veyon/VeyonSyncModal';
 import { useVeyonScreenshots } from '@/components/veyon/useVeyonScreenshots';
@@ -158,6 +159,9 @@ export default function VeyonManagementTab() {
         },
         [computers, deferredSearch, live, statusFilter, locationFilter, sessionFilter, sort],
     );
+    const pagination = useTablePagination(filteredComputers, JSON.stringify([
+        deferredSearch, statusFilter, locationFilter, sessionFilter, sort?.key, sort?.direction,
+    ]));
     const onlineCount = Object.values(live).filter((value) => value.state === 'online').length;
     const loggedInCount = Object.values(live).filter(
         (value) => value.state === 'online' && Boolean(value.information.user.login),
@@ -458,14 +462,14 @@ export default function VeyonManagementTab() {
                                     <Table.Tr>
                                         <Table.Th w={46}>
                                             <Checkbox
-                                                aria-label='Select all visible computers'
+                                                aria-label='Select all computers on this page'
                                                 checked={
-                                                    filteredComputers.length > 0 &&
-                                                    filteredComputers.every((computer) => selected.includes(computer.id))
+                                                    pagination.pageItems.length > 0 &&
+                                                    pagination.pageItems.every((computer) => selected.includes(computer.id))
                                                 }
                                                 indeterminate={
-                                                    filteredComputers.some((computer) => selected.includes(computer.id)) &&
-                                                    !filteredComputers.every((computer) => selected.includes(computer.id))
+                                                    pagination.pageItems.some((computer) => selected.includes(computer.id)) &&
+                                                    !pagination.pageItems.every((computer) => selected.includes(computer.id))
                                                 }
                                                 onChange={(event) => {
                                                     // Read currentTarget before
@@ -474,7 +478,7 @@ export default function VeyonManagementTab() {
                                                     // handler returns.
                                                     const checked =
                                                         event.currentTarget.checked;
-                                                    const visibleIds = filteredComputers.map((computer) => computer.id);
+                                                    const visibleIds = pagination.pageItems.map((computer) => computer.id);
                                                     setSelected((current) =>
                                                         checked
                                                             ? [...new Set([...current, ...visibleIds])]
@@ -498,7 +502,7 @@ export default function VeyonManagementTab() {
                                     {filteredComputers.length === 0 ? (
                                         <Table.Tr><Table.Td colSpan={6}><Text ta='center' c='dimmed'>No computers match the current filters.</Text></Table.Td></Table.Tr>
                                     ) : null}
-                                    {filteredComputers.map((computer) => (
+                                    {pagination.pageItems.map((computer) => (
                                         <ComputerRow
                                             key={computer.id}
                                             computer={computer}
@@ -528,6 +532,7 @@ export default function VeyonManagementTab() {
                             <Text size='sm' c='dimmed'>Add a target reachable by the Veyon proxy.</Text>
                         </Stack>
                     )}
+                    {!loading ? <TablePagination pagination={pagination} label='computers' /> : null}
                 </Stack>
             </Card>
 

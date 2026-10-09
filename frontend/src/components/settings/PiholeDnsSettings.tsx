@@ -5,6 +5,7 @@ import {
     type PiholeDnsElement,
 } from '@/api/pihole';
 import { useApiStream } from '@/api/useApiStream';
+import { TablePagination, useTablePagination } from '@/components/ui/TablePagination';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
@@ -164,6 +165,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
         };
         visibleItems.sort((a, b) => compareTableValues(sortValue(a.cells), sortValue(b.cells), sort.direction));
     }
+    const pagination = useTablePagination(visibleItems, JSON.stringify({ search, sort }));
 
     const refresh = useApiStream<PiholeDnsList>(enabled ? `/api/pihole/dns/${config.element}` : null,
         (data) => {
@@ -320,7 +322,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
                                     {visibleItems.length === 0 ? (
                                         <Table.Tr><Table.Td colSpan={config.columns.length + 1}><Text ta='center' c='dimmed'>No records match the current search.</Text></Table.Td></Table.Tr>
                                     ) : null}
-                                    {visibleItems.map(({ value, cells }) => {
+                                    {pagination.pageItems.map(({ value, cells }) => {
                                         return (
                                             <Table.Tr key={value}>
                                                 {cells.map((cell, idx) => (
@@ -371,6 +373,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
                         </ScrollArea>
                     </Table.ScrollContainer>
                 )}
+                {!loading && <TablePagination pagination={pagination} label='records' />}
             </Stack>
         </Card>
     );

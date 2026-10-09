@@ -310,10 +310,19 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
 
     const labId = c.req.param('labId');
 
+    let body: unknown;
     try {
-        const body = await c.req.json<{ enable: boolean }>();
-        const { enable } = body;
+        body = await c.req.json();
+    } catch {
+        return c.json({ error: 'Request body must be valid JSON' }, 400);
+    }
+    if (!body || typeof body !== 'object' || !('enable' in body) ||
+        typeof body.enable !== 'boolean') {
+        return c.json({ error: 'enable must be a boolean' }, 400);
+    }
+    const { enable } = body;
 
+    try {
         const storedConfig = await getFirewallConfigWithLabs(
             user.organizationId,
         );
@@ -337,7 +346,15 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
 
         // Demo mode: persist toggle in demo state instead of real systems
         if (isDemoUser(user)) {
-            await setDemoLabState(user.id, labId, enable);
+            try {
+                await setDemoLabState(user.id, labId, enable);
+            } catch {
+                return c.json({
+                    success: false,
+                    code: 'HISTORY_SAVE_FAILED',
+                    error: 'Demo lab access change could not be saved.',
+                }, 500);
+            }
             return c.json({
                 success: true,
                 lab: labId,
@@ -346,7 +363,6 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
             });
         }
 
-        // Toggle the rule (if enable=true, set disabled=false)
         const result = await toggleRuleDisabled(
             user.organizationId,
             lab.ruleId,
@@ -355,17 +371,36 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
         );
 
         if (!result.success) {
-            return c.json({ error: result.error }, 500);
+            return c.json({ success: false, error: result.error || 'The router could not apply the lab access change.' }, 500);
         }
 
-        // Save activation history
-        await db.insert(activationHistory).values({
-            id: crypto.randomUUID(),
-            labId,
-            enabled: enable,
-            triggeredBy: user.id,
-            createdAt: new Date(),
-        });
+        const verified = await getRuleStatus(user.organizationId, lab.ruleId);
+        if (!verified.success || verified.data?.action !== (enable ? 'accept' : 'drop') ||
+            ![false, 'false'].includes(verified.data?.disabled)) {
+            return c.json({
+                success: false,
+                code: 'ROUTER_STATE_UNVERIFIED',
+                error: 'The router change could not be verified. Lab access may have changed; refresh its status before retrying.',
+            }, 502);
+        }
+
+        try {
+            await db.insert(activationHistory).values({
+                id: crypto.randomUUID(),
+                labId,
+                enabled: enable,
+                triggeredBy: user.id,
+                createdAt: new Date(),
+            });
+        } catch {
+            return c.json({
+                success: false,
+                code: 'HISTORY_SAVE_FAILED',
+                routerApplied: true,
+                enabled: enable,
+                error: 'Lab access changed on the router, but its activation history could not be saved. Refresh its status before retrying.',
+            }, 500);
+        }
 
         return c.json({
             success: true,

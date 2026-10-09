@@ -4,13 +4,14 @@
     "description": "Teacher dashboard for managing lab firewall access via Mikrotik REST API",
     "type": "module",
     "scripts": {
-        "dev": "bun run --hot backend/server.ts",
+        "dev": "bun run --watch backend/server.ts",
         "build": "cd frontend && bun install && bun run build",
-        "build:all": "bun run build && tsc --noEmit",
+        "build:all": "bun run build && bun run typecheck",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p frontend/tsconfig.json && tsc --noEmit --composite false --incremental false -p frontend/tsconfig.node.json && tsc --noEmit -p landing/tsconfig.json",
         "serve": "bun run backend/server.ts",
         "start": "bun run build && bun run backend/server.ts",
-        "dev:landing": "bun run --hot src/landing/server.ts",
-        "serve:landing": "bun run src/landing/server.ts",
+        "dev:landing": "bun run --hot landing/server.ts",
+        "serve:landing": "bun run landing/server.ts",
         "dev:frontend": "cd frontend && bun run dev",
         "test": "bun test",
         "test:frontend": "cd frontend && bun run test"

@@ -6,6 +6,7 @@ import {
     updatePiholeDomain,
 } from '@/api/pihole';
 import { useApiStream } from '@/api/useApiStream';
+import { TablePagination, useTablePagination } from '@/components/ui/TablePagination';
 import {
     MobileFilterPanel,
     MobileFilterToggle,
@@ -218,6 +219,11 @@ const DomainBlockTab: FC = () => {
             ),
         );
 
+    const pagination = useTablePagination(
+        visibleDomains,
+        JSON.stringify([search, status, kind, sort.key, sort.direction]),
+    );
+
     return (
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
@@ -363,7 +369,7 @@ const DomainBlockTab: FC = () => {
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
-                                    {visibleDomains.map((d) => (
+                                    {pagination.pageItems.map((d) => (
                                         <Table.Tr
                                             key={`${d.type}-${d.kind}-${d.domain}`}
                                         >
@@ -463,6 +469,7 @@ const DomainBlockTab: FC = () => {
                         </ScrollArea>
                     </Table.ScrollContainer>
                 )}
+                {!loading && <TablePagination pagination={pagination} label='domains' />}
 
                 <Modal
                     opened={opened}

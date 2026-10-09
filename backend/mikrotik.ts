@@ -177,7 +177,7 @@ export async function toggleRuleDisabled(
     enabled: boolean,
     cidr: string,
 ): Promise<MikrotikResponse> {
-    await callMikrotik(
+    const result = await callMikrotik(
         organizationId,
         `/ip/firewall/filter/${ruleId}`,
         'PATCH',
@@ -186,6 +186,10 @@ export async function toggleRuleDisabled(
             action: enabled ? 'accept' : 'drop',
         },
     );
+
+    if (!result.success) {
+        return result;
+    }
 
     if (!enabled) {
         const prefix = cidr.replace(/0\/\d+$/, '');
