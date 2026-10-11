@@ -71,6 +71,9 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
     );
     const statusColor = isDisabled ? 'red' : 'green';
     const statusLabel = isDisabled ? 'Blocked' : 'Active';
+    const usageMB = stats.firewall.usageMB;
+    const usageUnit = usageMB != null && usageMB >= 1024 ** 2 ? 'TB' : usageMB != null && usageMB >= 1024 ? 'GB' : 'MB';
+    const usageDivisor = usageUnit === 'TB' ? 1024 ** 2 : usageUnit === 'GB' ? 1024 : 1;
 
     return (
         <Grid.Col span={{ base: 12, sm: 6, md: 4 }} h='100%'>
@@ -134,7 +137,7 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
                             {lab.interface ? `Interface Usage (${lab.interface})` : 'Firewall Usage'}
                         </Text>
                         <Text fw={500} size='sm' ff='monospace'>
-                            {stats.firewall.usageMB == null ? 'Unavailable' : `${stats.firewall.usageMB.toFixed(2)} MB`}
+                            {usageMB == null ? 'Unavailable' : `${(usageMB / usageDivisor).toFixed(2)} ${usageUnit}`}
                         </Text>
                     </div>
 
