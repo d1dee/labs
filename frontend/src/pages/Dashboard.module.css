@@ -1,3 +1,14 @@
+@media (min-width: 62em) {
+    .tabsList {
+        align-self: stretch;
+        margin-bottom: -1px;
+    }
+
+    .tabsList::before {
+        display: none;
+    }
+}
+
 @media (max-width: 61.99em) {
     .tabsList {
         position: fixed;

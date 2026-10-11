@@ -148,7 +148,7 @@ export default function NetworkAccessTimeline({
                             ? period.enabled === null
                                 ? 'No recorded activation time'
                                 : `Network ${period.enabled ? 'on' : 'off'}; transition time unavailable`
-                            : `${state} at ${dayjs(period.changedAt).format('DD MMM YYYY, HH:mm:ss')}`;
+                            : `${state} at ${dayjs(period.changedAt).format('HH:mm:ss')}`;
                     return (
                         <Tooltip
                             key={
