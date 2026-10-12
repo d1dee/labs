@@ -26,6 +26,7 @@ import {
     Card,
     Center,
     Checkbox,
+    Flex,
     Group,
     Loader,
     Modal,
@@ -228,39 +229,38 @@ const DomainBlockTab: FC = () => {
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
                 {error && <Alert color='red' title='Domains Request Failed'>{error}</Alert>}
-                <Group justify='space-between' align='flex-end'>
-                    <div>
+                <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                    <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                         <Title order={4}>Domain Blocking</Title>
                         <Text size='sm' c='dimmed'>
                             Manage which domains are blocked by FCD. Disabled
                             entries are temporarily inactive.
                         </Text>
-                    </div>
-                    <Group align='flex-end' w={{ base: '100%', sm: 'auto' }}>
-                        <Group
-                            wrap='nowrap'
-                            gap='xs'
-                            w={{ base: '100%', sm: 300 }}
-                        >
-                            <TextInput
-                                aria-label='Search blocked domains'
-                                placeholder='Search domains or comments...'
-                                value={search}
-                                flex={1}
-                                miw={0}
-                                onChange={(event) =>
-                                    setSearch(event.currentTarget.value)
-                                }
-                            />
-                            <MobileFilterToggle
-                                opened={filters.opened}
-                                onToggle={filters.toggle}
-                                controlsId={filters.controlsId}
-                                label='Toggle domain blocking filters'
-                            />
-                        </Group>
+                    </Stack>
+                    <Group
+                        wrap='nowrap'
+                        gap='xs'
+                        w={{ base: '100%', sm: 300 }}
+                        style={{ flexShrink: 0 }}
+                    >
+                        <TextInput
+                            aria-label='Search blocked domains'
+                            placeholder='Search domains or comments...'
+                            value={search}
+                            flex={1}
+                            miw={0}
+                            onChange={(event) =>
+                                setSearch(event.currentTarget.value)
+                            }
+                        />
+                        <MobileFilterToggle
+                            opened={filters.opened}
+                            onToggle={filters.toggle}
+                            controlsId={filters.controlsId}
+                            label='Toggle domain blocking filters'
+                        />
                     </Group>
-                </Group>
+                </Flex>
 
                 <MobileFilterPanel
                     opened={filters.opened}

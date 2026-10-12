@@ -14,6 +14,7 @@ import {
     Alert,
     Card,
     Center,
+    Flex,
     Group,
     Loader,
     Select,
@@ -262,14 +263,14 @@ const ActiveTasksTab: FC = () => {
             {error && <Alert color='red'>{error}</Alert>}
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
-                    <Group justify='space-between' align='flex-end'>
-                        <div>
+                    <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                        <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                             <Title order={4}>Task Details</Title>
                             <Text size='sm' c='dimmed'>
                                 View and manage currently running FOG tasks.
                             </Text>
-                        </div>
-                        <Group wrap='nowrap' w={{ base: '100%', sm: 300 }}>
+                        </Stack>
+                        <Group wrap='nowrap' w={{ base: '100%', sm: 300 }} style={{ flexShrink: 0 }}>
                         <TextInput
                             aria-label='Search'
                             placeholder='Search tasks...'
@@ -285,7 +286,7 @@ const ActiveTasksTab: FC = () => {
                             label='Toggle task filters'
                         />
                         </Group>
-                    </Group>
+                    </Flex>
                     <MobileFilterPanel id={controlsId} opened={opened}>
                     <Group grow preventGrowOverflow={false} align='flex-end'>
                         <Select

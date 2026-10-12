@@ -4,6 +4,7 @@ import {
     ActionIcon,
     Button,
     Box,
+    Flex,
     Group,
     Select,
     Stack,
@@ -179,14 +180,14 @@ export function HostFilterPanel({
 
     return (
             <Stack gap='md'>
-                <Group justify='space-between' align='flex-end'>
-                    <Box>
+                <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                    <Box flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                         <Title order={4}>Registered Hosts</Title>
                         <Text size='sm' c='dimmed'>
                             Select one or more hosts to perform actions.
                         </Text>
                     </Box>
-                    <Group align='flex-end' wrap='nowrap' w={{ base: '100%', sm: 300 }}>
+                    <Group align='flex-end' wrap='nowrap' w={{ base: '100%', sm: 300 }} style={{ flexShrink: 0 }}>
                     <TextInput
                         aria-label='Search'
                         placeholder='Search ID, name, MAC, image, manufacturer, model, IP, status...'
@@ -216,7 +217,7 @@ export function HostFilterPanel({
                         label='Toggle host filters'
                     />
                     </Group>
-                </Group>
+                </Flex>
                 <MobileFilterPanel id={controlsId} opened={opened}>
                     <Group grow preventGrowOverflow={false} align='flex-end'>
                         <Select

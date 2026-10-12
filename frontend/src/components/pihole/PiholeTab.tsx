@@ -24,6 +24,7 @@ import {
     Card,
     Center,
     Divider,
+    Flex,
     Group,
     Loader,
     ScrollArea,
@@ -287,8 +288,8 @@ const PiholeTab: FC = () => {
             <Divider variant='dotted' />
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
-                    <Group justify='space-between' align='flex-end'>
-                        <Stack gap={0} flex={1} miw={{ base: '100%', sm: 0 }}>
+                    <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                        <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                             <Title order={4}>Top Domains</Title>
                             <Text size='sm' c='dimmed'>
                                 Filters apply only to Top Domains, not the
@@ -320,7 +321,7 @@ const PiholeTab: FC = () => {
                                 label='Toggle top domain filters'
                             />
                         </Group>
-                    </Group>
+                    </Flex>
                     <MobileFilterPanel
                         opened={filters.opened}
                         id={filters.controlsId}

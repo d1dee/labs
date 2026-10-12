@@ -29,6 +29,7 @@ import {
     Button,
     Card,
     Checkbox,
+    Flex,
     Group,
     Image,
     Loader,
@@ -423,14 +424,14 @@ export default function VeyonManagementTab() {
 
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
-                    <Group justify='space-between' align='flex-end'>
-                        <div>
+                    <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                        <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                             <Title order={4}>Live computers</Title>
                             <Text size='sm' c='dimmed'>
                                 Statuses refresh automatically. Select targets, then apply controls from the command deck.
                             </Text>
-                        </div>
-                        <Group wrap='nowrap' gap='sm' w={{ base: '100%', sm: 300 }}>
+                        </Stack>
+                        <Group wrap='nowrap' gap='sm' w={{ base: '100%', sm: 300 }} style={{ flexShrink: 0 }}>
                             <TextInput
                                 aria-label='Search computers'
                                 placeholder='Search name, host, location, user...'
@@ -441,7 +442,7 @@ export default function VeyonManagementTab() {
                             <MobileFilterToggle opened={mobileFilters.opened} onToggle={mobileFilters.toggle}
                                 controlsId={mobileFilters.controlsId} label='Toggle computer filters' />
                         </Group>
-                    </Group>
+                    </Flex>
                     <MobileFilterPanel opened={mobileFilters.opened} id={mobileFilters.controlsId}>
                     <Group grow preventGrowOverflow={false} align='flex-end'>
                         <Select miw={{ base: '100%', sm: 180 }} label='Status' placeholder='All statuses' clearable

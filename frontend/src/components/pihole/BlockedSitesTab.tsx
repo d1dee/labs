@@ -10,6 +10,7 @@ import {
     Button,
     Card,
     Center,
+    Flex,
     Group,
     Loader,
     Modal,
@@ -127,14 +128,14 @@ const BlockedSitesTab: FC = () => {
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
                 {error && <Alert color='red' title='Queries Request Failed'>{error}</Alert>}
-                <Group justify='space-between' align='flex-end'>
-                    <div>
+                <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                    <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                         <Title order={4}>DNS Queries</Title>
                         <Text size='sm' c='dimmed'>
                             Allowed and blocked Pi-hole DNS queries stream every 10 seconds. Filters apply to the latest 200 fetched queries, not complete historical data. Dates use local time.
                         </Text>
-                    </div>
-                    <Group align='flex-end' w={{ base: '100%', sm: 'auto' }}>
+                    </Stack>
+                    <Group align='flex-end' justify='flex-end' w={{ base: '100%', sm: 300 }} style={{ flexShrink: 0 }}>
                         <Group wrap='nowrap' gap='xs' w={{ base: '100%', sm: 300 }}>
                             <TextInput aria-label='Search DNS queries' placeholder='Search domains...' value={search}
                                 flex={1} miw={0}
@@ -146,7 +147,7 @@ const BlockedSitesTab: FC = () => {
                             {visibleQueries.length} / {queries.length} queries
                         </Badge>
                     </Group>
-                </Group>
+                </Flex>
                 <MobileFilterPanel opened={filters.opened} id={filters.controlsId}>
                     <Group grow preventGrowOverflow={false} align='flex-end'>
                         <TextInput miw={{ base: '100%', sm: 180 }} label='Filter client' value={client} onChange={(event) => setClient(event.currentTarget.value)} />

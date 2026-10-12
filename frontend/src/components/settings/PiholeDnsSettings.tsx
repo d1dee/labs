@@ -14,6 +14,7 @@ import {
     Button,
     Card,
     Center,
+    Flex,
     Group,
     Loader,
     ScrollArea,
@@ -240,22 +241,20 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
     return (
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
-                <Group justify='space-between' align='flex-end'>
-                    <Stack gap={2}>
-                        <Group gap='xs'>
-                            {config.icon}
-                            <Title order={4}>{config.title}</Title>
+                <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
+                    <Stack gap={2} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
+                        <Group gap='xs' wrap='nowrap'>
+                            <Box style={{ flexShrink: 0 }}>{config.icon}</Box>
+                            <Title order={4} miw={0}>{config.title}</Title>
                         </Group>
                         <Text size='sm' c='dimmed'>
                             {config.description}
                         </Text>
                     </Stack>
-                    <Group w={{ base: '100%', sm: 'auto' }}>
-                        <TextInput aria-label={`Search ${config.title}`} placeholder='Search all fields...'
-                            value={search} onChange={(event) => setSearch(event.currentTarget.value)}
-                            w={{ base: '100%', sm: 300 }} />
-                    </Group>
-                </Group>
+                    <TextInput aria-label={`Search ${config.title}`} placeholder='Search all fields...'
+                        value={search} onChange={(event) => setSearch(event.currentTarget.value)}
+                        w={{ base: '100%', sm: 300 }} style={{ flexShrink: 0 }} />
+                </Flex>
 
                 <Group align='flex-end' grow preventGrowOverflow={false} wrap='wrap'>
                     {config.addFields.map((field) => (
