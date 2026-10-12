@@ -257,11 +257,12 @@ export class FogClient {
                 : '/fog/host';
             const res = await this.fogRequest('GET', path);
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const { count, items } = normalizeList<FogHost>(
-                await this.readJson(res),
-                'hosts',
-            );
+            const raw = await this.readJson(res);
+            const { count, items } = normalizeList<FogHost>(raw, 'hosts');
             const data: ListFogHosts = { count, hosts: withSynthesizedMacs(items) };
+            const envelope = raw as FogPageEnvelope | null;
+            if (count > items.length || envelope?.truncated === true ||
+                (typeof envelope?.nextUrl === 'string' && envelope.nextUrl)) data.truncated = true;
             return { success: true, data };
         } catch (err) {
             return { success: false, error: errorMessage(err) };

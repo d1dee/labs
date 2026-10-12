@@ -129,6 +129,7 @@ export interface FogHost {
 export type ListFogHosts = {
     count: number;
     hosts: FogHost[];
+    truncated?: boolean;
 };
 
 export type ListFogImages = {

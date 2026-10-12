@@ -1,4 +1,6 @@
 import type { FogHost, ListFogHosts } from '@/api/fog';
+import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
@@ -26,7 +28,7 @@ import {
     IconPlayerPlay,
     IconTrash,
 } from '@tabler/icons-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { HostFilterPanel, useHostFilters } from './HostFilterPanel';
 
 export interface HostTableProps {
@@ -47,6 +49,9 @@ export function HostTable({
     setSelectedIds,
     loading,
 }: HostTableProps) {
+    const identities = useDeviceIdentities();
+    const identitySearchText = useCallback((host: FogHost) =>
+        deviceIdentitySearchText(identities.lookup({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0] })), [identities.lookup]);
     const {
         filters,
         deferredFilters,
@@ -59,7 +64,7 @@ export function HostTable({
         statusOptions,
         manufacturerOptions,
         modelOptions,
-    } = useHostFilters(allHosts);
+    } = useHostFilters(allHosts, identitySearchText);
 
     const [page, setPage] = useState(1);
     const [sort, setSort] = useState<SortState<'id' | 'name' | 'image' | 'inventory' | 'status'> | null>(null);
@@ -123,6 +128,7 @@ export function HostTable({
     return (
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
+                    {identities.warning ? <Text size='xs' c='dimmed' role='status'>{identities.warning}</Text> : null}
                     <HostFilterPanel
                         filters={filters}
                         setFilter={setFilter}
@@ -305,6 +311,7 @@ export function HostTable({
                                                     >
                                                         {host.macs?.[0] || '-'}
                                                     </Text>
+                                                    <DeviceIdentityDetails identity={identities.lookup({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0] })} />
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='sm'>

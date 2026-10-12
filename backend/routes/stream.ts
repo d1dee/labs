@@ -19,7 +19,7 @@ const MAX_PATHS = 64;
 const MAX_ACTIVE = 6;
 const MAX_JSON_BYTES = 2 * 1_024 ** 2;
 const fixedPaths = new Set([
-    '/api/config', '/api/organizations', '/api/labs', '/api/labs/overview',
+    '/api/config', '/api/organizations', '/api/labs', '/api/labs/overview', '/api/devices',
     '/api/pihole/status', '/api/pihole/summary', '/api/pihole/top-domains',
     '/api/pihole/recent-blocked', '/api/pihole/queries', '/api/pihole/domains', '/api/pihole/blocking',
     '/api/fog/status', '/api/fog/system-info', '/api/fog/hosts', '/api/fog/images',

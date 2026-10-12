@@ -13,6 +13,7 @@ import {
     type VeyonInformation,
 } from '@/api/veyon';
 import { useApiStream } from '@/api/useApiStream';
+import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
 import { PageHero } from '@/components/ui/PageHero';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
@@ -113,6 +114,7 @@ function featureName(feature: VeyonFeature) {
 }
 
 export default function VeyonManagementTab() {
+    const identities = useDeviceIdentities();
     const [configured, setConfigured] = useState<boolean | null>(null);
     const [computers, setComputers] = useState<VeyonComputer[]>([]);
     const [live, setLive] = useState<Record<string, LiveState>>({});
@@ -133,6 +135,9 @@ export default function VeyonManagementTab() {
     const [syncOpened, setSyncOpened] = useState(false);
     const [wallOpened, setWallOpened] = useState(false);
     const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+    const locationFor = useCallback((computer: VeyonComputer) =>
+        identities.lookup({ veyonComputerId: computer.id, macAddress: computer.macAddress })?.lab?.name
+            ?? computer.location, [identities.lookup]);
 
     const filteredComputers = useMemo(
         () => {
@@ -141,14 +146,16 @@ export default function VeyonManagementTab() {
                 const user = state?.state === 'online' ? state.information.user : null;
                 const session = user ? (user.login ? 'logged-in' : 'no-user') : 'unavailable';
                 return (!statusFilter || (state?.state ?? 'offline') === statusFilter)
-                    && (!locationFilter || JSON.stringify(computer.location || '') === locationFilter)
+                    && (!locationFilter || JSON.stringify(locationFor(computer) || '') === locationFilter)
                     && (!sessionFilter || session === sessionFilter)
-                    && [computer.name, computer.host, computer.location ?? '', user?.login ?? '', user?.fullName ?? '']
+                    && [computer.name, computer.host, locationFor(computer) ?? '', user?.login ?? '', user?.fullName ?? '',
+                        deviceIdentitySearchText(identities.lookup({ veyonComputerId: computer.id, macAddress: computer.macAddress }))]
                         .join(' ').toLowerCase().includes(deferredSearch);
             });
             if (!sort) return rows;
             const value = (computer: VeyonComputer) => {
                 const state = live[computer.id];
+                if (sort.key === 'location') return locationFor(computer) || null;
                 if (sort.key === 'status') return state?.state ?? 'offline';
                 if (sort.key === 'user') {
                     return state?.state === 'online' && state.information.user.login
@@ -158,7 +165,7 @@ export default function VeyonManagementTab() {
             };
             return rows.sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
         },
-        [computers, deferredSearch, live, statusFilter, locationFilter, sessionFilter, sort],
+        [computers, deferredSearch, live, statusFilter, locationFilter, sessionFilter, sort, identities.lookup, locationFor],
     );
     const pagination = useTablePagination(filteredComputers, JSON.stringify([
         deferredSearch, statusFilter, locationFilter, sessionFilter, sort?.key, sort?.direction,
@@ -285,14 +292,29 @@ export default function VeyonManagementTab() {
         description: string,
         action: VeyonCommandAction,
         color = 'red',
+        targetIds?: string[],
     ) => {
         modals.openConfirmModal({
             title,
             children: <Text size='sm'>{description}</Text>,
             labels: { confirm: title, cancel: 'Cancel' },
             confirmProps: { color },
-            onConfirm: () => void runCommand(action),
+            onConfirm: () => void runCommand(action, {}, true, undefined, targetIds),
         });
+    };
+
+    const powerOn = async (targets: VeyonComputer[]) => {
+        const wakeTargets = targets.filter((computer) => computer.macAddress);
+        const results = await Promise.allSettled(
+            wakeTargets.map((computer) => powerOnVeyonComputer(computer.id)),
+        );
+        const failures = results.filter((result) => result.status === 'rejected').length;
+        notifications.show({
+            color: failures ? 'orange' : 'teal',
+            title: failures ? 'Wake-on-LAN partially sent' : 'Wake-on-LAN sent',
+            message: `${wakeTargets.length - failures} of ${wakeTargets.length} packets dispatched.`,
+        });
+        load();
     };
 
     const runCommandRef = useRef(runCommand);
@@ -353,6 +375,7 @@ export default function VeyonManagementTab() {
 
     return (
         <Stack gap='lg'>
+            {identities.warning ? <Text size='xs' c='dimmed' role='status'>{identities.warning}</Text> : null}
             {loadError ? <Alert color='yellow' title='Live status unavailable' icon={<IconAlertCircle size={18} />}>{loadError}</Alert> : null}
             <PageHero
                 eyebrow='Veyon operations desk'
@@ -405,21 +428,7 @@ export default function VeyonManagementTab() {
                 onCommand={runCommand}
                 onChanged={load}
                 onConfirm={confirmCommand}
-                onPowerOn={async () => {
-                    const targets = computers.filter(
-                        (computer) => selected.includes(computer.id) && computer.macAddress,
-                    );
-                    const results = await Promise.allSettled(
-                        targets.map((computer) => powerOnVeyonComputer(computer.id)),
-                    );
-                    const failures = results.filter((result) => result.status === 'rejected').length;
-                    notifications.show({
-                        color: failures ? 'orange' : 'teal',
-                        title: failures ? 'Wake-on-LAN partially sent' : 'Wake-on-LAN sent',
-                        message: `${targets.length - failures} of ${targets.length} packets dispatched.`,
-                    });
-                    load();
-                }}
+                onPowerOn={() => powerOn(computers.filter((computer) => selected.includes(computer.id)))}
             />
 
             <Card withBorder radius='lg' p='md'>
@@ -450,7 +459,7 @@ export default function VeyonManagementTab() {
                             data={[{ value: 'online', label: 'Online' }, { value: 'offline', label: 'Offline' }, { value: 'loading', label: 'Loading' }]} />
                         <Select miw={{ base: '100%', sm: 180 }} label='Location' placeholder='All locations' clearable searchable
                             value={locationFilter} onChange={setLocationFilter}
-                            data={[...new Set(computers.map((computer) => computer.location || ''))].sort().map((location) => ({ value: JSON.stringify(location), label: location || 'Unassigned' }))} />
+                            data={[...new Set(computers.map((computer) => locationFor(computer) || ''))].sort().map((location) => ({ value: JSON.stringify(location), label: location || 'Unassigned' }))} />
                         <Select miw={{ base: '100%', sm: 180 }} label='User session' placeholder='All sessions' clearable
                             value={sessionFilter} onChange={setSessionFilter}
                             data={[{ value: 'logged-in', label: 'Logged in' }, { value: 'no-user', label: 'No user (online)' }, { value: 'unavailable', label: 'Session unavailable' }]} />
@@ -507,6 +516,7 @@ export default function VeyonManagementTab() {
                                         <ComputerRow
                                             key={computer.id}
                                             computer={computer}
+                                            location={locationFor(computer)}
                                             live={live[computer.id]}
                                             selected={selected.includes(computer.id)}
                                             onSelected={(checked) =>
@@ -551,7 +561,16 @@ export default function VeyonManagementTab() {
                     void load();
                 }}
             />
-            <RemoteViewer computer={viewer} onClose={() => setViewer(null)} />
+            <RemoteViewer
+                computer={viewer}
+                onClose={() => setViewer(null)}
+                onCommand={(action, args, active, uid) => runCommand(action, args, active, uid, viewer ? [viewer.id] : [])}
+                onChanged={load}
+                onConfirm={(title, _description, action, color) => {
+                    if (viewer) confirmCommand(title, `Apply this action to ${viewer.name}? Unsaved work may be lost.`, action, color, [viewer.id]);
+                }}
+                onPowerOn={() => powerOn(viewer ? [viewer] : [])}
+            />
             <VeyonSyncModal
                 opened={syncOpened}
                 onClose={() => setSyncOpened(false)}
@@ -572,6 +591,7 @@ export default function VeyonManagementTab() {
 
 function ComputerRow({
     computer,
+    location,
     live,
     selected,
     onSelected,
@@ -580,6 +600,7 @@ function ComputerRow({
     onDelete,
 }: {
     computer: VeyonComputer;
+    location: string | null;
     live?: LiveState;
     selected: boolean;
     onSelected: (checked: boolean) => void;
@@ -624,7 +645,7 @@ function ComputerRow({
                     </div>
                 </Group>
             </Table.Td>
-            <Table.Td>{computer.location || <Text c='dimmed'>Unassigned</Text>}</Table.Td>
+            <Table.Td>{location || <Text c='dimmed'>Unassigned</Text>}</Table.Td>
             <Table.Td>
                 {information?.user.login ? (
                     <div>
@@ -678,6 +699,7 @@ function CommandDeck({
     onChanged,
     onConfirm,
     onPowerOn,
+    targetName,
 }: {
     selectedCount: number;
     selectedComputers: VeyonComputer[];
@@ -686,6 +708,7 @@ function CommandDeck({
     onChanged: () => void;
     onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
     onPowerOn: () => Promise<void>;
+    targetName?: string;
 }) {
     const [mode, setMode] = useState<string | null>(null);
     const [text, setText] = useState('');
@@ -719,7 +742,7 @@ function CommandDeck({
                     <Stack gap={0}>
                         <Title order={4}>Command deck</Title>
                         <Text size='sm' c='dimmed'>
-                            {selectedCount ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed` : 'Select computers to enable controls'}
+                            {targetName ? `Controls apply only to ${targetName}` : selectedCount ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed` : 'Select computers to enable controls'}
                         </Text>
                     </Stack>
                     <Badge variant='dot' color={selectedCount ? 'teal' : 'gray'}>{selectedCount} selected</Badge>
@@ -753,7 +776,7 @@ function CommandDeck({
                                     ['website', 'Website', IconBrowser],
                                     ['plugin', 'Plugin', IconBrandWindows],
                                     ['demo', 'Demo', IconScreenShare],
-                                ] as const).map(([value, label, Icon]) => (
+                                ] as const).filter(([value]) => !targetName || value !== 'demo').map(([value, label, Icon]) => (
                                     <Menu.Item key={value} leftSection={<Icon size={16} />}
                                         onClick={() => setMode(value)}>{label}</Menu.Item>
                                 ))}
@@ -1058,7 +1081,14 @@ function ComputerEditor({ state, onClose, onSaved }: { state: EditorState; onClo
     );
 }
 
-function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; onClose: () => void }) {
+function RemoteViewer({ computer, onClose, onCommand, onChanged, onConfirm, onPowerOn }: {
+    computer: VeyonComputer | null;
+    onClose: () => void;
+    onCommand: (action: VeyonCommandAction, args?: Record<string, unknown>, active?: boolean, uid?: string) => Promise<void>;
+    onChanged: () => void;
+    onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
+    onPowerOn: () => Promise<void>;
+}) {
     const [information, setInformation] = useState<VeyonInformation | null>(null);
     const [error, setError] = useState('');
     const [failedImage, setFailedImage] = useState<string | null>(null);
@@ -1115,6 +1145,17 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
                     </Group>
                 </Group>
                 {error ? <Alert color='red'>{error}</Alert> : null}
+                <CommandDeck
+                    key={computer.id}
+                    selectedCount={1}
+                    selectedComputers={[computer]}
+                    targetName={computer.name}
+                    features={information?.features ?? []}
+                    onCommand={onCommand}
+                    onChanged={onChanged}
+                    onConfirm={onConfirm}
+                    onPowerOn={onPowerOn}
+                />
                 <ScrollArea bg='dark.9' style={{ borderRadius: 'var(--mantine-radius-md)' }}>
                     <Image src={frame?.image ?? undefined} onError={() => setFailedImage(frame?.image ?? null)} alt={`Live screen of ${computer.name}`} fit='contain' mah='72vh' fallbackSrc='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="450"%3E%3Crect width="100%25" height="100%25" fill="%23252b32"/%3E/svg%3E' />
                 </ScrollArea>
@@ -1125,7 +1166,7 @@ function RemoteViewer({ computer, onClose }: { computer: VeyonComputer | null; o
                         <SessionField label='Uptime' value={`${Math.floor(information.session.sessionUptime / 60)} minutes`} />
                     </SimpleGrid>
                 ) : null}
-                <Text size='xs' c='dimmed'>The Veyon WebAPI exposes framebuffer images but no pointer or keyboard endpoint, so this view is read-only.</Text>
+                <Text size='xs' c='dimmed'>Use the command deck to control this computer. The screen preview is read-only because the Veyon WebAPI has no pointer or keyboard endpoint.</Text>
             </Stack>
         </Modal>
     );

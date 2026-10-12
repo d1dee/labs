@@ -1,5 +1,7 @@
 import { addPiholeDomain, type PiholeQueries } from '@/api/pihole';
 import { useApiStream } from '@/api/useApiStream';
+import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import { TablePagination, useTablePagination } from '@/components/ui/TablePagination';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
@@ -39,6 +41,7 @@ const statusColor = (status: string): string => {
 };
 
 const BlockedSitesTab: FC = () => {
+    const identities = useDeviceIdentities();
     const filters = useMobileTableFilters();
     const [queriesData, setQueriesData] = useState<PiholeQueries>();
     const [loading, setLoading] = useState(true);
@@ -101,14 +104,14 @@ const BlockedSitesTab: FC = () => {
     const incompleteRange = Boolean(dateRange[0] && !dateRange[1]);
     const visibleQueries = queries.filter((q) =>
         q.domain.toLowerCase().includes(search.trim().toLowerCase())
-        && `${q.client.name} ${q.client.ip}`.toLowerCase().includes(client.trim().toLowerCase())
+        && `${q.client.name} ${q.client.ip} ${deviceIdentitySearchText(identities.lookup({ address: q.client.ip, hostname: q.client.name }))}`.toLowerCase().includes(client.trim().toLowerCase())
         && (status === 'all' || q.status === status)
         && (outcome === 'all' || isBlockedStatus(q.status) === (outcome === 'blocked'))
         && (type === 'all' || q.type === type)
         && (incompleteRange || ((from === null || q.time >= from) && (until === null || q.time <= until))),
     ).sort((a, b) => compareTableValues(
-        sort.key === 'client' ? a.client.name || a.client.ip : a[sort.key],
-        sort.key === 'client' ? b.client.name || b.client.ip : b[sort.key], sort.direction,
+        sort.key === 'client' ? deviceIdentitySearchText(identities.lookup({ address: a.client.ip, hostname: a.client.name })) || a.client.name || a.client.ip : a[sort.key],
+        sort.key === 'client' ? deviceIdentitySearchText(identities.lookup({ address: b.client.ip, hostname: b.client.name })) || b.client.name || b.client.ip : b[sort.key], sort.direction,
     ));
 
     const pagination = useTablePagination(
@@ -128,6 +131,7 @@ const BlockedSitesTab: FC = () => {
         <Card withBorder radius='lg' p='md'>
             <Stack gap='md'>
                 {error && <Alert color='red' title='Queries Request Failed'>{error}</Alert>}
+                {identities.warning ? <Text size='xs' c='dimmed' role='status'>{identities.warning}</Text> : null}
                 <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
                     <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                         <Title order={4}>DNS Queries</Title>
@@ -200,9 +204,10 @@ const BlockedSitesTab: FC = () => {
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='sm'>
-                                                        {q.client.name ||
-                                                            q.client.ip}
+                                                        {q.client.name || q.client.ip}
                                                     </Text>
+                                                    {q.client.name ? <Text size='xs' c='dimmed'>{q.client.ip}</Text> : null}
+                                                    <DeviceIdentityDetails identity={identities.lookup({ address: q.client.ip, hostname: q.client.name })} />
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Badge

@@ -69,7 +69,7 @@ export interface UseHostFiltersResult {
     modelOptions: { value: string; label: string }[];
 }
 
-export function useHostFilters(allHosts: FogHost[]): UseHostFiltersResult {
+export function useHostFilters(allHosts: FogHost[], identitySearchText?: (host: FogHost) => string): UseHostFiltersResult {
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
     const deferredFilters = useDeferredValue(filters);
     const isPending = filters !== deferredFilters;
@@ -100,7 +100,8 @@ export function useHostFilters(allHosts: FogHost[]): UseHostFiltersResult {
         return allHosts.filter((host) => {
             if (
                 deferredFilters.search &&
-                !matchesSearch(host, deferredFilters.search)
+                !matchesSearch(host, deferredFilters.search) &&
+                !identitySearchText?.(host).toLowerCase().includes(deferredFilters.search.trim().toLowerCase())
             )
                 return false;
             if (
@@ -125,7 +126,7 @@ export function useHostFilters(allHosts: FogHost[]): UseHostFiltersResult {
                 return false;
             return true;
         });
-    }, [allHosts, deferredFilters]);
+    }, [allHosts, deferredFilters, identitySearchText]);
 
     const hasActiveFilters = Object.values(filters).some(
         (v) => v !== null && v !== '',

@@ -8,6 +8,7 @@ import { db } from '../db/database';
 import { organization } from '../db/schema';
 import { auth } from './auth';
 import { configRouter } from './routes/config';
+import { devicesRouter, invalidateDeviceDirectoryAfterMutation } from './routes/devices';
 import type { AppEnv } from './routes/context';
 import { fogRouter } from './routes/fog';
 import { labsRouter, startDataUsageSnapshots } from './routes/labs';
@@ -136,9 +137,11 @@ app.on(['POST', 'GET'], '/api/auth/*', (c) => {
 });
 
 // Mount API route groups
+app.use('/api/*', invalidateDeviceDirectoryAfterMutation);
 app.route('/api', configRouter);
 app.route('/api', organizationsRouter);
 app.route('/api', labsRouter);
+app.route('/api', devicesRouter);
 app.route('/api', piholeRouter);
 app.route('/api', fogRouter);
 app.route('/api', settingsRouter);

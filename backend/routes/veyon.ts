@@ -12,6 +12,7 @@ import {
     VeyonApiError,
 } from '../veyon';
 import { veyonPoller } from '../veyon-poller';
+import { resolveComputerLocations } from '../veyon-locations';
 import { createVeyonStreamWriter } from '../veyon-stream';
 import { buildVeyonSyncPlan, type VeyonSyncPlan } from '../veyon-sync';
 import { errorProperty, getLogger } from '../logger';
@@ -399,7 +400,7 @@ veyonRouter.get('/veyon/computers', async (c) => {
         where: eq(veyonComputer.organizationId, auth.user.organizationId),
         orderBy: (computer, { asc }) => [asc(computer.location), asc(computer.name)],
     });
-    return c.json({ computers });
+    return c.json({ computers: await resolveComputerLocations(auth.user.organizationId, computers) });
 });
 
 veyonRouter.post('/veyon/computers', async (c) => {
@@ -518,6 +519,8 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                 if (!signal.aborted) await write('heartbeat', {});
             }
         })().catch(abort);
+        let directorySignature = '';
+        let resolvedDirectory: typeof veyonComputer.$inferSelect[] = [];
         try {
             while (!signal.aborted) {
                 try {
@@ -525,25 +528,40 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                         where: eq(veyonComputer.organizationId, auth.user.organizationId),
                         orderBy: (computer, { asc }) => [asc(computer.location), asc(computer.name)],
                     }));
-                    await write('directory', { computers });
+                    const signature = JSON.stringify(computers);
+                    const displayedComputers = signature === directorySignature ? resolvedDirectory : computers;
+                    await write('directory', { computers: displayedComputers });
                     signal.throwIfAborted();
-                    const client = await pending(getVeyonClient(auth.user.organizationId, auth.user.id));
-                    let next = 0;
-                    await Promise.all(Array.from({ length: Math.min(6, computers.length) }, async () => {
-                        while (!signal.aborted) {
-                            const computer = computers[next++];
-                            if (!computer) return;
-                            let data;
-                            try {
-                                const information = await pending(client.information(computer.host, signal));
-                                data = { computerId: computer.id, state: 'online', information };
-                            } catch (error) {
-                                if (signal.aborted) return;
-                                data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
-                            }
-                            await write('information', data);
+                    // DHCP enrichment must not delay the initial directory or Veyon checks.
+                    const locations = pending(resolveComputerLocations(auth.user.organizationId, computers)).then(async (resolved) => {
+                        if (signal.aborted) return;
+                        directorySignature = signature;
+                        resolvedDirectory = resolved;
+                        if (resolved.some((computer, index) => computer.location !== displayedComputers[index]?.location)) {
+                            await write('directory', { computers: resolved });
                         }
-                    }));
+                    }).catch(abort);
+                    try {
+                        const client = await pending(getVeyonClient(auth.user.organizationId, auth.user.id));
+                        let next = 0;
+                        await Promise.all(Array.from({ length: Math.min(6, computers.length) }, async () => {
+                            while (!signal.aborted) {
+                                const computer = computers[next++];
+                                if (!computer) return;
+                                let data;
+                                try {
+                                    const information = await pending(client.information(computer.host, signal));
+                                    data = { computerId: computer.id, state: 'online', information };
+                                } catch (error) {
+                                    if (signal.aborted) return;
+                                    data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
+                                }
+                                await write('information', data);
+                            }
+                        }));
+                    } finally {
+                        await locations;
+                    }
                 } catch (error) {
                     if (signal.aborted) break;
                     await write('unavailable', { error: sanitizedError(error) });
