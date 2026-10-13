@@ -16,6 +16,7 @@ import {
 } from '../firewall-config';
 import { getFogConfigForOrg, isBearerToken, testFogConnection } from '../fog';
 import { errorProperty, getLogger } from '../logger';
+import { isDemoUser } from '../demo';
 import { testMikrotikConnection } from '../mikrotik';
 import {
     assertValidPrivateKeyPem,
@@ -32,6 +33,13 @@ import { createApp } from './context';
 import { veyonPoller } from '../veyon-poller';
 
 export const settingsRouter = createApp();
+
+settingsRouter.use('/settings/*', async (c, next) => {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && isDemoUser(c.get('user'))) {
+        return c.json({ error: 'Demo users cannot change persistent settings', code: 'DEMO_READ_ONLY' }, 403);
+    }
+    await next();
+});
 
 const settingsLogger = getLogger(['labs', 'settings']);
 
@@ -54,6 +62,13 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
         });
 
         const body = schema.parse(await c.req.json());
+
+        if (body.id) {
+            const existing = await db.query.firewallConfig.findFirst({ where: eq(firewallConfig.id, body.id) });
+            if (existing && existing.organizationId !== user.organizationId) {
+                return c.json({ error: 'Configuration not found' }, 404);
+            }
+        }
 
         // Verify connection to MikroTik with the provided credentials before saving
         const connectionTest = await testMikrotikConnection({
@@ -84,6 +99,7 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
             })
             .onConflictDoUpdate({
                 target: firewallConfig.id,
+                setWhere: eq(firewallConfig.organizationId, user.organizationId),
                 set: {
                     mikrotikBaseUrl: body.mikrotikBaseUrl,
                     mikrotikUsername: body.mikrotikUsername,
@@ -94,9 +110,8 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
             .returning();
 
         const saved = res[0];
-        const configWithLabs = saved
-            ? await getFirewallConfigByIdWithLabs(saved.id)
-            : undefined;
+        if (!saved) return c.json({ error: 'Configuration not found' }, 404);
+        const configWithLabs = await getFirewallConfigByIdWithLabs(saved.id);
 
         return c.json({
             success: true,
@@ -104,11 +119,13 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
             data: configWithLabs
                 ? {
                       ...configWithLabs,
+                      mikrotikPassword: '*'.repeat(configWithLabs.mikrotikPassword.length),
                       labs: mapLabs(configWithLabs.labs),
                   }
                 : undefined,
         });
     } catch (error) {
+        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid firewall configuration' }, 400);
         settingsLogger.error('Failed to save firewall settings: {error}', {
             error: errorProperty(error),
         });
@@ -198,12 +215,13 @@ settingsRouter.post('/settings/labs', async (c) => {
             data: configWithLabs
                 ? {
                       ...configWithLabs,
+                      mikrotikPassword: '*'.repeat(configWithLabs.mikrotikPassword.length),
                       labs: mapLabs(configWithLabs.labs),
                   }
                 : undefined,
         });
     } catch (error) {
-        if (error instanceof z.ZodError) return c.json({ error: 'Invalid lab configuration' }, 400);
+        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid lab configuration' }, 400);
         settingsLogger.error('Failed to save firewall settings: {error}', {
             error: errorProperty(error),
         });
@@ -330,6 +348,13 @@ settingsRouter.post('/settings/pihole', async (c) => {
 
         const body = schema.parse(await c.req.json());
 
+        if (body.id) {
+            const existing = await db.query.piholeConfig.findFirst({ where: eq(piholeConfig.id, body.id) });
+            if (existing && existing.organizationId !== user.organizationId) {
+                return c.json({ error: 'Configuration not found' }, 404);
+            }
+        }
+
         // Verify connection to Pi-hole with the provided credentials before saving
         const connectionTest = await testPiholeConnection({
             url: body.url,
@@ -361,6 +386,7 @@ settingsRouter.post('/settings/pihole', async (c) => {
             })
             .onConflictDoUpdate({
                 target: piholeConfig.id,
+                setWhere: eq(piholeConfig.organizationId, user.organizationId),
                 set: {
                     url: body.url,
                     password: body.password,
@@ -369,6 +395,8 @@ settingsRouter.post('/settings/pihole', async (c) => {
                 },
             })
             .returning();
+
+        if (!res[0]) return c.json({ error: 'Configuration not found' }, 404);
 
         return c.json({
             success: true,
@@ -383,6 +411,7 @@ settingsRouter.post('/settings/pihole', async (c) => {
             },
         });
     } catch (error) {
+        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid Pi-hole configuration' }, 400);
         settingsLogger.error('Failed to save Pi-hole settings: {error}', {
             error: errorProperty(error),
         });
@@ -463,6 +492,13 @@ settingsRouter.post('/settings/fog', async (c) => {
 
         const body = schema.parse(await c.req.json());
 
+        if (body.id) {
+            const existing = await db.query.fogConfig.findFirst({ where: eq(fogConfig.id, body.id) });
+            if (existing && existing.organizationId !== user.organizationId) {
+                return c.json({ error: 'Configuration not found' }, 404);
+            }
+        }
+
         if (!isBearerToken(body.apiToken) && !body.userToken) {
             return c.json(
                 {
@@ -493,7 +529,7 @@ settingsRouter.post('/settings/fog', async (c) => {
 
         const existing = await getFogConfigForOrg(user.organizationId);
 
-        await db
+        const res = await db
             .insert(fogConfig)
             .values({
                 id: body.id ?? existing?.id,
@@ -505,13 +541,17 @@ settingsRouter.post('/settings/fog', async (c) => {
             })
             .onConflictDoUpdate({
                 target: fogConfig.id,
+                setWhere: eq(fogConfig.organizationId, user.organizationId),
                 set: {
                     url: body.url,
                     apiToken: body.apiToken,
                     userToken: body.userToken,
                     updatedAt: new Date(),
                 },
-            });
+            })
+            .returning();
+
+        if (!res[0]) return c.json({ error: 'Configuration not found' }, 404);
 
         return c.json({
             success: true,
@@ -528,6 +568,7 @@ settingsRouter.post('/settings/fog', async (c) => {
             },
         });
     } catch (error) {
+        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid FOG configuration' }, 400);
         settingsLogger.error('Failed to save FOG settings: {error}', {
             error: errorProperty(error),
         });

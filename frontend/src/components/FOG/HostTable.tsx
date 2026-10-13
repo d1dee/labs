@@ -1,6 +1,5 @@
 import type { FogHost, ListFogHosts } from '@/api/fog';
 import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
-import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
@@ -311,7 +310,6 @@ export function HostTable({
                                                     >
                                                         {host.macs?.[0] || '-'}
                                                     </Text>
-                                                    <DeviceIdentityDetails identity={identities.lookup({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0] })} />
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Text size='sm'>

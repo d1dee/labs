@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/database';
 import { demoState } from '../db/schema';
 
@@ -26,7 +26,8 @@ export async function getDemoState(
         .select()
         .from(demoState)
         .where(and(...conditions))
-        .orderBy(desc(demoState.createdAt));
+        // Timestamp columns store whole seconds; rowid preserves insertion order for ties.
+        .orderBy(desc(demoState.createdAt), desc(sql`${demoState}.rowid`));
 }
 
 export async function getLatestDemoState(
@@ -228,7 +229,7 @@ export function applyDemoPiholeDomains(
     realDomains: { domains: any[]; took: number; processed?: any },
     demoOverrides: Awaited<ReturnType<typeof getDemoPiholeDomainOverrides>>,
 ): { domains: any[]; took: number; processed?: any } {
-    let domains = [...realDomains.domains];
+    let domains = realDomains.domains.map((domain) => ({ ...domain }));
 
     // Apply deletions
     for (const del of demoOverrides.deletions) {
@@ -303,21 +304,23 @@ export async function getDemoFogHostOverrides(userId: string): Promise<{
     const updates: Array<Record<string, unknown> & { id: number }> = [];
     const deletions: number[] = [];
 
-    const processedIds = new Set<string>();
-
-    for (const state of states) {
-        const id = state.resourceId!;
-        if (processedIds.has(id)) continue;
-        processedIds.add(id);
-
+    const effective = new Map<number, { action: string; data: Record<string, unknown> }>();
+    // Replay the event history; a newer patch must not discard an earlier creation.
+    for (const state of states.slice().reverse()) {
+        const id = Number(state.resourceId);
         const data = JSON.parse(state.data);
-        if (state.action === 'create') {
-            creations.push({ id: Number(id), ...data });
-        } else if (state.action === 'update') {
-            updates.push({ id: Number(id), ...data });
-        } else if (state.action === 'delete') {
-            deletions.push(Number(id));
+        const previous = effective.get(id);
+        if (state.action === 'update') {
+            if (previous?.action === 'delete') continue;
+            effective.set(id, { action: previous?.action === 'create' ? 'create' : 'update', data: { ...previous?.data, ...data } });
+        } else if (state.action === 'create' || state.action === 'delete') {
+            effective.set(id, { action: state.action, data });
         }
+    }
+    for (const [id, state] of effective) {
+        if (state.action === 'create') creations.push({ ...state.data, id });
+        else if (state.action === 'update') updates.push({ ...state.data, id });
+        else deletions.push(id);
     }
 
     return { creations, updates, deletions };

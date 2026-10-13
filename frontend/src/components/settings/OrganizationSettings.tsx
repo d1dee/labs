@@ -79,10 +79,9 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
             z.object({
                 joinKey: z
                     .string()
-                    .length(
-                        6,
-                        'Organization join Key must be 6 character long',
-                    ),
+                    .trim()
+                    .min(1, 'Organization join key is required')
+                    .max(128, 'Organization join key is too long'),
             }),
         ),
     });
@@ -141,7 +140,7 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
         try {
             const { data, error } = await betterFetch<{
                 organization: Organization;
-            }>(`/api/organizations/${values.joinKey}/join`, {
+            }>(`/api/organizations/${encodeURIComponent(values.joinKey.trim())}/join`, {
                 method: 'POST',
             });
 
@@ -276,7 +275,7 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
                                     Join existing
                                 </Title>
                                 <Text size='sm' color='dimmed'>
-                                    Enter a 6-character organization ID to join
+                                    Enter your organization join key to join
                                     an existing organization.
                                 </Text>
                                 <Group gap='xs'>
@@ -329,10 +328,6 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
                                         )()
                                     }
                                     loading={loading}
-                                    disabled={
-                                        !createForm.values.name.trim() ||
-                                        !createForm.values.email.trim()
-                                    }
                                 >
                                     Create
                                 </Button>

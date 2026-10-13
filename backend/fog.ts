@@ -115,7 +115,7 @@ function normalizeList<T>(raw: unknown, legacyKey: string): { count: number; ite
     } else if (Array.isArray(envelope[legacyKey])) {
         items = envelope[legacyKey] as T[];
     } else {
-        items = [];
+        throw new Error('FOG returned an invalid list response');
     }
     const count =
         typeof envelope.recordsTotal === 'number'
@@ -428,8 +428,8 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('POST', `/fog/host/${hostId}/task`, {
-                taskTypeID: taskTypeId,
                 ...options,
+                taskTypeID: taskTypeId,
             });
             if (!res.ok) return { success: false, error: await this.errorFrom(res) };
             // FOG 1.6 answers queued task creation with an empty body (older

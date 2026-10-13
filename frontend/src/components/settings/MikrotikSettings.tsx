@@ -59,11 +59,13 @@ export function MikroTikSettings({
             });
 
             setFirewallConfig(data.data);
-            form.resetDirty({
+            const savedValues = {
                 mikrotikBaseUrl: values.mikrotikBaseUrl,
                 mikrotikUsername: values.mikrotikUsername,
-                mikrotikPassword: values.mikrotikPassword,
-            });
+                mikrotikPassword: '',
+            };
+            form.setValues(savedValues);
+            form.resetDirty(savedValues);
             onSaved();
         } catch (err) {
             notifications.show({
@@ -73,7 +75,6 @@ export function MikroTikSettings({
                 icon: <IconX size={16} />,
             });
             console.error(err);
-            throw err;
         }
     };
 
@@ -81,7 +82,7 @@ export function MikroTikSettings({
         initialValues: {
             mikrotikBaseUrl: config?.mikrotikBaseUrl ?? '',
             mikrotikUsername: config?.mikrotikUsername ?? '',
-            mikrotikPassword: config?.mikrotikPassword ?? '',
+            mikrotikPassword: '',
         },
         validate: schemaResolver(mikrotikSchema),
         transformValues: (values) => ({
@@ -95,7 +96,7 @@ export function MikroTikSettings({
             const values = {
                 mikrotikBaseUrl: config.mikrotikBaseUrl ?? '',
                 mikrotikUsername: config.mikrotikUsername ?? '',
-                mikrotikPassword: config.mikrotikPassword ?? '',
+                mikrotikPassword: '',
             };
             form.setValues(values);
             form.resetDirty(values);
@@ -103,15 +104,11 @@ export function MikroTikSettings({
     }, [config]);
 
     async function submit(values: z.infer<typeof mikrotikSchema>) {
-        if (saveConfig) {
-            setSaving(true);
-            try {
-                await saveConfig(values);
-            } finally {
-                setSaving(false);
-            }
-        } else {
-            console.log('Saving MikroTik config:', values);
+        setSaving(true);
+        try {
+            await saveConfig(values);
+        } finally {
+            setSaving(false);
         }
     }
 
@@ -140,6 +137,7 @@ export function MikroTikSettings({
                         type='password'
                         {...form.getInputProps('mikrotikPassword')}
                         placeholder='Enter password'
+                        description='Re-enter the router password to test and save changes.'
                         required
                     />
 

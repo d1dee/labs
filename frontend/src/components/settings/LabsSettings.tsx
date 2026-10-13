@@ -425,15 +425,8 @@ export function LabsSettings({
                                         {isExisting ? (
                                             <Button
                                                 title='Done'
-                                                onClick={() =>
-                                                    setEditingKeys((prev) => {
-                                                        const next = new Set(
-                                                            prev,
-                                                        );
-                                                        next.delete(lab.key);
-                                                        return next;
-                                                    })
-                                                }
+                                                type='submit'
+                                                loading={saving}
                                                 leftSection={
                                                     <IconCheck size={16} />
                                                 }

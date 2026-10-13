@@ -21,6 +21,7 @@ export function buildNetworkPeriods(
         enabled: boolean;
         changedAt: number | null;
     }[] = history
+        .slice().reverse()
         .map((entry) => {
             const time = Date.parse(entry.createdAt);
             return { time, enabled: entry.enabled, changedAt: time };
@@ -148,7 +149,10 @@ export default function NetworkAccessTimeline({
                             ? period.enabled === null
                                 ? 'No recorded activation time'
                                 : `Network ${period.enabled ? 'on' : 'off'}; transition time unavailable`
-                            : `${state} at ${dayjs(period.changedAt).format('HH:mm:ss')}`;
+                            : history.some((entry) => entry.source === 'external' &&
+                                Date.parse(entry.createdAt) === period.changedAt && entry.enabled === period.enabled)
+                              ? `Network ${period.enabled ? 'on' : 'off'} detected externally at ${dayjs(period.changedAt).format('HH:mm:ss')}; actual transition time unavailable`
+                              : `${state} at ${dayjs(period.changedAt).format('HH:mm:ss')}`;
                     return (
                         <Tooltip
                             key={

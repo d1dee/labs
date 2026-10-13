@@ -35,7 +35,8 @@ export interface ActivationHistoryEntry {
     id: string;
     labId: string;
     enabled: boolean;
-    triggeredBy: string;
+    triggeredBy: string | null;
+    source?: 'app' | 'external';
     createdAt: string;
 }
 

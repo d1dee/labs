@@ -445,6 +445,7 @@ class PollingWorker {
     private readonly controller = new AbortController();
     private cycleController = new AbortController();
     private refreshPending = false;
+    private framebufferRetryPending = false;
     private client: VeyonFramebufferClient | undefined;
     private clientHost: string | undefined;
     readonly finished: Promise<void>;
@@ -768,6 +769,7 @@ class PollingWorker {
     }
 
     private onSuccess(image: ArrayBuffer, mimeType: string) {
+        this.framebufferRetryPending = false;
         const lastUpdated = Date.now();
         this.state = {
             image,
@@ -788,6 +790,13 @@ class PollingWorker {
     }
 
     private onFailure(error: unknown, durationMs: number) {
+        // A newly opened Veyon connection may not have its first frame yet.
+        // Retry once through normal budget admission before reporting failure.
+        if (error instanceof VeyonApiError && error.upstreamCode === 10 && !this.framebufferRetryPending) {
+            this.framebufferRetryPending = true;
+            return;
+        }
+        this.framebufferRetryPending = false;
         const summary = summarizeError(error);
         this.state = {
             ...this.state,
@@ -842,6 +851,7 @@ class PollingWorker {
     // success: pollIntervalMs; failure #n: min(interval * 2^n, maxBackoff).
     // Jitter (0..jitterMs) spreads machines so they never poll in lockstep.
     private nextDelayMs(): number {
+        if (this.framebufferRetryPending) return 700;
         const failures = this.state.consecutiveFailures;
         const base =
             failures === 0

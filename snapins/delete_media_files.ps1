@@ -112,10 +112,11 @@ function ConvertFrom-DurationString {
     if ([string]::IsNullOrWhiteSpace($Duration)) { return $null }
 
     $pattern = '(\d+(?:\.\d+)?)\s*([wWdDhHmMsS])'
-    $matches = [regex]::Matches($Duration, $pattern)
-    if ($matches.Count -eq 0) {
+    $Duration = $Duration.Trim()
+    if (-not [regex]::IsMatch($Duration, '\A(?:' + $pattern + '\s*)+\z')) {
         throw "Invalid duration format: '$Duration'. Expected e.g. '5H', '30M', '2D', '1W', or '1D2H30M'."
     }
+    $matches = [regex]::Matches($Duration, $pattern)
 
     $total = [TimeSpan]::Zero
     foreach ($m in $matches) {

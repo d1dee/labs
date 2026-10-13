@@ -12,7 +12,8 @@ sqlite.run(`
     INSERT INTO user VALUES ('teacher');
     CREATE TABLE activationHistory (
         id TEXT PRIMARY KEY NOT NULL, labId TEXT NOT NULL,
-        enabled INTEGER NOT NULL, triggeredBy TEXT NOT NULL REFERENCES user(id),
+        enabled INTEGER NOT NULL, triggeredBy TEXT REFERENCES user(id),
+        source TEXT NOT NULL DEFAULT 'app',
         createdAt INTEGER NOT NULL
     );
     CREATE TABLE demoState (
@@ -36,6 +37,8 @@ mock.module('./firewall-config', () => ({
 
 const calls: Array<{ url: string; method: string; body: unknown }> = [];
 let action = 'drop';
+let unavailable = false;
+let ruleDisabled = false;
 globalThis.fetch = (async (input, options) => {
     const url = String(input);
     const method = options?.method ?? 'GET';
@@ -49,9 +52,10 @@ globalThis.fetch = (async (input, options) => {
         return Response.json({ action, disabled: 'false' });
     }
     if (url.endsWith('/ip/firewall/filter/*1')) {
-        if (scenario === 'verification-failure') return Response.json({ message: 'Unavailable' }, { status: 503 });
-        return Response.json({ action, disabled: scenario === 'disabled-rule' ? 'true' : 'false' });
+        if (scenario === 'verification-failure' || unavailable) return Response.json({ message: 'Unavailable' }, { status: 503 });
+        return Response.json({ action, disabled: scenario === 'disabled-rule' || ruleDisabled ? 'true' : 'false' });
     }
+    if (url.endsWith('/ip/arp')) return Response.json([]);
     if (url.endsWith('/ip/firewall/connection')) {
         return Response.json([{ '.id': '*c', 'src-address': '192.0.2.10:443' }, { '.id': '*d', 'src-address': '198.51.100.10:443' }]);
     }
@@ -80,7 +84,52 @@ const assertEmpty = () => {
 };
 
 try {
-    if (scenario.startsWith('helper-patch-failure')) {
+    if (scenario === 'external' || scenario === 'external-db-failure' || scenario === 'demo-observation') {
+        const overview = async () => app.request('/api/labs/overview');
+        const first = await overview();
+        assert.equal(first.status, 200);
+        assert.equal(history().length, demo ? 0 : 1, 'initial observation establishes a durable baseline');
+        if (!demo) {
+            assert.equal(history()[0]?.source, 'external');
+            assert.equal(history()[0]?.triggeredBy, null);
+            assert.equal(history()[0]?.enabled, false);
+        }
+        action = 'accept';
+        if (scenario === 'external-db-failure') {
+            sqlite.run("CREATE TRIGGER reject_history BEFORE INSERT ON activationHistory BEGIN SELECT RAISE(ABORT, 'test'); END");
+            assert.equal((await overview()).status, 500);
+            assert.equal(history().length, 1);
+            sqlite.run('DROP TRIGGER reject_history');
+        }
+        const responses = await Promise.all(Array.from({ length: 5 }, overview));
+        for (const response of responses) {
+            assert.equal(response.status, 200);
+            const result = await response.json() as any;
+            assert.equal(result.stats['lab-a'].firewall.disabled, false);
+            if (!demo) assert.equal(result.history['lab-a'][0].enabled, true, 'same response includes reconciled state');
+        }
+        assert.equal(history().length, demo ? 0 : 2, 'concurrent observations are deduplicated');
+        if (!demo) {
+            unavailable = true;
+            assert.equal((await overview()).status, 500);
+            unavailable = false;
+            ruleDisabled = true;
+            assert.equal((await overview()).status, 500);
+            ruleDisabled = false;
+            action = 'jump';
+            assert.equal((await overview()).status, 500);
+            assert.equal(history().length, 2, 'unreliable states are not recorded');
+            action = 'accept';
+            assert.equal((await request({ enable: false })).status, 200);
+            assert.equal((await overview()).status, 200);
+            assert.equal(history().length, 3, 'app toggle is not duplicated by observation');
+            assert.equal(history()[2]?.triggeredBy, 'teacher');
+            assert.equal(history()[2]?.source, 'app');
+            const before = history().length;
+            await Promise.all([overview(), request({ enable: true }), overview()]);
+            assert.equal(history().length, before + 1, 'polls racing an app toggle do not create external rows');
+        }
+    } else if (scenario.startsWith('helper-patch-failure')) {
         const { toggleRuleDisabled } = await import('./mikrotik');
         const enable = !scenario.endsWith('-disable');
         action = enable ? 'accept' : 'drop';

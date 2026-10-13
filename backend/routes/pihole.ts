@@ -15,8 +15,45 @@ import {
     type PiholeDnsElement,
 } from '../pihole';
 import { createApp } from './context';
+import { z } from 'zod';
 
 export const piholeRouter = createApp();
+
+const domainIdentity = {
+    domain: z.string().trim().min(1).max(1_024),
+    type: z.enum(['allow', 'deny']),
+    kind: z.enum(['exact', 'regex']),
+};
+const domainUpdates = {
+    enabled: z.boolean().optional(),
+    comment: z.string().max(4_096).optional(),
+    groups: z.array(z.number().int().nonnegative()).max(100).optional(),
+    newType: z.enum(['allow', 'deny']).optional(),
+    newKind: z.enum(['exact', 'regex']).optional(),
+};
+
+piholeRouter.use('/pihole/*', async (c, next) => {
+    // Authenticate before parsing bodies and reject invalid data before any upstream call.
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Not authenticated' }, 401);
+    if (!user.organizationId) return c.json({ error: 'You must join an organization first' }, 403);
+    if (['POST', 'PUT', 'DELETE'].includes(c.req.method)) {
+        const path = c.req.path;
+        const schema = path.endsWith('/pihole/domains')
+            ? c.req.method === 'POST'
+                ? z.object({ ...domainIdentity, type: domainIdentity.type.optional(), kind: domainIdentity.kind.optional(), ...domainUpdates })
+                : z.object({ ...domainIdentity, ...domainUpdates })
+            : path.endsWith('/pihole/blocking')
+                ? z.object({ blocking: z.boolean(), timer: z.number().finite().nonnegative().nullable().optional() })
+                : /\/pihole\/dns\/[^/]+$/.test(path)
+                    ? z.object({ value: z.string().trim().min(1).max(4_096) }) : null;
+        if (schema) {
+            try { schema.parse(await c.req.json()); }
+            catch { return c.json({ error: 'Invalid request body' }, 400); }
+        }
+    }
+    await next();
+});
 
 const DNS_ELEMENTS: readonly PiholeDnsElement[] = [
     'upstreams',
@@ -118,7 +155,11 @@ piholeRouter.get('/pihole/recent-blocked', async (c) => {
         return c.json({ error: 'You must join an organization first' }, 403);
     }
 
-    const count = parseInt(c.req.query('count') || '20', 10);
+    const countValue = c.req.query('count') ?? '20';
+    const count = Number(countValue);
+    if (!/^\d+$/.test(countValue) || !Number.isSafeInteger(count) || count < 1 || count > 100) {
+        return c.json({ error: 'count must be an integer from 1 to 100' }, 400);
+    }
     const client = await getPiholeClient(user.organizationId);
     const result = await client.getRecentBlocked(count);
     if (!result.success) {
@@ -137,7 +178,11 @@ piholeRouter.get('/pihole/queries', async (c) => {
         return c.json({ error: 'You must join an organization first' }, 403);
     }
 
-    const length = parseInt(c.req.query('length') || '100', 10);
+    const lengthValue = c.req.query('length') ?? '100';
+    const length = Number(lengthValue);
+    if (!/^\d+$/.test(lengthValue) || !Number.isSafeInteger(length) || length < 1 || length > 1_000) {
+        return c.json({ error: 'length must be an integer from 1 to 1000' }, 400);
+    }
     const client = await getPiholeClient(user.organizationId);
     const result = await client.getQueries(length);
     if (!result.success) {

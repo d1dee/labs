@@ -26,25 +26,6 @@ await configureLogger();
 const serverLogger = getLogger(['labs', 'server']);
 const httpLogger = getLogger(['labs', 'http']);
 
-// Globally accept self-signed certificates for outbound fetch requests
-// when MikroTik is configured with insecure TLS (self-signed routers).
-if (process.env.MIKROTIK_INSECURE_FETCH === 'true') {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = ((
-        input: string | URL | Request,
-        init?: RequestInit & { tls?: Record<string, unknown> },
-    ) => {
-        const merged = {
-            ...init,
-            tls: {
-                rejectUnauthorized: false,
-                ...(init?.tls ?? {}),
-            },
-        };
-        return originalFetch(input, merged);
-    }) as typeof globalThis.fetch;
-}
-
 // Define Hono app with typed variables for auth
 const app = new Hono<AppEnv>({});
 

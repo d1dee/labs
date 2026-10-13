@@ -11,6 +11,8 @@ param(
     [string]$LogFilePath
 )
 
+$ErrorActionPreference = 'Stop'
+
 # --- Configuration ---
 # URL to the hosted zip file (HTTPS is highly recommended)
  $DownloadUrl = "http://192.168.1.21/iso/GPO-policies/GPO_Backup.zip"
@@ -28,6 +30,11 @@ param(
 # Log file path (use passed value when re-launched as 64-bit to keep one log)
 if (-not $LogFilePath) {
     $LogFilePath = "C:\snapin\GPO_Restore_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+}
+
+$LogDirectory = Split-Path -Path $LogFilePath -Parent
+if ($LogDirectory) {
+    New-Item -Path $LogDirectory -ItemType Directory -Force -ErrorAction Stop | Out-Null
 }
 
 # Logging function
@@ -90,10 +97,23 @@ New-Item -Path $TempExtractPath -ItemType Directory -Force | Out-Null
 # --- Extraction ---
 Write-Log "Extracting zip file to temp directory..."
 try {
-    Expand-Archive -Path $ZipFilePath -DestinationPath $TempExtractPath -Force
+    Expand-Archive -Path $ZipFilePath -DestinationPath $TempExtractPath -Force -ErrorAction Stop
 }
 catch {
     Write-Log "Failed to extract zip file. It may be corrupted. Details: $_" "ERROR"
+    exit 1
+}
+
+# Validate both sources before modifying policy files or closing consoles.
+try {
+    $SourceGroupPolicy = Get-ChildItem -Path $TempExtractPath -Recurse -Directory -Filter "GroupPolicy" -ErrorAction Stop | Select-Object -First 1
+    $SourcePolicyDefs = Get-ChildItem -Path $TempExtractPath -Recurse -Directory -Filter "PolicyDefinitions" -ErrorAction Stop | Select-Object -First 1
+    if (-not $SourceGroupPolicy -or -not $SourcePolicyDefs) {
+        throw "Backup must contain both GroupPolicy and PolicyDefinitions directories."
+    }
+}
+catch {
+    Write-Log "CRITICAL: Invalid policy backup. Details: $_" "ERROR"
     exit 1
 }
 
@@ -120,9 +140,6 @@ foreach ($proc in $processesToKill) {
 }
 
 # --- Copy GroupPolicy ---
-# Look for the GroupPolicy folder inside the extracted content
- $SourceGroupPolicy = Get-ChildItem -Path $TempExtractPath -Recurse -Directory -Filter "GroupPolicy" | Select-Object -First 1
-
 if ($SourceGroupPolicy) {
     Write-Log "Replacing contents of $GroupPolicyTarget..."
     try {
@@ -132,16 +149,11 @@ if ($SourceGroupPolicy) {
     }
     catch {
         Write-Log "Failed to copy GroupPolicy. A file may be locked by the system. Details: $_" "ERROR"
+        exit 1
     }
-}
-else {
-    Write-Log "Could not find a 'GroupPolicy' folder inside the zip file. Skipping." "WARNING"
 }
 
 # --- Copy PolicyDefinitions ---
-# Look for the PolicyDefinitions folder inside the extracted content
- $SourcePolicyDefs = Get-ChildItem -Path $TempExtractPath -Recurse -Directory -Filter "PolicyDefinitions" | Select-Object -First 1
-
 if ($SourcePolicyDefs) {
     Write-Log "Replacing contents of $PolicyDefsTarget..."
     try {
@@ -151,10 +163,8 @@ if ($SourcePolicyDefs) {
     }
     catch {
         Write-Log "Failed to copy PolicyDefinitions. Details: $_" "ERROR"
+        exit 1
     }
-}
-else {
-    Write-Log "Could not find a 'PolicyDefinitions' folder inside the zip file. Skipping." "WARNING"
 }
 
 # --- Cleanup ---

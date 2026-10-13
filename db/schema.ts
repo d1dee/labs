@@ -48,7 +48,7 @@ export const organization = sqliteTable('organization', {
     email: text('email').notNull(),
     joinKey: text('joinKey')
         .notNull()
-        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 6)),
+        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '')),
     createdAt: integer('createdAt', { mode: 'timestamp' })
         .notNull()
         .$defaultFn(() => new Date())
@@ -138,8 +138,8 @@ export const activationHistory = sqliteTable(
         labId: text('labId').notNull(),
         enabled: integer('enabled', { mode: 'boolean' }).notNull(),
         triggeredBy: text('triggeredBy')
-            .notNull()
             .references(() => user.id, { onDelete: 'set null' }),
+        source: text('source', { enum: ['app', 'external'] }).notNull().default('app'),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .notNull()
             .$defaultFn(() => new Date()),

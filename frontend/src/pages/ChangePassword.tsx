@@ -65,7 +65,7 @@ const ChangePassword: FC<ChangePasswordProps> = ({ opened, onClose }) => {
                 setCurrentPassword('');
                 setNewPassword('');
                 setConfirmPassword('');
-                setTimeout(onClose, 1500);
+                onClose();
             }
         } catch (err) {
             notifications.show({

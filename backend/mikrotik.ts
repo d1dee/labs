@@ -68,6 +68,7 @@ export async function callMikrotik(
             method,
             headers,
             signal: AbortSignal.timeout(15_000),
+            tls: { rejectUnauthorized: process.env.MIKROTIK_INSECURE_FETCH !== 'true' },
         };
 
         if (body) {
@@ -118,6 +119,7 @@ export async function testMikrotikConnection(config: {
         const response = await fetch(`${config.baseUrl}/rest/system/identity`, {
             method: 'GET',
             signal: AbortSignal.timeout(15_000),
+            tls: { rejectUnauthorized: process.env.MIKROTIK_INSECURE_FETCH !== 'true' },
             headers: {
                 Authorization: getBasicAuth(mikrotikConfig),
                 'Content-Type': 'application/json',
@@ -191,16 +193,17 @@ export async function toggleRuleDisabled(
         return result;
     }
 
-    if (!enabled) {
-        const prefix = cidr.replace(/0\/\d+$/, '');
+    if (!enabled && addressInSubnet(cidr.split('/')[0] ?? '', cidr)) {
         const connections = await callMikrotik(
             organizationId,
             '/ip/firewall/connection',
         );
         if (connections.success && Array.isArray(connections.data)) {
-            const toDelete = connections.data.filter((conn: any) =>
-                conn['src-address']?.startsWith(prefix),
-            );
+            const toDelete = connections.data.filter((conn: any) => {
+                const source = conn?.['src-address'];
+                return typeof source === 'string' && /^\*[0-9a-f]+$/i.test(conn['.id'] ?? '') &&
+                    addressInSubnet(source.replace(/:\d+$/, ''), cidr);
+            });
             for (const conn of toDelete) {
                 await callMikrotik(
                     organizationId,
@@ -268,6 +271,8 @@ export function countOnlineDevices(
         return { connected: null, source: 'unavailable' };
     }
     const scopedLeases = leases?.filter((lease) =>
+        lease && lease.disabled !== true && lease.disabled !== 'true' &&
+        lease.invalid !== true && lease.invalid !== 'true' &&
         lease.status === 'bound' &&
         (!details.dhcpServer || (lease['active-server'] || lease.server) === details.dhcpServer) &&
         (!details.subnet || addressInSubnet(lease['active-address'] || lease.address || '', details.subnet)),
@@ -286,7 +291,10 @@ export function countOnlineDevices(
             const identity = row['mac-address'] || row.address;
             if (identity) devices.add(String(identity).toLowerCase());
         }
-        return { connected: devices.size, source: 'arp' };
+        // An empty reachability cache does not mean the lab has no DHCP devices.
+        if (devices.size > 0 || !scopedLeases?.length) {
+            return { connected: devices.size, source: 'arp' };
+        }
     }
     if (scopedLeases && (details.dhcpServer || details.subnet)) {
         const devices = new Set(scopedLeases.map((lease) => lease['active-mac-address'] || lease['mac-address'] || lease.address).filter(Boolean).map((id) => String(id).toLowerCase()));

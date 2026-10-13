@@ -1,13 +1,12 @@
 import {
     createVeyonComputer,
     deleteVeyonComputer,
-    powerOnVeyonComputer,
     sendVeyonCommand,
-    setVeyonDemo,
     updateVeyonComputer,
     veyonFramebufferUrl,
     type VeyonInformationEvent,
     type VeyonCommandAction,
+    type VeyonCommandResult,
     type VeyonComputer,
     type VeyonFeature,
     type VeyonInformation,
@@ -41,7 +40,6 @@ import {
     ScrollArea,
     Scroller,
     Select,
-    SegmentedControl,
     SimpleGrid,
     Stack,
     Table,
@@ -103,6 +101,25 @@ type ComputerSortKey = 'name' | 'location' | 'user' | 'status';
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
+}
+
+function notificationError(error: unknown, details: unknown = error) {
+    console.error('Veyon request failed:', details);
+    const message = errorMessage(error).replace(/\s+/g, ' ').trim();
+    return message.length > 120 ? `${message.slice(0, 117)}...` : message;
+}
+
+function reportCommandResults(results: VeyonCommandResult[], titles: [string, string, string], message: string, failed = false) {
+    const failures = results.filter((item) => !item.success);
+    const allFailed = failed || (failures.length > 0 && failures.length === results.length);
+    notifications.show({
+        color: allFailed ? 'red' : failures.length ? 'orange' : 'teal',
+        title: titles[allFailed ? 2 : failures.length ? 1 : 0],
+        message: failures.length
+            ? `${message} ${notificationError(`${failures[0].name}: ${failures[0].error || 'Request failed'}`, failures)}${failures.length > 1 ? ` (+${failures.length - 1} more failures)` : ''}`
+            : message,
+        icon: failures.length ? <IconAlertCircle size={16} /> : <IconCheck size={16} />,
+    });
 }
 
 function featureUid(feature: VeyonFeature) {
@@ -268,22 +285,18 @@ export default function VeyonManagementTab() {
                 arguments: argumentsValue,
                 featureUid: featureUidValue,
             });
-            const failures = result.results.filter((item) => !item.success);
-            notifications.show({
-                color: failures.length ? 'orange' : 'teal',
-                title: failures.length ? 'Command partially completed' : 'Command completed',
-                message: failures.length
-                    ? failures.map((item) => `${item.name}: ${item.error}`).join('; ')
-                    : `${result.results.length} computer${result.results.length === 1 ? '' : 's'} updated.`,
-                icon: failures.length ? <IconAlertCircle size={16} /> : <IconCheck size={16} />,
-            });
+            reportCommandResults(
+                result.results,
+                ['Command accepted', 'Command partially accepted', 'Command failed'],
+                `${result.results.filter((item) => item.success).length}/${result.results.length} accepted. Completion not verified.`,
+            );
             load();
             if (['user-login', 'user-logoff', 'reboot', 'power-down'].includes(action)) {
                 window.clearTimeout(commandRefreshTimer.current);
                 commandRefreshTimer.current = window.setTimeout(load, 1200);
             }
         } catch (error) {
-            notifications.show({ color: 'red', title: 'Command failed', message: errorMessage(error) });
+            notifications.show({ color: 'red', title: 'Command failed', message: notificationError(error) });
         }
     };
 
@@ -301,20 +314,6 @@ export default function VeyonManagementTab() {
             confirmProps: { color },
             onConfirm: () => void runCommand(action, {}, true, undefined, targetIds),
         });
-    };
-
-    const powerOn = async (targets: VeyonComputer[]) => {
-        const wakeTargets = targets.filter((computer) => computer.macAddress);
-        const results = await Promise.allSettled(
-            wakeTargets.map((computer) => powerOnVeyonComputer(computer.id)),
-        );
-        const failures = results.filter((result) => result.status === 'rejected').length;
-        notifications.show({
-            color: failures ? 'orange' : 'teal',
-            title: failures ? 'Wake-on-LAN partially sent' : 'Wake-on-LAN sent',
-            message: `${wakeTargets.length - failures} of ${wakeTargets.length} packets dispatched.`,
-        });
-        load();
     };
 
     const runCommandRef = useRef(runCommand);
@@ -346,7 +345,7 @@ export default function VeyonManagementTab() {
                     setSelected((current) => current.filter((id) => id !== computer.id));
                     load();
                 } catch (error) {
-                    notifications.show({ color: 'red', title: 'Remove failed', message: errorMessage(error) });
+                    notifications.show({ color: 'red', title: 'Remove failed', message: notificationError(error) });
                 }
             },
         });
@@ -421,14 +420,11 @@ export default function VeyonManagementTab() {
 
             <CommandDeck
                 selectedCount={selected.length}
-                selectedComputers={computers.filter((computer) => selected.includes(computer.id))}
                 features={Object.values(live).flatMap((value) =>
                     value.state === 'online' ? value.information.features : [],
                 )}
                 onCommand={runCommand}
-                onChanged={load}
                 onConfirm={confirmCommand}
-                onPowerOn={() => powerOn(computers.filter((computer) => selected.includes(computer.id)))}
             />
 
             <Card withBorder radius='lg' p='md'>
@@ -565,11 +561,9 @@ export default function VeyonManagementTab() {
                 computer={viewer}
                 onClose={() => setViewer(null)}
                 onCommand={(action, args, active, uid) => runCommand(action, args, active, uid, viewer ? [viewer.id] : [])}
-                onChanged={load}
                 onConfirm={(title, _description, action, color) => {
                     if (viewer) confirmCommand(title, `Apply this action to ${viewer.name}? Unsaved work may be lost.`, action, color, [viewer.id]);
                 }}
-                onPowerOn={() => powerOn(viewer ? [viewer] : [])}
             />
             <VeyonSyncModal
                 opened={syncOpened}
@@ -693,21 +687,15 @@ function ComputerRow({
 
 function CommandDeck({
     selectedCount,
-    selectedComputers,
     features,
     onCommand,
-    onChanged,
     onConfirm,
-    onPowerOn,
     targetName,
 }: {
     selectedCount: number;
-    selectedComputers: VeyonComputer[];
     features: VeyonFeature[];
     onCommand: (action: VeyonCommandAction, args?: Record<string, unknown>, active?: boolean, uid?: string) => Promise<void>;
-    onChanged: () => void;
     onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
-    onPowerOn: () => Promise<void>;
     targetName?: string;
 }) {
     const [mode, setMode] = useState<string | null>(null);
@@ -718,8 +706,6 @@ function CommandDeck({
     const [website, setWebsite] = useState('');
     const [customUid, setCustomUid] = useState('');
     const [customArguments, setCustomArguments] = useState('{}');
-    const [demoSource, setDemoSource] = useState<string | null>(null);
-    const [demoWindowed, setDemoWindowed] = useState('fullscreen');
     const disabled = selectedCount === 0;
     const uniqueFeatures = [...new Map(features.map((feature) => [featureUid(feature), feature])).values()].filter(
         (feature) => featureUid(feature),
@@ -757,7 +743,6 @@ function CommandDeck({
                             onLock={() => void onCommand('screen-lock')} onUnlock={() => void onCommand('screen-lock', {}, false)} />
                         <LockControl label='Input lock' icon={IconKey} unlockIcon={IconBolt} disabled={disabled}
                             onLock={() => void onCommand('input-lock')} onUnlock={() => void onCommand('input-lock', {}, false)} />
-                        <ControlButton label='Wake' icon={IconPower} disabled={disabled || !selectedComputers.some((computer) => computer.macAddress)} onClick={() => void onPowerOn()} />
                         <ControlButton label='Log off' icon={IconUserOff} disabled={disabled} color='orange' onClick={() => onConfirm('Log off users', 'Unsaved work may be lost on all selected computers.', 'user-logoff', 'orange')} />
                         <ControlButton label='Restart' icon={IconReload} disabled={disabled} color='orange' onClick={() => onConfirm('Restart computers', 'Restart all selected computers now? Unsaved work may be lost.', 'reboot', 'orange')} />
                         <ControlButton label='Shut down' icon={IconPower} disabled={disabled} color='red' onClick={() => onConfirm('Shut down computers', 'Power down all selected computers now? Unsaved work may be lost.', 'power-down')} />
@@ -775,8 +760,7 @@ function CommandDeck({
                                     ['program', 'Program', IconCommand],
                                     ['website', 'Website', IconBrowser],
                                     ['plugin', 'Plugin', IconBrandWindows],
-                                    ['demo', 'Demo', IconScreenShare],
-                                ] as const).filter(([value]) => !targetName || value !== 'demo').map(([value, label, Icon]) => (
+                                ] as const).map(([value, label, Icon]) => (
                                     <Menu.Item key={value} leftSection={<Icon size={16} />}
                                         onClick={() => setMode(value)}>{label}</Menu.Item>
                                 ))}
@@ -898,94 +882,6 @@ function CommandDeck({
                         </Group>
                     </CommandForm>
                 ) : null}
-                {mode === 'demo' ? (
-                    <CommandForm title='Broadcast a computer screen' icon={IconScreenShare}>
-                        <Select
-                            label='Source computer'
-                            description='Select at least one additional destination computer'
-                            data={selectedComputers.map((computer) => ({
-                                value: computer.id,
-                                label: computer.name,
-                            }))}
-                            value={demoSource}
-                            onChange={setDemoSource}
-                            placeholder='Choose broadcast source'
-                            searchable
-                        />
-                        <SegmentedControl
-                            value={demoWindowed}
-                            onChange={setDemoWindowed}
-                            data={[
-                                { value: 'fullscreen', label: 'Full screen' },
-                                { value: 'window', label: 'Window' },
-                            ]}
-                        />
-                        <Group>
-                            <Button
-                                disabled={disabled || !demoSource || selectedCount < 2}
-                                onClick={async () => {
-                                    if (!demoSource) return;
-                                    try {
-                                        const result = await setVeyonDemo({
-                                            sourceComputerId: demoSource,
-                                            computerIds: selectedComputers.map(
-                                                (computer) => computer.id,
-                                            ),
-                                            windowed: demoWindowed === 'window',
-                                            active: true,
-                                        });
-                                        onChanged();
-                                        notifications.show({
-                                            color: result.failed ? 'orange' : 'teal',
-                                            title: 'Demonstration started',
-                                            message: `${result.targets - result.failed} clients connected.`,
-                                        });
-                                    } catch (error) {
-                                        notifications.show({
-                                            color: 'red',
-                                            title: 'Demo failed',
-                                            message: errorMessage(error),
-                                        });
-                                    }
-                                }}
-                            >
-                                Start broadcast
-                            </Button>
-                            <Button
-                                variant='light'
-                                color='red'
-                                disabled={disabled || !demoSource}
-                                onClick={async () => {
-                                    if (!demoSource) return;
-                                    try {
-                                        await setVeyonDemo({
-                                            sourceComputerId: demoSource,
-                                            computerIds: selectedComputers.map(
-                                                (computer) => computer.id,
-                                            ),
-                                            windowed: demoWindowed === 'window',
-                                            active: false,
-                                        });
-                                        onChanged();
-                                        notifications.show({
-                                            color: 'teal',
-                                            title: 'Demonstration stopped',
-                                            message: 'Selected clients returned to monitoring mode.',
-                                        });
-                                    } catch (error) {
-                                        notifications.show({
-                                            color: 'red',
-                                            title: 'Stop failed',
-                                            message: errorMessage(error),
-                                        });
-                                    }
-                                }}
-                            >
-                                Stop broadcast
-                            </Button>
-                        </Group>
-                    </CommandForm>
-                ) : null}
                     </Stack>
                 ) : null}
             </Stack>
@@ -1055,7 +951,7 @@ function ComputerEditor({ state, onClose, onSaved }: { state: EditorState; onClo
             onSaved(state.computer ? await updateVeyonComputer(state.computer.id, input) : await createVeyonComputer(input));
             notifications.show({ color: 'teal', title: 'Computer saved', message: `${input.name} is ready for Veyon management.` });
         } catch (error) {
-            notifications.show({ color: 'red', title: 'Save failed', message: errorMessage(error) });
+            notifications.show({ color: 'red', title: 'Save failed', message: notificationError(error) });
         } finally {
             setSaving(false);
         }
@@ -1074,20 +970,18 @@ function ComputerEditor({ state, onClose, onSaved }: { state: EditorState; onClo
                 <TextInput label='Display name' value={name} onChange={(event) => setName(event.currentTarget.value)} required data-autofocus />
                 <TextInput label='Host address' description='Hostname/IP and optional Veyon session port' placeholder='lab-pc-01.example.edu:11100' value={host} onChange={(event) => setHost(event.currentTarget.value)} required />
                 <TextInput label='Location' placeholder='Lab A' value={location} onChange={(event) => setLocation(event.currentTarget.value)} />
-                <TextInput label='MAC address' description='Required only for Wake-on-LAN' placeholder='00:11:22:33:44:55' value={macAddress} onChange={(event) => setMacAddress(event.currentTarget.value)} />
+                <TextInput label='MAC address' description='Optional device identity address' placeholder='00:11:22:33:44:55' value={macAddress} onChange={(event) => setMacAddress(event.currentTarget.value)} />
                 <Group justify='flex-end'><Button variant='default' onClick={onClose}>Cancel</Button><Button loading={saving} disabled={!name.trim() || !host.trim()} onClick={() => void save()}>Save computer</Button></Group>
             </Stack>
         </Modal>
     );
 }
 
-function RemoteViewer({ computer, onClose, onCommand, onChanged, onConfirm, onPowerOn }: {
+function RemoteViewer({ computer, onClose, onCommand, onConfirm }: {
     computer: VeyonComputer | null;
     onClose: () => void;
     onCommand: (action: VeyonCommandAction, args?: Record<string, unknown>, active?: boolean, uid?: string) => Promise<void>;
-    onChanged: () => void;
     onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
-    onPowerOn: () => Promise<void>;
 }) {
     const [information, setInformation] = useState<VeyonInformation | null>(null);
     const [error, setError] = useState('');
@@ -1148,13 +1042,10 @@ function RemoteViewer({ computer, onClose, onCommand, onChanged, onConfirm, onPo
                 <CommandDeck
                     key={computer.id}
                     selectedCount={1}
-                    selectedComputers={[computer]}
                     targetName={computer.name}
                     features={information?.features ?? []}
                     onCommand={onCommand}
-                    onChanged={onChanged}
                     onConfirm={onConfirm}
-                    onPowerOn={onPowerOn}
                 />
                 <ScrollArea bg='dark.9' style={{ borderRadius: 'var(--mantine-radius-md)' }}>
                     <Image src={frame?.image ?? undefined} onError={() => setFailedImage(frame?.image ?? null)} alt={`Live screen of ${computer.name}`} fit='contain' mah='72vh' fallbackSrc='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="450"%3E%3Crect width="100%25" height="100%25" fill="%23252b32"/%3E/svg%3E' />

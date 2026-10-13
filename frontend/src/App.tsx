@@ -39,6 +39,7 @@ const AppContent: FC = () => {
                 onSettingsOpen={() => setSettingsOpen(true)}
             />
             <ChangePassword
+                key={`password:${user?.id}`}
                 opened={changePasswordOpened}
                 onClose={() => setChangePasswordOpened(false)}
             />

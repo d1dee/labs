@@ -16,11 +16,57 @@ import { resolveComputerLocations } from '../veyon-locations';
 import { createVeyonStreamWriter } from '../veyon-stream';
 import { buildVeyonSyncPlan, type VeyonSyncPlan } from '../veyon-sync';
 import { errorProperty, getLogger } from '../logger';
+import { isDemoUser } from '../demo';
+import { auth } from '../auth';
+import { streamIdentityMatches, type StreamIdentity } from './stream';
 import { createApp } from './context';
 
 export const veyonRouter = createApp();
 
+veyonRouter.use('/veyon/*', async (c, next) => {
+    if (c.req.method !== 'GET' && isDemoUser(c.get('user'))) {
+        return c.json({ error: 'Veyon changes are unavailable in demo mode', code: 'DEMO_READ_ONLY' }, 403);
+    }
+    await next();
+});
+
 const veyonLogger = getLogger(['labs', 'veyon']);
+
+function watchStreamIdentity(headers: Headers, expected: StreamIdentity, revoke: () => void) {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+        stopped = true;
+        clearTimeout(timer);
+        clearTimeout(deadline);
+    };
+    const check = async () => {
+        if (stopped) return;
+        try {
+            const session = await Promise.race([
+                auth.api.getSession({ headers, query: { disableCookieCache: true } }),
+                new Promise<never>((_, reject) => {
+                    deadline = setTimeout(() => reject(new Error('Stream authentication timed out')), 10_000);
+                }),
+            ]);
+            if (stopped) return;
+            const actual: StreamIdentity = session ? {
+                userId: session.user.id, sessionId: session.session.id,
+                organizationId: session.user.organizationId ?? null,
+            } : null;
+            if (!streamIdentityMatches(expected, actual)) { stop(); revoke(); }
+        } catch {
+            if (!stopped) { stop(); revoke(); }
+        } finally {
+            clearTimeout(deadline);
+            // Schedule only after the previous lookup settles; never overlap checks.
+            if (!stopped) timer = setTimeout(check, 10_000);
+        }
+    };
+    timer = setTimeout(check, 10_000);
+    return stop;
+}
 
 const hostSchema = z
     .string()
@@ -58,12 +104,6 @@ const commandSchema = z.object({
     active: z.boolean().default(true),
     arguments: z.record(z.string(), z.unknown()).default({}),
     featureUid: z.uuid().optional(),
-});
-const demoSchema = z.object({
-    sourceComputerId: idSchema,
-    computerIds: z.array(idSchema).min(1).max(100),
-    windowed: z.boolean().default(false),
-    active: z.boolean().default(true),
 });
 const syncApplySchema = z.object({
     additions: z.array(z.number().int()).optional(),
@@ -142,6 +182,10 @@ async function fetchSyncPlan(organizationId: string): Promise<
     const hostsResult = await fog.listHosts();
     if (!hostsResult.success || !hostsResult.data) {
         return { error: hostsResult.error ?? 'Failed to list FOG hosts' };
+    }
+    // Absence from a partial inventory is not evidence that a host was deleted.
+    if (hostsResult.data.truncated || hostsResult.data.count > hostsResult.data.hosts.length) {
+        return { error: 'FOG returned an incomplete host inventory. Sync is unavailable until a complete list can be loaded.' };
     }
     // Deterministic ordering: tier matching in buildVeyonSyncPlan is
     // first-wins, so the preview must not depend on row order luck.
@@ -459,7 +503,7 @@ veyonRouter.delete('/veyon/computers/:id', async (c) => {
         const client = await getVeyonClient(auth.user.organizationId, auth.user.id).catch(
             () => null,
         );
-        await client?.close(computer.host);
+        await client?.close(computer.host).catch(() => undefined);
         await db.delete(veyonComputer).where(eq(veyonComputer.id, id));
         // Drop cached screenshots and stop any polling worker for the
         // removed machine so nothing keeps polling a deleted computer.
@@ -473,10 +517,14 @@ veyonRouter.delete('/veyon/computers/:id', async (c) => {
 veyonRouter.get('/veyon/information/stream', (c) => {
     const auth = requireUser(c);
     if (auth.response) return auth.response;
+    const session = c.get('session');
+    if (!session) return c.json({ error: 'Not authenticated' }, 401);
     const response = streamSSE(c, async (stream) => {
         const controller = new AbortController();
         const { signal } = controller;
+        let stopIdentityWatch = () => {};
         const abort = () => {
+            stopIdentityWatch();
             controller.abort();
             c.req.raw.signal.removeEventListener('abort', abort);
             stream.abort();
@@ -519,6 +567,9 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                 if (!signal.aborted) await write('heartbeat', {});
             }
         })().catch(abort);
+        if (!signal.aborted) stopIdentityWatch = watchStreamIdentity(c.req.raw.headers, {
+            userId: auth.user.id, sessionId: session.id, organizationId: auth.user.organizationId,
+        }, abort);
         let directorySignature = '';
         let resolvedDirectory: typeof veyonComputer.$inferSelect[] = [];
         try {
@@ -698,6 +749,8 @@ const streamProfileSchema = z.object({
 veyonRouter.get('/veyon/screenshots/stream', async (c) => {
     const auth = requireUser(c);
     if (auth.response) return auth.response;
+    const session = c.get('session');
+    if (!session) return c.json({ error: 'Not authenticated' }, 401);
     try {
         const organizationId = auth.user.organizationId;
         const profile = streamProfileSchema.parse(c.req.query());
@@ -737,6 +790,7 @@ veyonRouter.get('/veyon/screenshots/stream', async (c) => {
         return streamSSE(c, async (stream) => {
             let closed = false;
             let cleaned = false;
+            let stopIdentityWatch = () => {};
             const subscribedIds = new Map<string, symbol>();
             const resets = new Set<string>();
             const lastFrameSent = new Map<string, number>();
@@ -790,6 +844,7 @@ veyonRouter.get('/veyon/screenshots/stream', async (c) => {
             const cleanup = () => {
                 if (cleaned) return;
                 cleaned = true;
+                stopIdentityWatch();
                 closed = true;
                 writer.close();
                 removeListener();
@@ -809,6 +864,9 @@ veyonRouter.get('/veyon/screenshots/stream', async (c) => {
                 abort();
                 return;
             }
+            stopIdentityWatch = watchStreamIdentity(c.req.raw.headers, {
+                userId: auth.user.id, sessionId: session.id, organizationId,
+            }, abort);
 
             // Attach the listener before subscribing so no frame event can
             // slip past the initial snapshot below.
@@ -1122,119 +1180,6 @@ veyonRouter.post('/veyon/commands', async (c) => {
             success: results.every((result) => result.success),
             results,
         });
-    } catch (error) {
-        return apiError(c, error);
-    }
-});
-
-veyonRouter.post('/veyon/demo', async (c) => {
-    const auth = requireUser(c);
-    if (auth.response) return auth.response;
-    try {
-        const body = demoSchema.parse(await c.req.json());
-        const computers = await db.query.veyonComputer.findMany({
-            where: eq(veyonComputer.organizationId, auth.user.organizationId),
-        });
-        const source = computers.find(
-            (computer) => computer.id === body.sourceComputerId,
-        );
-        const requestedIds = new Set(body.computerIds);
-        const targets = computers.filter(
-            (computer) =>
-                requestedIds.has(computer.id) && computer.id !== source?.id,
-        );
-        if (
-            !source ||
-            targets.length !==
-                [...requestedIds].filter((id) => id !== source.id).length
-        ) {
-            return c.json(
-                { error: 'One or more demo computers were not found' },
-                404,
-            );
-        }
-        const client = await getVeyonClient(
-            auth.user.organizationId,
-            auth.user.id,
-        );
-        const token = crypto.randomUUID().replace(/-/g, '');
-        const clientFeature = body.windowed
-            ? VEYON_FEATURES.windowDemoClient
-            : VEYON_FEATURES.fullScreenDemoClient;
-
-        if (body.active) {
-            await client.setFeature(source.host, VEYON_FEATURES.demoServer, true, {
-                demoAccessToken: token,
-            });
-        }
-        const settled = await Promise.allSettled(
-            targets.map((target) =>
-                client.setFeature(target.host, clientFeature, body.active, {
-                    demoAccessToken: token,
-                    demoServerHost: source.host,
-                }),
-            ),
-        );
-        if (!body.active) {
-            await Promise.allSettled([
-                client.setFeature(source.host, VEYON_FEATURES.demoServer, false),
-                ...targets.flatMap((target) => [
-                    client.setFeature(
-                        target.host,
-                        VEYON_FEATURES.fullScreenDemoClient,
-                        false,
-                    ),
-                    client.setFeature(
-                        target.host,
-                        VEYON_FEATURES.windowDemoClient,
-                        false,
-                    ),
-                ]),
-            ]);
-        }
-        const failed = settled.filter(
-            (result) => result.status === 'rejected',
-        ).length;
-        return c.json({ success: failed === 0, targets: targets.length, failed });
-    } catch (error) {
-        return apiError(c, error);
-    }
-});
-
-veyonRouter.post('/veyon/computers/:id/power-on', async (c) => {
-    const auth = requireUser(c);
-    if (auth.response) return auth.response;
-    try {
-        const computer = await ownedComputer(
-            auth.user.organizationId,
-            idSchema.parse(c.req.param('id')),
-        );
-        if (!computer) return c.json({ error: 'Computer not found' }, 404);
-        if (!computer.macAddress) return c.json({ error: 'MAC address is required' }, 400);
-        // A leading dash would be parsed as a flag by veyon-cli (argument
-        // injection into Bun.spawn); refuse to spawn.
-        if (computer.macAddress.startsWith('-')) {
-            return c.json(
-                {
-                    error: 'Stored MAC address is invalid: it must not start with "-"',
-                    code: 'INVALID_MAC',
-                },
-                400,
-            );
-        }
-        const executable = Bun.which(process.env.VEYON_CLI_PATH || 'veyon-cli');
-        if (!executable) {
-            return c.json({ error: 'veyon-cli is not installed on the server', code: 'CLI_MISSING' }, 501);
-        }
-        const processResult = Bun.spawn([executable, 'power', 'on', computer.macAddress], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-        });
-        const exitCode = await processResult.exited;
-        if (exitCode !== 0) {
-            return c.json({ error: await new Response(processResult.stderr).text() }, 502);
-        }
-        return c.json({ success: true });
     } catch (error) {
         return apiError(c, error);
     }

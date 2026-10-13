@@ -1276,7 +1276,7 @@
 
             @media screen and (max-width: 820px) {
                 .page {
-                    width: 100%;
+                    width: calc(100% - 20px);
                     min-height: auto;
                     margin: 10px;
                 }
@@ -1634,9 +1634,9 @@
                     Labs FCD — Computer Lab Management for Kenyan Schools
                 </div>
                 <div class="page-footer-right">
-                    <a href="#">labs.fcd.co.ke</a>
-                    <a href="#">info@fcd.co.ke</a>
-                    <a href="#">+254 752 302 021</a>
+                    <a href="https://labs.fcd.co.ke">labs.fcd.co.ke</a>
+                    <a href="mailto:info@fcd.co.ke">info@fcd.co.ke</a>
+                    <a href="tel:+254752302021">+254 752 302 021</a>
                 </div>
             </div>
         </div>
@@ -1848,9 +1848,9 @@
                     Labs FCD — Computer Lab Management for Kenyan Schools
                 </div>
                 <div class="page-footer-right">
-                    <a href="#">labs.fcd.co.ke</a>
-                    <a href="#">info@fcd.co.ke</a>
-                    <a href="#">+254 752 302 021</a>
+                    <a href="https://labs.fcd.co.ke">labs.fcd.co.ke</a>
+                    <a href="mailto:info@fcd.co.ke">info@fcd.co.ke</a>
+                    <a href="tel:+254752302021">+254 752 302 021</a>
                 </div>
             </div>
         </div>
@@ -2313,9 +2313,9 @@
                     Labs FCD — Computer Lab Management for Kenyan Schools
                 </div>
                 <div class="page-footer-right">
-                    <a href="#">labs.fcd.co.ke</a>
-                    <a href="#">info@fcd.co.ke</a>
-                    <a href="#">+254 752 302 021</a>
+                    <a href="https://labs.fcd.co.ke">labs.fcd.co.ke</a>
+                    <a href="mailto:info@fcd.co.ke">info@fcd.co.ke</a>
+                    <a href="tel:+254752302021">+254 752 302 021</a>
                 </div>
             </div>
         </div>
@@ -2477,9 +2477,9 @@
                     labs.fcd.co.ke
                 </div>
                 <div class="page-footer-right">
-                    <a href="#">labs.fcd.co.ke</a>
-                    <a href="#">info@fcd.co.ke</a>
-                    <a href="#">+254 752 302 021</a>
+                    <a href="https://labs.fcd.co.ke">labs.fcd.co.ke</a>
+                    <a href="mailto:info@fcd.co.ke">info@fcd.co.ke</a>
+                    <a href="tel:+254752302021">+254 752 302 021</a>
                 </div>
             </div>
         </div>
@@ -2487,26 +2487,6 @@
         <script>
             document.querySelectorAll('.js-year').forEach((el) => {
                 el.textContent = new Date().getFullYear();
-            });
-            document.querySelectorAll('a[href="#"]').forEach((link) => {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const toast = document.createElement('div');
-                    toast.textContent = 'This is a print-ready PDF mockup.';
-                    toast.style.cssText = `
-        position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
-        background:#1a1c20; color:#00875a; padding:10px 20px; border-radius:6px;
-        font-size:11px; font-family:'DM Sans',sans-serif; font-weight:500;
-        box-shadow:0 4px 16px rgba(0,0,0,0.2); z-index:9999;
-        opacity:0; transition:opacity 0.3s;
-      `;
-                    document.body.appendChild(toast);
-                    requestAnimationFrame(() => (toast.style.opacity = '1'));
-                    setTimeout(() => {
-                        toast.style.opacity = '0';
-                        setTimeout(() => toast.remove(), 300);
-                    }, 2000);
-                });
             });
         </script>
     </body>

@@ -133,7 +133,7 @@ const DNS_CONFIGS: DnsElementConfig[] = [
         ],
         buildValue: (v) => {
             const base = `${v.domain.trim()},${v.target.trim()}`;
-            return v.ttl.trim() ? `${base},${v.ttl.trim()}` : base;
+            return v.ttl?.trim() ? `${base},${v.ttl.trim()}` : base;
         },
         splitValue: (v) => {
             const parts = v.split(',');
@@ -183,13 +183,12 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
         });
 
     const handleAdd = async () => {
-        const value = config.buildValue(formValues);
-        if (!value.trim()) return;
-
         const missingRequired = config.addFields.some(
             (f) => f.required && !(formValues[f.key] || '').trim(),
         );
         if (missingRequired) return;
+        const value = config.buildValue(formValues);
+        if (!value.trim()) return;
 
         setSubmitting(true);
         try {

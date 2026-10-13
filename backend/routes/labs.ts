@@ -1,4 +1,4 @@
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import process from 'process';
 import { setInterval } from 'timers';
 import { db } from '../../db/database';
@@ -10,6 +10,7 @@ import {
     setDemoLabState,
 } from '../demo';
 import { errorProperty, getLogger } from '../logger';
+import { reconcileLabActivation, withLabActivation } from '../lab-activation';
 import {
     type ConfigLab,
     getFirewallConfigWithLabs,
@@ -40,10 +41,17 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
     const organizationId = user.organizationId!;
 
     // Get rule status
-    const ruleResponse = await getRuleStatus(
-        organizationId,
-        lab.ruleId,
-    );
+    const ruleResponse = await withLabActivation(lab.id, async () => {
+        const response = await getRuleStatus(organizationId, lab.ruleId);
+        if (!isDemoUser(user)) {
+            if (!response.success || !['accept', 'drop'].includes(response.data?.action) ||
+                ![false, 'false'].includes(response.data?.disabled)) {
+                throw new Error(`Cannot determine access state for lab ${lab.name}: firewall rule unavailable, disabled, or unsupported.`);
+            }
+            reconcileLabActivation(lab.id, response.data.action === 'accept');
+        }
+        return response;
+    });
     const ruleDisabled =
         ruleResponse.success && ruleResponse.data?.action === 'drop';
 
@@ -127,7 +135,7 @@ async function fetchLabHistory(user: LabUser, labId: string) {
                 gte(activationHistory.createdAt, oneWeekAgo),
             ),
         )
-        .orderBy(desc(activationHistory.createdAt))
+        .orderBy(desc(activationHistory.createdAt), sql`rowid desc`)
         .limit(100);
 
     return history.map((entry) => ({
@@ -135,6 +143,7 @@ async function fetchLabHistory(user: LabUser, labId: string) {
         labId: entry.labId,
         enabled: entry.enabled,
         triggeredBy: entry.triggeredBy,
+        source: entry.source,
         createdAt: entry.createdAt.toISOString(),
     }));
 }
@@ -202,34 +211,17 @@ labsRouter.get('/labs/overview', async (c) => {
 
         const labs = mapLabs(storedConfig.labs);
 
-        // Build stats and history for every lab concurrently. This is a single
-        // HTTP response for the client, even though it fans out into MikroTik /
-        // DB calls here on the server.
-        const [statsEntries, historyEntries] = await Promise.all([
-            Promise.all(
-                labs.map(
-                    async (lab) =>
-                        [
-                            lab.id,
-                            await buildLabStats(lab, user),
-                        ] as const,
-                ),
-            ),
-            Promise.all(
-                labs.map(
-                    async (lab) =>
-                        [
-                            lab.id,
-                            await fetchLabHistory(user, lab.id),
-                        ] as const,
-                ),
-            ),
-        ]);
+        // Reconcile each lab before reading its history for this response.
+        const entries = await Promise.all(labs.map(async (lab) => {
+            const stats = await buildLabStats(lab, user);
+            const history = await fetchLabHistory(user, lab.id);
+            return { labId: lab.id, stats, history };
+        }));
 
         return c.json({
             labs,
-            stats: Object.fromEntries(statsEntries),
-            history: Object.fromEntries(historyEntries),
+            stats: Object.fromEntries(entries.map(({ labId, stats }) => [labId, stats])),
+            history: Object.fromEntries(entries.map(({ labId, history }) => [labId, history])),
         });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -363,50 +355,53 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
             });
         }
 
-        const result = await toggleRuleDisabled(
-            user.organizationId,
-            lab.ruleId,
-            enable,
-            lab.subnet,
-        );
+        const organizationId = user.organizationId;
+        return await withLabActivation(labId, async () => {
+            const result = await toggleRuleDisabled(
+                organizationId,
+                lab.ruleId,
+                enable,
+                lab.subnet,
+            );
 
-        if (!result.success) {
-            return c.json({ success: false, error: result.error || 'The router could not apply the lab access change.' }, 500);
-        }
+            if (!result.success) {
+                return c.json({ success: false, error: result.error || 'The router could not apply the lab access change.' }, 500);
+            }
 
-        const verified = await getRuleStatus(user.organizationId, lab.ruleId);
-        if (!verified.success || verified.data?.action !== (enable ? 'accept' : 'drop') ||
-            ![false, 'false'].includes(verified.data?.disabled)) {
+            const verified = await getRuleStatus(organizationId, lab.ruleId);
+            if (!verified.success || verified.data?.action !== (enable ? 'accept' : 'drop') ||
+                ![false, 'false'].includes(verified.data?.disabled)) {
+                return c.json({
+                    success: false,
+                    code: 'ROUTER_STATE_UNVERIFIED',
+                    error: 'The router change could not be verified. Lab access may have changed; refresh its status before retrying.',
+                }, 502);
+            }
+
+            try {
+                await db.insert(activationHistory).values({
+                    id: crypto.randomUUID(),
+                    labId,
+                    enabled: enable,
+                    triggeredBy: user.id,
+                    createdAt: new Date(),
+                });
+            } catch {
+                return c.json({
+                    success: false,
+                    code: 'HISTORY_SAVE_FAILED',
+                    routerApplied: true,
+                    enabled: enable,
+                    error: 'Lab access changed on the router, but its activation history could not be saved. Refresh its status before retrying.',
+                }, 500);
+            }
+
             return c.json({
-                success: false,
-                code: 'ROUTER_STATE_UNVERIFIED',
-                error: 'The router change could not be verified. Lab access may have changed; refresh its status before retrying.',
-            }, 502);
-        }
-
-        try {
-            await db.insert(activationHistory).values({
-                id: crypto.randomUUID(),
-                labId,
+                success: true,
+                lab: labId,
                 enabled: enable,
-                triggeredBy: user.id,
-                createdAt: new Date(),
+                message: `Lab ${labId} access has been ${enable ? 'enabled' : 'disabled'}`,
             });
-        } catch {
-            return c.json({
-                success: false,
-                code: 'HISTORY_SAVE_FAILED',
-                routerApplied: true,
-                enabled: enable,
-                error: 'Lab access changed on the router, but its activation history could not be saved. Refresh its status before retrying.',
-            }, 500);
-        }
-
-        return c.json({
-            success: true,
-            lab: labId,
-            enabled: enable,
-            message: `Lab ${labId} access has been ${enable ? 'enabled' : 'disabled'}`,
         });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -431,7 +426,11 @@ labsRouter.get('/labs/:labId/history', async (c) => {
     }
 });
 
+let snapshotInFlight = false;
+let snapshotTimer: ReturnType<typeof setInterval> | undefined;
 async function saveDataUsageSnapshot() {
+    if (snapshotInFlight) return;
+    snapshotInFlight = true;
     try {
         const configs = await db.query.firewallConfig.findMany({
             with: { labs: true },
@@ -441,7 +440,14 @@ async function saveDataUsageSnapshot() {
             const labs = mapLabs(storedConfig.labs);
 
             for (const lab of labs) {
-                const ruleResponse = lab.interface ? null : await getRuleStatus(storedConfig.organizationId, lab.ruleId);
+                const ruleResponse = await withLabActivation(lab.id, async () => {
+                    const response = await getRuleStatus(storedConfig.organizationId, lab.ruleId);
+                    if (response.success && ['accept', 'drop'].includes(response.data?.action) &&
+                        [false, 'false'].includes(response.data?.disabled)) {
+                        reconcileLabActivation(lab.id, response.data.action === 'accept');
+                    }
+                    return response;
+                });
                 const totalBytes = lab.interface
                     ? await getInterfaceUsage(storedConfig.organizationId, lab.interface)
                     : ruleResponse?.success ? parseByteCounter(ruleResponse.data?.bytes) : null;
@@ -465,16 +471,18 @@ async function saveDataUsageSnapshot() {
         snapshotLogger.error('Failed to save data usage snapshot: {error}', {
             error: errorProperty(error),
         });
+    } finally {
+        snapshotInFlight = false;
     }
 }
 
 export function startDataUsageSnapshots() {
-    const interval = parseInt(
-        process.env.DATA_USAGE_SNAPSHOT_INTERVAL || '300000',
-        10,
-    );
-    setInterval(saveDataUsageSnapshot, interval);
-    saveDataUsageSnapshot();
+    if (snapshotTimer) return;
+    const configured = Number(process.env.DATA_USAGE_SNAPSHOT_INTERVAL ?? 300_000);
+    const interval = Number.isSafeInteger(configured) && configured >= 1_000 && configured <= 2_147_483_647
+        ? configured : 300_000;
+    snapshotTimer = setInterval(saveDataUsageSnapshot, interval);
+    void saveDataUsageSnapshot();
 }
 
 labsRouter.get('/labs/:labId/usage-history', async (c) => {

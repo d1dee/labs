@@ -237,6 +237,8 @@ export function veyonScreenshotStreamUrl(
     return `/api/veyon/screenshots/stream?${query}`;
 }
 
+export type VeyonCommandResult = { id: string; name: string; success: boolean; error?: string };
+
 export async function sendVeyonCommand(input: {
     computerIds: string[];
     action: VeyonCommandAction;
@@ -247,33 +249,9 @@ export async function sendVeyonCommand(input: {
     return throwOnError(
         await $fetch<{
             success: boolean;
-            results: Array<{ id: string; name: string; success: boolean; error?: string }>;
+            results: VeyonCommandResult[];
         }>('/api/veyon/commands', { method: 'POST', body: input }),
         'Veyon command failed',
-    );
-}
-
-export async function powerOnVeyonComputer(id: string) {
-    return throwOnError(
-        await $fetch<{ success: boolean }>(`/api/veyon/computers/${id}/power-on`, {
-            method: 'POST',
-        }),
-        'Failed to power on computer',
-    );
-}
-
-export async function setVeyonDemo(input: {
-    sourceComputerId: string;
-    computerIds: string[];
-    windowed: boolean;
-    active: boolean;
-}) {
-    return throwOnError(
-        await $fetch<{ success: boolean; targets: number; failed: number }>(
-            '/api/veyon/demo',
-            { method: 'POST', body: input },
-        ),
-        'Failed to update demonstration mode',
     );
 }
 

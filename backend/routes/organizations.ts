@@ -1,11 +1,12 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import z from 'zod';
 import { db } from '../../db/database';
 import { organization, user as userTable } from '../../db/schema';
 import { createApp } from './context';
+import { isDemoUser } from '../demo';
 
 export async function regenerateOrganizationJoinKey(orgId: string) {
-    const newJoinKey = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+    const newJoinKey = crypto.randomUUID().replace(/-/g, '');
     const updatedOrg = await db
         .update(organization)
         .set({ joinKey: newJoinKey, updatedAt: new Date() })
@@ -15,6 +16,13 @@ export async function regenerateOrganizationJoinKey(orgId: string) {
 }
 
 export const organizationsRouter = createApp();
+
+organizationsRouter.use('/organizations/*', async (c, next) => {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && isDemoUser(c.get('user'))) {
+        return c.json({ error: 'Demo users cannot change organization membership', code: 'DEMO_READ_ONLY' }, 403);
+    }
+    await next();
+});
 
 organizationsRouter.get('/organizations', async (c) => {
     const user = c.get('user');
@@ -56,7 +64,7 @@ organizationsRouter.get('/organizations', async (c) => {
                     name: orgData.name,
                     email: orgData.email,
                     phoneNumber: orgData.phoneNumber,
-                    joinKey: orgData.joinKey,
+                    joinKey: isDemoUser(user) ? '' : orgData.joinKey,
                     members: members.map((m) => ({
                         id: m.id,
                         name: m.name,
@@ -83,7 +91,7 @@ organizationsRouter.post('/organizations', async (c) => {
         const orgSchema = z.object({
             name: z
                 .string()
-                .min(4, 'Organization name must be at least 2 characters'),
+                .min(4, 'Organization name must be at least 4 characters'),
             email: z
                 .email('Invalid email address')
                 .min(1, 'Contact information is required'),
@@ -91,27 +99,32 @@ organizationsRouter.post('/organizations', async (c) => {
         });
         const validatedBody = orgSchema.parse(body);
         // Create organization
-        const result = await db
-            .insert(organization)
-            .values({
-                name: validatedBody.name,
-                email: validatedBody.email,
-                phoneNumber: validatedBody.phoneNumber,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-            })
-            .returning();
+        const result = db.transaction((tx) => {
+            const result = tx
+                .insert(organization)
+                .values({
+                    name: validatedBody.name,
+                    email: validatedBody.email,
+                    phoneNumber: validatedBody.phoneNumber,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                })
+                .returning().all();
+
+            if (!result[0]) throw new Error('Failed to create organization');
+            const updated = tx
+                .update(userTable)
+                .set({ organizationId: result[0].id, updatedAt: new Date() })
+                .where(eq(userTable.id, user.id))
+                .returning({ id: userTable.id }).all();
+            if (!updated[0]) throw new Error('User not found');
+            return result;
+        });
 
         if (!result || result.length === 0 || !result[0]) {
             return c.json({ error: 'Failed to create organization' }, 500);
         }
         const newOrgId = result[0].id;
-
-        // Add user to organization
-        await db
-            .update(userTable)
-            .set({ organizationId: newOrgId, updatedAt: new Date() })
-            .where(eq(userTable.id, user.id));
 
         return c.json({
             success: true,
@@ -124,6 +137,7 @@ organizationsRouter.post('/organizations', async (c) => {
             },
         });
     } catch (error) {
+        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid organization details' }, 400);
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -179,10 +193,13 @@ organizationsRouter.post('/organizations/:orgId/leave', async (c) => {
 
     try {
         // Remove user from organization
-        await db
+        const removed = await db
             .update(userTable)
             .set({ organizationId: null, updatedAt: new Date() })
-            .where(eq(userTable.id, user.id));
+            .where(and(eq(userTable.id, user.id), eq(userTable.organizationId, orgId)))
+            .returning({ id: userTable.id });
+
+        if (!removed[0]) return c.json({ error: 'You are not a member of this organization' }, 403);
 
         return c.json({ success: true });
     } catch (error) {

@@ -31,7 +31,7 @@ app.get('/robots.txt', (c) => {
 app.get('/sitemap.xml', (c) => {
     c.header('Cache-Control', 'public, max-age=300');
     c.header('Content-Type', 'application/xml');
-    return c.text(sitemap);
+    return c.body(sitemap);
 });
 app.get('/favicon.ico', (c) => {
     c.header('Cache-Control', 'public, max-age=86400');

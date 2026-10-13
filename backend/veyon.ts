@@ -20,9 +20,6 @@ export const VEYON_FEATURES = {
     userLogoff: '7311d43d-ab53-439e-a03a-8cb25f7ed526',
     reboot: '4f7d98f0-395a-4fff-b968-e49b8d0f748c',
     powerDown: '6f5a27a0-0e2f-496e-afcc-7aae62eede10',
-    demoServer: 'e4b6e743-1f5b-491d-9364-e091086200f4',
-    fullScreenDemoClient: '7b6231bd-eb89-45d3-af32-f70663b2f878',
-    windowDemoClient: 'ae45c3db-dc2e-4204-ae8b-374cdab8c62c',
     startApp: 'da9ca56a-b2ad-4fff-8f8a-929b2927b442',
     openWebsite: '8a11a75d-b3db-48b6-b9cb-f8422ddd5b0c',
     textMessage: 'e75ae9c8-ac17-4d00-8f0d-019348346208',
@@ -138,7 +135,7 @@ export function clearVeyonConnections(organizationId: string) {
     for (const [key, connection] of connections) {
         if (connection.organizationId === organizationId) {
             connections.delete(key);
-            void connection.dispose();
+            void connection.dispose().catch(() => undefined);
         }
     }
     for (const [key, pending] of pendingConnections) {
@@ -280,7 +277,7 @@ export class VeyonClient {
                 try {
                     const uid = JSON.parse(new TextDecoder().decode(body))?.['connection-uid'];
                     if (typeof uid === 'string' && uid.trim() && !/[\r\n]/.test(uid)) {
-                        void this.dispose(decodeURIComponent(path.slice('/authentication/'.length)), uid);
+                        void this.dispose(decodeURIComponent(path.slice('/authentication/'.length)), uid).catch(() => undefined);
                     }
                 } catch { /* Malformed responses cannot identify a remote connection. */ }
             }
@@ -321,10 +318,11 @@ export class VeyonClient {
 
     private async dispose(host: string, uid: string, callerSignal?: AbortSignal) {
         await withDeadline(callerSignal, 5_000, async (signal) => {
-            await this.request(`/authentication/${encodeURIComponent(host)}`, {
+            const response = await this.request(`/authentication/${encodeURIComponent(host)}`, {
                 method: 'DELETE', headers: { 'Connection-Uid': uid },
             }, signal);
-        }).catch(() => undefined);
+            if (!response.ok) throw await this.responseError(response);
+        });
     }
 
     private async createConnection(host: string, signal: AbortSignal): Promise<Connection> {
@@ -353,7 +351,7 @@ export class VeyonClient {
             signal.throwIfAborted();
             this.assertCurrent();
         } catch (error) {
-            if (typeof uid === 'string' && uid.trim() && !/[\r\n]/.test(uid)) void this.dispose(host, uid);
+            if (typeof uid === 'string' && uid.trim() && !/[\r\n]/.test(uid)) void this.dispose(host, uid).catch(() => undefined);
             throw error;
         }
         const connection: Connection = {
@@ -381,7 +379,7 @@ export class VeyonClient {
         }
         if (existing) {
             connections.delete(key);
-            void existing.dispose();
+            void existing.dispose().catch(() => undefined);
         }
         let pending = pendingConnections.get(key);
         if (!pending) {
@@ -452,7 +450,7 @@ export class VeyonClient {
                 const key = connectionKey(this.organizationId, this.userId, host);
                 if (connections.get(key) === connection) {
                     connections.delete(key);
-                    void connection.dispose();
+                    void connection.dispose().catch(() => undefined);
                 }
                 if (attempt !== 0) throw error;
                 veyonLogger.info('Veyon connection invalid for {host}, reauthenticating', { host, organizationId: this.organizationId });
@@ -516,8 +514,8 @@ export class VeyonClient {
         return (await this.authenticatedRequest(host, '/feature')).json();
     }
 
-    async featureStatus(host: string, uid: string) {
-        return (await this.authenticatedRequest(host, `/feature/${uid}`)).json();
+    async featureStatus(host: string, uid: string, signal?: AbortSignal) {
+        return (await this.authenticatedRequest(host, `/feature/${uid}`, { signal })).json();
     }
 
     async setFeature(
@@ -525,11 +523,13 @@ export class VeyonClient {
         uid: string,
         active: boolean,
         args: Record<string, unknown> = {},
+        signal?: AbortSignal,
     ) {
         await this.authenticatedRequest(host, `/feature/${uid}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ active, arguments: args }),
+            signal,
         });
     }
 }

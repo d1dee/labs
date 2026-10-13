@@ -10,8 +10,36 @@ import {
 } from '../demo';
 import { credentialsComplete, getFogClient, getFogCredentials } from '../fog';
 import { createApp } from './context';
+import { z } from 'zod';
 
 export const fogRouter = createApp();
+
+const positiveId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+fogRouter.use('/fog/*', async (c, next) => {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Not authenticated' }, 401);
+    if (!user.organizationId) return c.json({ error: 'You must join an organization first' }, 403);
+    const path = c.req.path;
+    const rawId = path.match(/\/fog\/(?:hosts|tasks)\/([^/]+)/)?.[1];
+    if (rawId && rawId !== 'active' &&
+        (!/^-?[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(Number(rawId)) ||
+            (Number(rawId) < 0 && !isDemoUser(user)))) {
+        return c.json({ error: 'Invalid resource ID' }, 400);
+    }
+    if (['POST', 'PUT'].includes(c.req.method) && !/\/tasks\/[^/]+\/(cancel|force)$/.test(path)) {
+        try {
+            const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+            if (/\/hosts\/[^/]+\/task$/.test(path)) {
+                z.union([positiveId, z.string().regex(/^[1-9]\d*$/).transform(Number).pipe(positiveId)]).parse(body.taskType);
+            } else if (/\/hosts\/[^/]+\/snapin-task$/.test(path)) {
+                positiveId.parse(body.snapinID);
+            } else if (/\/tasks\/[^/]+\/restart$/.test(path)) {
+                z.object({ hostId: positiveId.optional(), taskTypeId: positiveId.optional() }).parse(body);
+            }
+        } catch { return c.json({ error: 'Invalid request body' }, 400); }
+    }
+    await next();
+});
 
 fogRouter.get('/fog/status', async (c) => {
     const user = c.get('user');
@@ -134,11 +162,11 @@ fogRouter.post('/fog/hosts', async (c) => {
             const demoId = generateDemoFogHostId();
             await createDemoFogHost(user.id, demoId, body);
             return c.json({
-                id: demoId,
                 name: (body.name as string) || 'Demo Host',
                 description: (body.description as string) || '',
                 macs: (body.macs as string[]) || [],
                 ...body,
+                id: demoId,
             });
         }
 
@@ -180,7 +208,7 @@ fogRouter.put('/fog/hosts/:id', async (c) => {
                 const overrides = await getDemoFogHostOverrides(user.id);
                 return c.json(applyDemoFogHost(result.data, overrides, id));
             }
-            return c.json({ id, ...body });
+            return c.json({ ...body, id });
         }
 
         const result = await client.updateHost(id, body);

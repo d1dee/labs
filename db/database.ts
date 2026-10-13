@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import * as schema from '../db/schema';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '..', 'teachers.db');
+const DB_PATH = process.env.DATABASE_PATH || (process.env.NODE_ENV === 'test' ? ':memory:' : path.join(__dirname, '..', 'teachers.db'));
 
 // Initialize Bun's built-in SQLite database
 const sqliteDb = new Database(DB_PATH);
@@ -13,6 +13,47 @@ sqliteDb.run('PRAGMA journal_mode = WAL');
 sqliteDb.run('PRAGMA foreign_keys = ON');
 // Serialize concurrent startups instead of failing instantly on lock.
 sqliteDb.run('PRAGMA busy_timeout = 5000');
+
+// SQLite cannot drop NOT NULL in place. Preserve explicit rowids because they
+// break ties between history events with the same timestamp. Disable FK checks
+// outside the transaction so legacy orphaned actors are preserved as well.
+sqliteDb.run('PRAGMA foreign_keys = OFF');
+try {
+    sqliteDb.transaction(() => {
+        const columns = sqliteDb.query('PRAGMA table_info(activationHistory)').all() as Array<{
+            name: string;
+            notnull: number;
+        }>;
+        // Fresh databases still use the existing schema bootstrap.
+        if (!columns.length) return;
+        const hasSource = columns.some((column) => column.name === 'source');
+        if (columns.find((column) => column.name === 'triggeredBy')?.notnull) {
+            const dependents = sqliteDb.query(`SELECT sql FROM sqlite_master
+                WHERE tbl_name = 'activationHistory' AND type IN ('index', 'trigger')
+                AND sql IS NOT NULL`).all() as Array<{ sql: string }>;
+            sqliteDb.run(`CREATE TABLE activationHistory_upgrade (
+                id TEXT PRIMARY KEY NOT NULL,
+                labId TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                triggeredBy TEXT,
+                source TEXT NOT NULL DEFAULT 'app',
+                createdAt INTEGER NOT NULL,
+                FOREIGN KEY (triggeredBy) REFERENCES user(id) ON DELETE SET NULL
+            )`);
+            sqliteDb.run(`INSERT INTO activationHistory_upgrade
+                (rowid, id, labId, enabled, triggeredBy, source, createdAt)
+                SELECT rowid, id, labId, enabled, triggeredBy,
+                    ${hasSource ? 'source' : "'app'"}, createdAt FROM activationHistory`);
+            sqliteDb.run('DROP TABLE activationHistory');
+            sqliteDb.run('ALTER TABLE activationHistory_upgrade RENAME TO activationHistory');
+            for (const dependent of dependents) sqliteDb.run(dependent.sql);
+        } else if (!hasSource) {
+            sqliteDb.run("ALTER TABLE activationHistory ADD COLUMN source TEXT NOT NULL DEFAULT 'app'");
+        }
+    }).immediate();
+} finally {
+    sqliteDb.run('PRAGMA foreign_keys = ON');
+}
 
 // This project predates checked-in Drizzle migrations. Keep the additive
 // Veyon tables self-initializing so existing installations can upgrade safely.
@@ -85,7 +126,9 @@ if (labColumns.length && !labColumns.some((column) => column.name === 'interface
 
 // Preserve username access for accounts created with the old synthetic email flow.
 // New signups cannot use this domain, and real addresses still require verification.
-sqliteDb.run("UPDATE user SET emailVerified = 1 WHERE lower(email) LIKE '%@local.lan' AND emailVerified = 0");
+if (sqliteDb.query('PRAGMA table_info(user)').all().length) {
+    sqliteDb.run("UPDATE user SET emailVerified = 1 WHERE lower(email) LIKE '%@local.lan' AND emailVerified = 0");
+}
 
 // Create Drizzle database instance with Better Auth schema
 export const db = drizzle({ client: sqliteDb, schema });
