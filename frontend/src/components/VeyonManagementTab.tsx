@@ -40,7 +40,6 @@ import {
     ScrollArea,
     Scroller,
     Select,
-    SimpleGrid,
     Stack,
     Table,
     Text,
@@ -721,18 +720,19 @@ function CommandDeck({
         [uniqueFeatures],
     );
 
-    return (
-        <Card withBorder radius='lg' p='sm' miw={0}>
-            <Stack gap='xs'>
+    const controls = (
+            <Stack gap='xs' miw={0}>
+                {!targetName ? (
                 <Group justify='space-between'>
                     <Stack gap={0}>
                         <Title order={4}>Command deck</Title>
                         <Text size='sm' c='dimmed'>
-                            {targetName ? `Controls apply only to ${targetName}` : selectedCount ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed` : 'Select computers to enable controls'}
+                            {selectedCount ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed` : 'Select computers to enable controls'}
                         </Text>
                     </Stack>
                     <Badge variant='dot' color={selectedCount ? 'teal' : 'gray'}>{selectedCount} selected</Badge>
                 </Group>
+                ) : null}
 
                 <Scroller
                     startControlProps={{ 'aria-label': 'Scroll actions left' }}
@@ -885,8 +885,8 @@ function CommandDeck({
                     </Stack>
                 ) : null}
             </Stack>
-        </Card>
     );
+    return targetName ? controls : <Card withBorder radius='lg' p='sm' miw={0}>{controls}</Card>;
 }
 
 function LockControl({ label, icon: Icon, unlockIcon: UnlockIcon, disabled, onLock, onUnlock }: {
@@ -1033,6 +1033,16 @@ function RemoteViewer({ computer, onClose, onCommand, onConfirm }: {
                             </Tooltip>
                         ) : null}
                         {information?.user.login ? <Text size='sm' c='dimmed'>{information.user.fullName || information.user.login}</Text> : null}
+                        {information ? (
+                            <Group gap='sm' style={{ overflowWrap: 'anywhere' }}>
+                                <Text size='xs' c='dimmed'>Session {information.session.sessionId}</Text>
+                                <Text size='xs' c='dimmed'>{information.session.sessionHostName || computer.host}</Text>
+                                <Text size='xs' c='dimmed'>Uptime {information.session.sessionUptime >= 0 ? `${Math.floor(information.session.sessionUptime / 60)} min` : 'unavailable'}</Text>
+                            </Group>
+                        ) : null}
+                        <Tooltip label='Use the command deck for controls. Direct pointer and keyboard input are not supported.'>
+                            <Text size='xs' c='dimmed'>Read-only preview</Text>
+                        </Tooltip>
                     </Group>
                     <Group gap='xs'>
                         <Button component='a' href={veyonFramebufferUrl(computer.id, { download: true })} variant='light'>Screenshot</Button>
@@ -1050,19 +1060,7 @@ function RemoteViewer({ computer, onClose, onCommand, onConfirm }: {
                 <ScrollArea bg='dark.9' style={{ borderRadius: 'var(--mantine-radius-md)' }}>
                     <Image src={frame?.image ?? undefined} onError={() => setFailedImage(frame?.image ?? null)} alt={`Live screen of ${computer.name}`} fit='contain' mah='72vh' fallbackSrc='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="450"%3E%3Crect width="100%25" height="100%25" fill="%23252b32"/%3E/svg%3E' />
                 </ScrollArea>
-                {information ? (
-                    <SimpleGrid cols={{ base: 1, sm: 3 }}>
-                        <SessionField label='Session ID' value={String(information.session.sessionId)} />
-                        <SessionField label='Session host' value={information.session.sessionHostName || computer.host} />
-                        <SessionField label='Uptime' value={`${Math.floor(information.session.sessionUptime / 60)} minutes`} />
-                    </SimpleGrid>
-                ) : null}
-                <Text size='xs' c='dimmed'>Use the command deck to control this computer. The screen preview is read-only because the Veyon WebAPI has no pointer or keyboard endpoint.</Text>
             </Stack>
         </Modal>
     );
-}
-
-function SessionField({ label, value }: { label: string; value: string }) {
-    return <Paper withBorder p='xs'><Text size='xs' c='dimmed'>{label}</Text><Text size='sm' fw={600}>{value}</Text></Paper>;
 }
