@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { firewallConfig } from '../db/schema';
+import { addressInRange, ipv4Range } from '../frontend/src/api/network';
 
 interface MikrotikResponse {
     success: boolean;
@@ -219,12 +220,12 @@ export async function toggleRuleDisabled(
 
 export async function getDHCPLeases(
     organizationId: string,
-    pool: string,
+    pool?: string,
 ): Promise<MikrotikResponse> {
     // Get DHCP leases
     return callMikrotik(
         organizationId,
-        `/ip/dhcp-server/lease?server=${encodeURIComponent(pool)}`,
+        `/ip/dhcp-server/lease${pool ? `?server=${encodeURIComponent(pool)}` : ''}`,
     );
 }
 
@@ -246,20 +247,8 @@ export async function getInterfaceUsage(organizationId: string, name: string): P
     return rx !== null && tx !== null && Number.isSafeInteger(rx + tx) ? rx + tx : null;
 }
 
-function ipv4(address: string): number | null {
-    const parts = address.split('.');
-    if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return null;
-    return parts.reduce((value, part) => value * 256 + Number(part), 0) >>> 0;
-}
-
 export function addressInSubnet(address: string, subnet: string): boolean {
-    const [network, prefix = '32', extra] = subnet.split('/');
-    if (extra !== undefined || !/^\d{1,2}$/.test(prefix) || Number(prefix) > 32) return false;
-    const ip = ipv4(address);
-    const base = ipv4(network ?? '');
-    if (ip === null || base === null) return false;
-    const mask = Number(prefix) === 0 ? 0 : (0xffffffff << (32 - Number(prefix))) >>> 0;
-    return (ip & mask) === (base & mask);
+    return addressInRange(address, subnet);
 }
 
 export function countOnlineDevices(
@@ -267,7 +256,7 @@ export function countOnlineDevices(
     leases: any[] | null,
     details: { interface?: string; subnet?: string; dhcpServer?: string },
 ): { connected: number | null; source: 'arp' | 'dhcp' | 'unavailable' } {
-    if (details.subnet && !addressInSubnet(details.subnet.split('/')[0] ?? '', details.subnet)) {
+    if (details.subnet && !ipv4Range(details.subnet)) {
         return { connected: null, source: 'unavailable' };
     }
     const scopedLeases = leases?.filter((lease) =>

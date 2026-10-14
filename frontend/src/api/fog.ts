@@ -484,7 +484,7 @@ export async function createFogTask(
         `/api/fog/hosts/${hostId}/task`,
         {
             method: 'POST',
-            body: { taskTypeID: taskTypeId, ...options },
+            body: { ...options, taskType: taskTypeId },
         },
     );
     if (error) {

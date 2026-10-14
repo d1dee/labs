@@ -20,7 +20,7 @@ export interface DeviceDirectoryInput {
     updatedAt?: string;
     labs?: ComputerLocationLab[];
     leases?: RouterRow[];
-    /** All assigned-server reads succeeded, even if the scoped inventory is marked partial. */
+    /** The full lease read succeeded, even though the returned inventory is organization-scoped. */
     dhcpComplete?: boolean;
     arp?: RouterRow[];
     fogHosts?: FogRow[];
@@ -52,6 +52,11 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         updatedAt: configured[source] === undefined ? null : updatedAt,
     }])) as DeviceDirectory['sources'];
     const observations: Observation[] = [];
+    const knownMacs = new Set(macs([
+        ...(input.computers ?? []).map((computer) => computer.macAddress),
+        ...(input.fogHosts ?? []).flatMap((computer) => [computer.primac,
+            ...(Array.isArray(computer.macs) ? computer.macs.map((entry) => typeof entry === 'string' ? entry : entry?.mac) : [])]),
+    ]));
     const add = (row: Observation) => {
         if (row.names.length || row.addresses.length || row.macs.length || row.fogIds.length || row.veyonIds.length) observations.push(row);
     };
@@ -59,16 +64,18 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         if (!row || row.status !== 'bound' || flag(row.disabled) || flag(row.invalid)) continue;
         const server = text(row['active-server'] || row.server);
         const leaseAddresses = addresses([row['active-address'] || row.address]);
-        if (input.labs !== undefined && !input.labs.some((lab) => lab.dhcpServer && lab.dhcpServer === server &&
-            (!lab.subnet || leaseAddresses.some((address) => addressInSubnet(address, lab.subnet!))))) continue;
+        const leaseMacs = macs([row['active-mac-address'] || row['mac-address']]);
+        if (input.labs !== undefined && !leaseMacs.some((mac) => knownMacs.has(mac)) && !input.labs.some((lab) =>
+            lab.subnet ? leaseAddresses.some((address) => addressInSubnet(address, lab.subnet!))
+                : lab.dhcpServer && lab.dhcpServer === server)) continue;
         add({ source: 'dhcp', names: names([row['host-name']]), addresses: leaseAddresses,
-            macs: macs([row['active-mac-address'] || row['mac-address']]),
+            macs: leaseMacs,
             server, fogIds: [], veyonIds: [] });
     }
     for (const row of input.arp ?? []) {
         if (!row || !['reachable', 'delay', 'probe'].includes(row.status ?? '') || flag(row.disabled) || flag(row.invalid) || flag(row.published)) continue;
         // Router credentials may see several organizations. Only assigned lab scopes are ours.
-        if (input.labs !== undefined && !input.labs.some((lab) => {
+        if (input.labs !== undefined && !macs([row['mac-address']]).some((mac) => knownMacs.has(mac)) && !input.labs.some((lab) => {
             if (lab.interface && row.interface !== lab.interface) return false;
             if (lab.subnet && !addressInSubnet(text(row.address), lab.subnet)) return false;
             if (lab.interface || lab.subnet) return true;
@@ -195,7 +202,11 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         const veyonComputerIds = unique(group.flatMap((row) => row.veyonIds)).sort();
         const hostnames = unique(ordered.filter((row) => !row.historical || !live.length).flatMap((row) => row.names));
         const matches = new Map<string, ComputerLocationLab>();
-        if (input.dhcpComplete ?? sources.dhcp.state === 'available') for (const row of group.filter((entry) => entry.source === 'dhcp')) {
+        if (!group.some((row) => row.invalidMac)) for (const lab of input.labs ?? []) {
+            if (lab.subnet && deviceAddresses.some((address) => addressInSubnet(address, lab.subnet!))) matches.set(lab.id, lab);
+        }
+        // Server-based detection is a fallback for labs without a usable address match.
+        if (!matches.size && (input.dhcpComplete ?? sources.dhcp.state === 'available')) for (const row of group.filter((entry) => entry.source === 'dhcp')) {
             for (const lab of input.labs ?? []) if (row.addresses.length && lab.dhcpServer && row.server === lab.dhcpServer &&
                 (!lab.subnet || row.addresses.some((address) => addressInSubnet(address, lab.subnet!)))) matches.set(lab.id, lab);
         }
@@ -203,10 +214,11 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         const manual = unique(group.map((row) => row.location).filter((value): value is string => Boolean(value)));
         const id = veyonComputerIds.length ? `veyon:${veyonComputerIds[0]}` : fogHostIds.length ? `fog:${fogHostIds[0]}` : deviceMacs.length ? `mac:${[...deviceMacs].sort()[0]}` : `observed:${createHash('sha256').update(JSON.stringify([hostnames.slice().sort(), deviceAddresses])).digest('hex').slice(0, 20)}`;
         return { id, hostname: hostnames[0] ?? null, hostnames, addresses: deviceAddresses,
-            macAddresses: deviceMacs.sort(), lab: lab ? { id: lab.id, name: lab.name, dhcpServer: lab.dhcpServer! } : null,
+            macAddresses: deviceMacs.sort(), lab: lab ? { id: lab.id, name: lab.name, dhcpServer: lab.dhcpServer } : null,
             location: lab?.name ?? (manual.length === 1 ? manual[0]! : null), sources: unique(ordered.map((row) => row.source)), veyonComputerIds, fogHostIds };
     });
-    return { organizationId: input.organizationId, updatedAt, devices: devices.sort((a, b) => a.id.localeCompare(b.id)), sources };
+    return { organizationId: input.organizationId, updatedAt, devices: devices.sort((a, b) => a.id.localeCompare(b.id)), sources,
+        labs: (input.labs ?? []).map(({ id, name, dhcpServer, subnet }) => ({ id, name, dhcpServer, subnet })) };
 }
 
 const dependencies = {
@@ -247,7 +259,7 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
             attempt(() => deps.loadFirewall(organizationId)), attempt(() => deps.loadFogConfig(organizationId)),
             attempt(() => deps.loadPiholeConfig(organizationId)), attempt(() => deps.loadComputers(organizationId)),
         ]);
-        const signature = createHash('sha256').update(JSON.stringify([firewall, fog, pihole, computers])).digest('hex');
+        const signature = createHash('sha256').update(JSON.stringify([3, firewall, fog, pihole, computers])).digest('hex');
         const now = deps.now();
         for (const [org, entry] of cache) if (entry.expiresAt <= now) cache.delete(org);
         const cached = cache.get(organizationId);
@@ -271,20 +283,21 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
             if (firewall.ok) input.labs = firewall.value?.labs ?? [];
             const config = firewall.ok ? firewall.value : undefined;
             const routerConfigured = Boolean(config?.mikrotikBaseUrl && config.mikrotikUsername && config.mikrotikPassword);
-            const servers = unique((input.labs ?? []).map((lab) => lab.dhcpServer).filter((server): server is string => Boolean(server)));
+            const hasDeviceScope = (input.labs ?? []).some((lab) => lab.subnet || lab.interface || lab.dhcpServer) ||
+                (input.computers ?? []).some((computer) => Boolean(normalizeDeviceMac(computer.macAddress ?? ''))) || credentialsComplete(fog.ok ? fog.value : undefined);
             await Promise.all([
                 (async () => {
                     if (!firewall.ok) { mark('dhcp', 'unavailable'); return; }
-                    if (!routerConfigured || !servers.length) return;
-                    const responses = await Promise.all(servers.map((server) => attempt(() => deps.getDHCPLeases(organizationId, server))));
-                    const good = responses.filter((response) => response.ok && response.value.success && Array.isArray(response.value.data));
-                    input.leases = good.flatMap((response) => response.ok ? response.value.data : []);
-                    input.dhcpComplete = good.length === responses.length;
-                    mark('dhcp', good.length ? 'partial' : 'unavailable');
+                    if (!routerConfigured || !hasDeviceScope) return;
+                    // Server names can change; scope the response by lab ranges and known device MACs before persistence.
+                    const response = await attempt(() => deps.getDHCPLeases(organizationId));
+                    input.dhcpComplete = response.ok && response.value.success && Array.isArray(response.value.data);
+                    if (input.dhcpComplete && response.ok) input.leases = response.value.data;
+                    mark('dhcp', input.dhcpComplete ? 'partial' : 'unavailable');
                 })(),
                 (async () => {
                     if (!firewall.ok) { mark('arp', 'unavailable'); return; }
-                    if (!routerConfigured || !(input.labs ?? []).some((lab) => lab.subnet || lab.interface || lab.dhcpServer)) return;
+                    if (!routerConfigured || !hasDeviceScope) return;
                     const response = await attempt(() => deps.callMikrotik(organizationId, '/ip/arp'));
                     if (response.ok && response.value.success && Array.isArray(response.value.data)) { input.arp = response.value.data; mark('arp', 'partial'); }
                     else mark('arp', 'unavailable');

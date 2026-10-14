@@ -1,12 +1,12 @@
 import {
     configureSync,
+    defaultConsoleFormatter,
     getConsoleSink,
     getLogger,
     type LogLevel,
 } from '@logtape/logtape';
 
-// VITE_LOG_LEVEL overrides the default threshold (debug in development,
-// info in production) for every logger under the ["labs", "frontend"] root.
+// Request traces are opt-in via VITE_LOG_LEVEL=debug.
 function resolveLevel(): LogLevel {
     const raw = import.meta.env.VITE_LOG_LEVEL?.trim().toLowerCase();
     if (
@@ -19,7 +19,7 @@ function resolveLevel(): LogLevel {
     ) {
         return raw;
     }
-    return import.meta.env.DEV ? 'debug' : 'info';
+    return 'info';
 }
 
 // Configure LogTape synchronously before React renders: import this module
@@ -27,7 +27,14 @@ function resolveLevel(): LogLevel {
 // console sink (the file sink from @logtape/file is Node/Bun-only).
 configureSync({
     sinks: {
-        console: getConsoleSink(),
+        console: getConsoleSink({
+            formatter: (record) => {
+                const summary = defaultConsoleFormatter(record);
+                return ['warning', 'error', 'fatal'].includes(record.level)
+                    ? [...summary, record.properties]
+                    : summary;
+            },
+        }),
     },
     loggers: [
         {

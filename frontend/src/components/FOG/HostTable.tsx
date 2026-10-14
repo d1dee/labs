@@ -1,5 +1,7 @@
 import type { FogHost, ListFogHosts } from '@/api/fog';
 import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
+import { useFogHostStatus } from '@/api/useFogHostStatus';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
@@ -49,8 +51,12 @@ export function HostTable({
     loading,
 }: HostTableProps) {
     const identities = useDeviceIdentities();
+    const statusFor = useFogHostStatus(allHosts, identities.lookup);
     const identitySearchText = useCallback((host: FogHost) =>
         deviceIdentitySearchText(identities.lookup({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0] })), [identities.lookup]);
+    const labIdFor = useCallback((host: FogHost) => identities.labFor({
+        fogHostId: host.id, macAddress: host.primac || host.macs?.[0], address: host.ip,
+    })?.id ?? null, [identities.labFor]);
     const {
         filters,
         deferredFilters,
@@ -63,7 +69,7 @@ export function HostTable({
         statusOptions,
         manufacturerOptions,
         modelOptions,
-    } = useHostFilters(allHosts, identitySearchText);
+    } = useHostFilters(allHosts, statusFor, identitySearchText, labIdFor);
 
     const [page, setPage] = useState(1);
     const [sort, setSort] = useState<SortState<'id' | 'name' | 'image' | 'inventory' | 'status'> | null>(null);
@@ -80,16 +86,16 @@ export function HostTable({
         const value = (host: FogHost) => {
             switch (sort.key) {
                 case 'id': return Number(host.id);
-                case 'name': return host.name;
+                case 'name': return identities.lookup({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0] })?.hostname || host.name;
                 case 'image': return host.imagename || null;
                 case 'inventory': return host.inventory
                     ? `${host.inventory.sysman || 'Unknown'} / ${host.inventory.sysproduct || 'Unknown'}`
                     : null;
-                case 'status': return host.pingstatustext || 'unknown';
+                case 'status': return statusFor(host);
             }
         };
         return [...filteredHosts].sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
-    }, [filteredHosts, sort]);
+    }, [filteredHosts, sort, identities.lookup, statusFor]);
 
     const paginatedHosts = useMemo(
         () => sortedHosts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
@@ -129,6 +135,7 @@ export function HostTable({
                 <Stack gap='md'>
                     {identities.warning ? <Text size='xs' c='dimmed' role='status'>{identities.warning}</Text> : null}
                     <HostFilterPanel
+                        labOptions={identities.labs.map((lab) => ({ value: lab.id, label: lab.name }))}
                         filters={filters}
                         setFilter={setFilter}
                         clearFilters={clearFilters}
@@ -300,9 +307,12 @@ export function HostTable({
                                                 </Table.Td>
                                                 <Table.Td>{host.id}</Table.Td>
                                                 <Table.Td>
-                                                    <Text size='sm' fw={500}>
-                                                        {host.name}
-                                                    </Text>
+                                                    <DeviceIdentityDetails
+                                                        identity={identities.lookup({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0] })}
+                                                        hostname={host.name}
+                                                        address={host.ip}
+                                                        lab={identities.labFor({ fogHostId: host.id, macAddress: host.primac || host.macs?.[0], address: host.ip })}
+                                                    />
                                                     <Text
                                                         size='sm'
                                                         c='dimmed'
@@ -337,18 +347,9 @@ export function HostTable({
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Badge
-                                                        color={
-                                                            host.pingstatuscode ===
-                                                            0
-                                                                ? 'green'
-                                                                : host.pingstatuscode ===
-                                                                    1
-                                                                  ? 'red'
-                                                                  : 'gray'
-                                                        }
+                                                        color={statusFor(host) === 'Online' ? 'green' : 'red'}
                                                     >
-                                                        {host.pingstatustext ||
-                                                            'unknown'}
+                                                        {statusFor(host)}
                                                     </Badge>
                                                 </Table.Td>
                                                 <Table.Td>

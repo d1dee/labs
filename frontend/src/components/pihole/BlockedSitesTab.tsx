@@ -4,6 +4,7 @@ import {
     deviceIdentitySearchText,
     useDeviceIdentities,
 } from '@/api/useDeviceIdentities';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import {
     MobileFilterPanel,
     MobileFilterToggle,
@@ -71,6 +72,7 @@ const BlockedSitesTab: FC = () => {
     const [status, setStatus] = useState('all');
     const [outcome, setOutcome] = useState('all');
     const [type, setType] = useState('all');
+    const [labId, setLabId] = useState('all');
     const [blockDomain, setBlockDomain] = useState<string | null>(null);
     const [blockKind, setBlockKind] = useState<'exact' | 'regex'>('exact');
     const [blockRule, setBlockRule] = useState('');
@@ -144,15 +146,24 @@ const BlockedSitesTab: FC = () => {
         : null;
     const incompleteRange = Boolean(dateRange[0] && !dateRange[1]);
     const visibleQueries = queries
+        .map((q) => {
+            const client = { address: q.client.ip, hostname: q.client.name };
+            return {
+                ...q,
+                identity: identities.lookup(client),
+                lab: identities.labFor(client),
+            };
+        })
         .filter(
             (q) =>
-                `${q.domain} ${q.client.name} ${q.client.ip} ${deviceIdentitySearchText(identities.lookup({ address: q.client.ip, hostname: q.client.name }))}`
+                `${q.domain} ${q.client.name} ${q.client.ip} ${deviceIdentitySearchText(q.identity)} ${q.lab?.name ?? ''} ${q.lab?.dhcpServer ?? ''}`
                     .toLowerCase()
                     .includes(search.trim().toLowerCase()) &&
                 (status === 'all' || q.status === status) &&
                 (outcome === 'all' ||
                     isBlockedStatus(q.status) === (outcome === 'blocked')) &&
                 (type === 'all' || q.type === type) &&
+                (labId === 'all' || q.lab?.id === labId) &&
                 (incompleteRange ||
                     ((from === null || q.time >= from) &&
                         (until === null || q.time <= until))),
@@ -160,24 +171,10 @@ const BlockedSitesTab: FC = () => {
         .sort((a, b) =>
             compareTableValues(
                 sort.key === 'client'
-                    ? deviceIdentitySearchText(
-                          identities.lookup({
-                              address: a.client.ip,
-                              hostname: a.client.name,
-                          }),
-                      ) ||
-                          a.client.name ||
-                          a.client.ip
+                    ? a.identity?.hostname || a.client.name || a.client.ip
                     : a[sort.key],
                 sort.key === 'client'
-                    ? deviceIdentitySearchText(
-                          identities.lookup({
-                              address: b.client.ip,
-                              hostname: b.client.name,
-                          }),
-                      ) ||
-                          b.client.name ||
-                          b.client.ip
+                    ? b.identity?.hostname || b.client.name || b.client.ip
                     : b[sort.key],
                 sort.direction,
             ),
@@ -190,6 +187,7 @@ const BlockedSitesTab: FC = () => {
             status,
             outcome,
             type,
+            labId,
             dateRange,
             sort.key,
             sort.direction,
@@ -277,6 +275,20 @@ const BlockedSitesTab: FC = () => {
                     id={filters.controlsId}
                 >
                     <Group grow preventGrowOverflow={false} align='flex-end'>
+                        <Select
+                            miw={{ base: '100%', sm: 180 }}
+                            label='Lab'
+                            value={labId}
+                            allowDeselect={false}
+                            onChange={(value) => setLabId(value ?? 'all')}
+                            data={[
+                                { value: 'all', label: 'All labs' },
+                                ...identities.labs.map((lab) => ({
+                                    value: lab.id,
+                                    label: lab.name,
+                                })),
+                            ]}
+                        />
                         <Select
                             miw={{ base: '100%', sm: 180 }}
                             label='Query outcome'
@@ -413,18 +425,12 @@ const BlockedSitesTab: FC = () => {
                                                     </Text>
                                                 </Table.Td>
                                                 <Table.Td>
-                                                    <Text size='sm'>
-                                                        {q.client.name ||
-                                                            q.client.ip}
-                                                    </Text>
-                                                    {q.client.name ? (
-                                                        <Text
-                                                            size='xs'
-                                                            c='dimmed'
-                                                        >
-                                                            {q.client.ip}
-                                                        </Text>
-                                                    ) : null}
+                                                    <DeviceIdentityDetails
+                                                        identity={q.identity}
+                                                        hostname={q.client.name}
+                                                        address={q.client.ip}
+                                                        lab={q.lab}
+                                                    />
                                                 </Table.Td>
                                                 <Table.Td>
                                                     <Badge

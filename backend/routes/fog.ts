@@ -11,8 +11,10 @@ import {
 import { credentialsComplete, getFogClient, getFogCredentials } from '../fog';
 import { createApp } from './context';
 import { z } from 'zod';
+import { errorProperty, getLogger } from '../logger';
 
 export const fogRouter = createApp();
+const fogLogger = getLogger(['labs', 'fog', 'routes']);
 
 const positiveId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 fogRouter.use('/fog/*', async (c, next) => {
@@ -36,7 +38,10 @@ fogRouter.use('/fog/*', async (c, next) => {
             } else if (/\/tasks\/[^/]+\/restart$/.test(path)) {
                 z.object({ hostId: positiveId.optional(), taskTypeId: positiveId.optional() }).parse(body);
             }
-        } catch { return c.json({ error: 'Invalid request body' }, 400); }
+        } catch (error) {
+            fogLogger.warn('Invalid FOG request body', { method: c.req.method, path, error: errorProperty(error) });
+            return c.json({ error: 'Invalid request body' }, 400);
+        }
     }
     await next();
 });
@@ -176,6 +181,7 @@ fogRouter.post('/fog/hosts', async (c) => {
         }
         return c.json(result.data);
     } catch (error) {
+        fogLogger.error('FOG host creation failed', { error: errorProperty(error) });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -217,6 +223,7 @@ fogRouter.put('/fog/hosts/:id', async (c) => {
         }
         return c.json(result.data);
     } catch (error) {
+        fogLogger.error('FOG host update failed', { hostId: id, error: errorProperty(error) });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -358,7 +365,7 @@ fogRouter.post('/fog/hosts/:id/task', async (c) => {
 
     try {
         const body = await c.req.json<{
-            taskType: string;
+            taskType: string | number;
             [key: string]: unknown;
         }>();
         const client = await getFogClient(user.organizationId);
@@ -371,7 +378,7 @@ fogRouter.post('/fog/hosts/:id/task', async (c) => {
         const { taskType, ...options } = body;
         const result = await client.createTask(
             hostId,
-            parseInt(body.taskType, 10),
+            Number(taskType),
             options,
         );
         if (!result.success) {
@@ -379,6 +386,7 @@ fogRouter.post('/fog/hosts/:id/task', async (c) => {
         }
         return c.json(result.data);
     } catch (error) {
+        fogLogger.error('FOG task creation failed', { hostId, error: errorProperty(error) });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -472,6 +480,7 @@ fogRouter.post('/fog/tasks/:id/restart', async (c) => {
         }
         return c.json({ success: true });
     } catch (error) {
+        fogLogger.error('FOG task restart failed', { taskId, error: errorProperty(error) });
         return c.json({ error: String(error) }, 500);
     }
 });
@@ -510,6 +519,7 @@ fogRouter.post('/fog/hosts/:id/snapin-task', async (c) => {
         }
         return c.json(result.data);
     } catch (error) {
+        fogLogger.error('FOG snapin task creation failed', { hostId, error: errorProperty(error) });
         return c.json({ error: String(error) }, 500);
     }
 });

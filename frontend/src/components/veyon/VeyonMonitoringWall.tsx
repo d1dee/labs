@@ -3,6 +3,9 @@ import {
     type VeyonComputer,
 } from '@/api/veyon';
 import type { LiveState } from '@/components/VeyonManagementTab';
+import type { DeviceIdentity, DeviceLab } from '@/api/devices';
+import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import {
     useVeyonScreenshots,
     type VeyonScreenshotFrame,
@@ -17,6 +20,7 @@ import {
     Paper,
     Popover,
     SegmentedControl,
+    Select,
     Stack,
     Text,
     TextInput,
@@ -38,7 +42,7 @@ import {
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 const GRID_GAP = 12;
-const ROW_CHROME = 112;
+const ROW_CHROME = 136;
 const MAX_ACTIVE = 64;
 
 const REFRESH_OPTIONS = [
@@ -73,11 +77,13 @@ export default function VeyonMonitoringWall({
     onOpenViewer: (computer: VeyonComputer) => void;
     onCommand: (computerId: string, action: VeyonCommandAction) => void | Promise<void>;
 }) {
+    const identities = useDeviceIdentities();
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [columns, setColumns] = useState('auto');
     const [refresh, setRefresh] = useState('10000');
     const [search, setSearch] = useState('');
     const [selectionSearch, setSelectionSearch] = useState('');
+    const [labFilter, setLabFilter] = useState<string | null>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewport, setViewport] = useState({ width: 1024, height: 600 });
     const [activeIds, setActiveIds] = useState<string[]>([]);
@@ -96,6 +102,8 @@ export default function VeyonMonitoringWall({
                   .map((computer) => computer.id);
         setSelectedIds([...new Set(base)]);
         setSearch('');
+        setSelectionSearch('');
+        setLabFilter(null);
         setScrollTop(0);
     }, [opened]);
 
@@ -103,9 +111,15 @@ export default function VeyonMonitoringWall({
 
     const selectedSet = new Set(selectedIds);
     const selectedComputers = computers.filter((computer) => selectedSet.has(computer.id));
+    const identityQuery = (computer: VeyonComputer) => ({
+        veyonComputerId: computer.id, macAddress: computer.macAddress, address: computer.host,
+    });
+    const matchesLab = (computer: VeyonComputer) => !labFilter || identities.labFor(identityQuery(computer))?.id === labFilter;
     const matchesSearch = (computer: VeyonComputer, query: string) =>
-        `${computer.name} ${computer.host} ${computer.location ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
-    const filteredComputers = selectedComputers.filter((computer) => matchesSearch(computer, search));
+        [computer.name, computer.host, computer.location ?? '', identities.labFor(identityQuery(computer))?.name ?? '',
+            deviceIdentitySearchText(identities.lookup(identityQuery(computer)))]
+            .join(' ').toLowerCase().includes(query.trim().toLowerCase());
+    const filteredComputers = selectedComputers.filter((computer) => matchesLab(computer) && matchesSearch(computer, search));
     const availableColumns = viewport.width < 600 ? 1 : viewport.width < 900 ? 2 : viewport.width < 1200 ? 3 : 4;
     const gridColumns = columns === 'auto'
         ? Math.min(availableColumns, Math.max(1, Math.ceil(Math.sqrt(filteredComputers.length))))
@@ -153,7 +167,7 @@ export default function VeyonMonitoringWall({
     useEffect(() => {
         if (viewportElement) viewportElement.scrollTop = 0;
         setScrollTop(0);
-    }, [search, columns, selectedIds, viewportElement]);
+    }, [search, labFilter, columns, selectedIds, viewportElement]);
 
     useEffect(() => {
         const pinFullscreen = () => setPinnedId(document.fullscreenElement?.getAttribute('data-tile-id') ?? null);
@@ -255,8 +269,12 @@ export default function VeyonMonitoringWall({
                                     <Button variant='subtle' size='xs' onClick={() => setSelectedIds([])}>Clear selection</Button>
                                     <Box style={{ maxHeight: 280, overflowY: 'auto' }}>
                                         <Stack gap='xs'>
-                                            {computers.filter((computer) => matchesSearch(computer, selectionSearch)).map((computer) => (
-                                                <Checkbox key={computer.id} label={computer.name} checked={selectedSet.has(computer.id)}
+                                            {computers.filter((computer) => matchesLab(computer) && matchesSearch(computer, selectionSearch)).map((computer) => (
+                                                <Checkbox key={computer.id} aria-label={computer.name} label={
+                                                    <DeviceIdentityDetails identity={identities.lookup(identityQuery(computer))}
+                                                        hostname={computer.name || computer.host} address={computer.host}
+                                                        lab={identities.labFor(identityQuery(computer))} />
+                                                } checked={selectedSet.has(computer.id)}
                                                     onChange={(event) => {
                                                         const checked = event.currentTarget.checked;
                                                         setSelectedIds((ids) => checked ? [...ids, computer.id] : ids.filter((id) => id !== computer.id));
@@ -267,7 +285,9 @@ export default function VeyonMonitoringWall({
                                 </Stack>
                             </Popover.Dropdown>
                         </Popover>
-                        <Button variant='light' size='sm' style={{ flexShrink: 0 }} onClick={() => setSelectedIds(computers.map((computer) => computer.id))}>Select all</Button>
+                        <Button variant='light' size='sm' style={{ flexShrink: 0 }} onClick={() => setSelectedIds((ids) => [...new Set([...ids, ...computers.filter(matchesLab).map((computer) => computer.id)])])}>Select all</Button>
+                        <Select label='Lab' placeholder='All labs' clearable searchable size='sm' value={labFilter} onChange={setLabFilter}
+                            data={identities.labs.map((lab) => ({ value: lab.id, label: lab.name }))} miw={180} />
                         <TextInput aria-label='Search computers' placeholder='Search name, host or location...' value={search}
                             onChange={(event) => setSearch(event.currentTarget.value)} size='sm' style={{ flex: 1, minWidth: 180 }} />
                     </Group>
@@ -315,6 +335,8 @@ export default function VeyonMonitoringWall({
                             }}>
                             <WallTile
                                 computer={computer}
+                                identity={identities.lookup(identityQuery(computer))}
+                                lab={identities.labFor(identityQuery(computer))}
                                 live={live[computer.id]}
                                 frame={computer.id === pinnedComputer?.id ? fullscreen.frames[computer.id] : frames[computer.id]}
                                 streaming={(computer.id === pinnedComputer?.id ? fullscreen.connected : connected) && refresh !== 'paused'}
@@ -332,7 +354,7 @@ export default function VeyonMonitoringWall({
                         </ThemeIcon>
                         <Text fw={600}>{selectedComputers.length ? 'No matching computers' : 'No computers on the wall'}</Text>
                         <Text size='sm' c='dimmed'>
-                            {selectedComputers.length ? 'Change the search to find a selected computer.' : 'Pick computers above to start live monitoring.'}
+                            {selectedComputers.length ? 'Change the search or lab filter to find a selected computer.' : 'Pick computers above to start live monitoring.'}
                         </Text>
                     </Stack>
                 )}
@@ -437,6 +459,8 @@ const TileImage = memo(function TileImage({
 
 const WallTile = memo(function WallTile({
     computer,
+    identity,
+    lab,
     live,
     frame,
     streaming,
@@ -445,6 +469,8 @@ const WallTile = memo(function WallTile({
     onCommand,
 }: {
     computer: VeyonComputer;
+    identity: DeviceIdentity | null;
+    lab: DeviceLab | null;
     live?: LiveState;
     frame: VeyonScreenshotFrame | undefined;
     streaming: boolean;
@@ -524,12 +550,9 @@ const WallTile = memo(function WallTile({
                             }}
                         />
                         <div style={{ minWidth: 0 }}>
-                            <Text size='sm' fw={600} truncate>
-                                {computer.name}
-                            </Text>
-                            <Text size='xs' c='dimmed' truncate>
-                                {computer.location || 'Unassigned'}
-                            </Text>
+                            <DeviceIdentityDetails identity={identity} hostname={computer.name || computer.host}
+                                address={computer.host} lab={lab} />
+                            {!lab && !identity?.lab ? <Text size='xs' c='dimmed'>{computer.location || 'Unassigned'}</Text> : null}
                         </div>
                     </Group>
                     <Group gap={2} wrap='nowrap'>

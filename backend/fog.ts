@@ -2,6 +2,54 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { fogConfig } from '../db/schema';
 import type { FogHost, ListFogHosts } from '../frontend/src/api';
+import { errorProperty, getLogger } from './logger';
+
+const fogLogger = getLogger(['labs', 'fog']);
+type RequestContext = { method: string; path: string };
+
+// Already logged at the transport/parser boundary; method catches only normalize.
+class LoggedFogError extends Error {}
+
+function loggedError(error: unknown, context: Record<string, unknown>): LoggedFogError {
+    fogLogger.error('FOG operation failed: {error}', { ...context, error: errorProperty(error) });
+    return new LoggedFogError(error instanceof Error ? error.message : String(error), { cause: error });
+}
+
+async function responseText(res: Response, context?: RequestContext): Promise<string> {
+    try {
+        return await res.text();
+    } catch (error) {
+        throw loggedError(error, { ...context, status: res.status });
+    }
+}
+
+function responseError(url: string, res: Response, text: string, context?: RequestContext): string {
+    let error: unknown;
+    let message: string | undefined;
+    try {
+        const json = JSON.parse(text) as { error?: string; message?: string } | null;
+        message = json?.error || json?.message;
+    } catch (caught) {
+        error = caught;
+    }
+    fogLogger.error('FOG upstream request failed (HTTP {status}): {response}', {
+        ...context,
+        status: res.status,
+        response: text,
+        ...(error === undefined ? {} : { error: errorProperty(error) }),
+    });
+    return message || statusMessage(url, res.status, text);
+}
+
+function responseJson(url: string, res: Response, text: string, context?: RequestContext): unknown {
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        const logged = loggedError(error, { ...context, status: res.status, response: text });
+        logged.message = nonJsonMessage(url, res.status, text);
+        throw logged;
+    }
+}
 
 // ===================== Types =====================
 
@@ -150,6 +198,7 @@ function withSynthesizedMacs<T>(hosts: T[]): T[] {
  * /active, /update) are avoided.
  */
 export class FogClient {
+    private responseContexts = new WeakMap<Response, RequestContext>();
     private url: string;
     private apiToken: string;
     private userToken: string;
@@ -190,12 +239,17 @@ export class FogClient {
             'Content-Type': 'application/json',
         };
 
-        const opts: RequestInit = { method, headers, signal: AbortSignal.timeout(15_000) };
-        if (body && (method === 'POST' || method === 'PUT')) {
-            opts.body = JSON.stringify(body);
+        try {
+            const opts: RequestInit = { method, headers, signal: AbortSignal.timeout(15_000) };
+            if (body && (method === 'POST' || method === 'PUT')) {
+                opts.body = JSON.stringify(body);
+            }
+            const res = await fetch(this.fogUrl(path), opts);
+            this.responseContexts.set(res, { method, path });
+            return res;
+        } catch (error) {
+            throw loggedError(error, { method, path });
         }
-
-        return fetch(this.fogUrl(path), opts);
     }
 
     /**
@@ -206,29 +260,24 @@ export class FogClient {
      * body or the JSON string ""; both normalize to null.
      */
     private async readJson(res: Response): Promise<unknown> {
-        const text = await res.text();
+        const context = this.responseContexts.get(res);
+        const text = await responseText(res, context);
         if (!text.trim()) return null;
-        try {
-            const parsed: unknown = JSON.parse(text);
-            return typeof parsed === 'string' && !parsed.trim() ? null : parsed;
-        } catch {
-            throw new Error(nonJsonMessage(this.url, res.status, text));
-        }
+        const parsed = responseJson(this.url, res, text, context);
+        return typeof parsed === 'string' && !parsed.trim() ? null : parsed;
     }
 
     /** Safely extract an error message from a non-OK FOG response. */
     private async errorFrom(res: Response): Promise<string> {
-        const text = await res.text().catch(() => '');
+        const context = this.responseContexts.get(res);
+        let text: string;
         try {
-            const json = JSON.parse(text) as {
-                error?: string;
-                message?: string;
-            };
-            if (json.error || json.message) return json.error || json.message!;
+            text = await responseText(res, context);
         } catch {
-            // Body is not JSON (e.g. an HTML error page); fall through.
+            // responseText logged the original read failure and HTTP context.
+            return statusMessage(this.url, res.status, '');
         }
-        return statusMessage(this.url, res.status, text);
+        return responseError(this.url, res, text, context);
     }
 
     // ---------- System / connection ----------
@@ -616,7 +665,11 @@ function statusMessage(url: string, status: number, body: string): string {
 
 /** Convert an unknown thrown value into a user-presentable message. */
 function errorMessage(err: unknown): string {
+    if (!(err instanceof LoggedFogError)) {
+        fogLogger.error('FOG operation failed: {error}', { error: errorProperty(err) });
+    }
     if (err instanceof Error) {
+        const original = err instanceof LoggedFogError && err.cause instanceof Error ? err.cause : err;
         if (
             err instanceof SyntaxError ||
             /JSON Parse error|not valid JSON|Unexpected token/i.test(err.message)
@@ -625,7 +678,7 @@ function errorMessage(err: unknown): string {
         }
         if (
             /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|network/i.test(
-                `${err.message} ${err.cause instanceof Error ? err.cause.message : ''}`,
+                `${err.message} ${original.cause instanceof Error ? original.cause.message : ''}`,
             )
         ) {
             return 'Could not reach the FOG server. Please verify the FOG server URL in the FOG settings and that the server is online.';
@@ -737,30 +790,19 @@ export async function testFogConnection(
                 'Content-Type': 'application/json',
             },
         });
-        const text = await res.text();
+        const context = { method: 'GET', path: '/fog/host?start=0&length=1' };
+        const text = await responseText(res, context);
         if (!res.ok) {
-            try {
-                const json = JSON.parse(text) as {
-                    error?: string;
-                    message?: string;
-                };
-                if (json.error || json.message) {
-                    return { success: false, error: json.error || json.message };
-                }
-            } catch {
-                // Body is not JSON (e.g. an HTML error page); fall through.
-            }
-            return { success: false, error: statusMessage(url, res.status, text) };
+            return { success: false, error: responseError(url, res, text, context) };
         }
         // A 200 with an HTML body means we reached a web server that is not
         // the FOG API (or an auth redirect); treat it as a failed test.
-        try {
-            JSON.parse(text);
-        } catch {
-            return { success: false, error: nonJsonMessage(url, res.status, text) };
-        }
+        responseJson(url, res, text, context);
         return { success: true };
     } catch (err) {
+        if (!(err instanceof LoggedFogError)) {
+            err = loggedError(err, { method: 'GET', path: '/fog/host?start=0&length=1' });
+        }
         return { success: false, error: errorMessage(err) };
     }
 }

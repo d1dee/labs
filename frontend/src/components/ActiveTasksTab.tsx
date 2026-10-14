@@ -9,6 +9,7 @@ import {
 } from '@/api/fog';
 import { PageHero } from '@/components/ui/PageHero';
 import { useApiStream } from '@/api/useApiStream';
+import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import {
     Alert,
@@ -30,7 +31,7 @@ import {
     IconTools,
 } from '@tabler/icons-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
-import ActiveTasksTable from './FOG/ActiveTasksTable';
+import ActiveTasksTable, { fogTaskIdentityQuery } from './FOG/ActiveTasksTable';
 
 interface TaskStats {
     total: number;
@@ -68,6 +69,7 @@ const computeStats = (tasks: FogActiveTask[]): TaskStats => {
 };
 
 const ActiveTasksTab: FC = () => {
+    const identities = useDeviceIdentities();
     const [tasks, setTasks] = useState<FogActiveTask[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -76,6 +78,7 @@ const ActiveTasksTab: FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [stateFilter, setStateFilter] = useState<string | null>(null);
     const [typeFilter, setTypeFilter] = useState<string | null>(null);
+    const [labFilter, setLabFilter] = useState<string | null>(null);
     const { opened, toggle, controlsId } = useMobileTableFilters();
 
     const streamError = (err: Error) => {
@@ -135,7 +138,9 @@ const ActiveTasksTab: FC = () => {
                     (t.typeName || t.type?.name || '')
                         .toLowerCase()
                         .includes(q) ||
-                    (t.state?.name || 'Unknown').toLowerCase().includes(q),
+                    (t.state?.name || 'Unknown').toLowerCase().includes(q) ||
+                    deviceIdentitySearchText(identities.lookup(fogTaskIdentityQuery(t))).toLowerCase().includes(q) ||
+                    (t.host?.ip || '').toLowerCase().includes(q),
             );
         }
         if (stateFilter) {
@@ -148,8 +153,13 @@ const ActiveTasksTab: FC = () => {
                 (t) => String(t.typeID ?? t.type?.id ?? 0) === typeFilter,
             );
         }
+        if (labFilter) {
+            result = result.filter((task) => identities.labFor({
+                ...fogTaskIdentityQuery(task), address: task.host?.ip,
+            })?.id === labFilter);
+        }
         return result;
-    }, [tasks, searchQuery, stateFilter, typeFilter]);
+    }, [tasks, searchQuery, stateFilter, typeFilter, labFilter, identities.lookup, identities.labFor]);
 
     const [actioningTasks, setActioningTasks] = useState<Set<number>>(
         new Set(),
@@ -263,6 +273,7 @@ const ActiveTasksTab: FC = () => {
             {error && <Alert color='red'>{error}</Alert>}
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
+                    {identities.warning ? <Text size='xs' c='dimmed' role='status'>{identities.warning}</Text> : null}
                     <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
                         <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
                             <Title order={4}>Task Details</Title>
@@ -291,6 +302,17 @@ const ActiveTasksTab: FC = () => {
                     <Group grow preventGrowOverflow={false} align='flex-end'>
                         <Select
                             miw={{ base: '100%', sm: 180 }}
+                            placeholder='All labs'
+                            label='Lab'
+                            data={identities.labs.map((lab) => ({ value: lab.id, label: lab.name }))}
+                            value={labFilter}
+                            onChange={setLabFilter}
+                            clearable
+                            searchable
+                            nothingFoundMessage='No labs'
+                        />
+                        <Select
+                            miw={{ base: '100%', sm: 180 }}
                             placeholder='Filter by state'
                             label='State'
                             data={stateOptions}
@@ -314,9 +336,10 @@ const ActiveTasksTab: FC = () => {
                         <Text c='dimmed' ta='center'>No active tasks found.</Text>
                     )}
                         <ActiveTasksTable
+                            identities={identities}
                             loading={loading}
                             tasks={filteredTasks}
-                            filterKey={JSON.stringify([searchQuery, stateFilter, typeFilter])}
+                            filterKey={JSON.stringify([searchQuery, stateFilter, typeFilter, labFilter])}
                             actioningTasks={actioningTasks}
                             onTaskAction={handleTaskAction}
                         />

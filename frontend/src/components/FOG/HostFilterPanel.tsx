@@ -21,6 +21,7 @@ export interface Filters {
     status: string | null;
     manufacturer: string | null;
     model: string | null;
+    lab: string | null;
 }
 
 export const EMPTY_FILTERS: Filters = {
@@ -29,9 +30,10 @@ export const EMPTY_FILTERS: Filters = {
     status: null,
     manufacturer: null,
     model: null,
+    lab: null,
 };
 
-function matchesSearch(host: FogHost, term: string): boolean {
+function matchesSearch(host: FogHost, term: string, status: string): boolean {
     const t = term.trim().toLowerCase();
     return (
         String(host.id).includes(t) ||
@@ -42,7 +44,7 @@ function matchesSearch(host: FogHost, term: string): boolean {
         host.inventory?.sysproduct?.toLowerCase().includes(t) ||
         host.inventory?.cpuversion?.toLowerCase().includes(t) ||
         host.ip?.toLowerCase().includes(t) ||
-        (host.pingstatustext || 'unknown').toLowerCase().includes(t) ||
+        status.toLowerCase().includes(t) ||
         false
     );
 }
@@ -69,7 +71,7 @@ export interface UseHostFiltersResult {
     modelOptions: { value: string; label: string }[];
 }
 
-export function useHostFilters(allHosts: FogHost[], identitySearchText?: (host: FogHost) => string): UseHostFiltersResult {
+export function useHostFilters(allHosts: FogHost[], statusFor: (host: FogHost) => string, identitySearchText?: (host: FogHost) => string, labIdFor?: (host: FogHost) => string | null): UseHostFiltersResult {
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
     const deferredFilters = useDeferredValue(filters);
     const isPending = filters !== deferredFilters;
@@ -91,16 +93,17 @@ export function useHostFilters(allHosts: FogHost[], identitySearchText?: (host: 
     );
     const statusOptions = useMemo(() => {
         const seen = new Set(
-            allHosts.map((h) => h.pingstatustext || 'unknown'),
+            allHosts.map(statusFor),
         );
         return [...seen].sort().map((v) => ({ value: v, label: v }));
-    }, [allHosts]);
+    }, [allHosts, statusFor]);
 
     const filteredHosts = useMemo(() => {
         return allHosts.filter((host) => {
+            if (deferredFilters.lab && labIdFor?.(host) !== deferredFilters.lab) return false;
             if (
                 deferredFilters.search &&
-                !matchesSearch(host, deferredFilters.search) &&
+                !matchesSearch(host, deferredFilters.search, statusFor(host)) &&
                 !identitySearchText?.(host).toLowerCase().includes(deferredFilters.search.trim().toLowerCase())
             )
                 return false;
@@ -111,7 +114,7 @@ export function useHostFilters(allHosts: FogHost[], identitySearchText?: (host: 
                 return false;
             if (
                 deferredFilters.status &&
-                (host.pingstatustext || 'unknown') !== deferredFilters.status
+                statusFor(host) !== deferredFilters.status
             )
                 return false;
             if (
@@ -126,7 +129,7 @@ export function useHostFilters(allHosts: FogHost[], identitySearchText?: (host: 
                 return false;
             return true;
         });
-    }, [allHosts, deferredFilters, identitySearchText]);
+    }, [allHosts, deferredFilters, identitySearchText, labIdFor, statusFor]);
 
     const hasActiveFilters = Object.values(filters).some(
         (v) => v !== null && v !== '',
@@ -149,6 +152,7 @@ export function useHostFilters(allHosts: FogHost[], identitySearchText?: (host: 
 }
 
 export interface HostFilterPanelProps {
+    labOptions: { value: string; label: string }[];
     filters: Filters;
     setFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
     clearFilters: () => void;
@@ -164,6 +168,7 @@ export interface HostFilterPanelProps {
 }
 
 export function HostFilterPanel({
+    labOptions,
     filters,
     setFilter,
     clearFilters,
@@ -221,6 +226,17 @@ export function HostFilterPanel({
                 </Flex>
                 <MobileFilterPanel id={controlsId} opened={opened}>
                     <Group grow preventGrowOverflow={false} align='flex-end'>
+                        <Select
+                            miw={{ base: '100%', sm: 180 }}
+                            label='Lab'
+                            placeholder='All labs'
+                            data={labOptions}
+                            value={filters.lab}
+                            onChange={(v) => setFilter('lab', v)}
+                            clearable
+                            searchable
+                            nothingFoundMessage='No labs'
+                        />
                         <Select
                             miw={{ base: '100%', sm: 180 }}
                             label='Image'

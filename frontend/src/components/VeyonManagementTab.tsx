@@ -13,6 +13,8 @@ import {
 } from '@/api/veyon';
 import { useApiStream } from '@/api/useApiStream';
 import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
+import type { DeviceIdentity, DeviceLab } from '@/api/devices';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import { PageHero } from '@/components/ui/PageHero';
 import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
@@ -129,6 +131,10 @@ function featureName(feature: VeyonFeature) {
     return feature.displayName || feature.name || featureUid(feature) || 'Unknown feature';
 }
 
+function identityQuery(computer: VeyonComputer) {
+    return { veyonComputerId: computer.id, macAddress: computer.macAddress, address: computer.host };
+}
+
 export default function VeyonManagementTab() {
     const identities = useDeviceIdentities();
     const [configured, setConfigured] = useState<boolean | null>(null);
@@ -139,6 +145,7 @@ export default function VeyonManagementTab() {
     const mobileFilters = useMobileTableFilters();
     const [statusFilter, setStatusFilter] = useState<string | null>(null);
     const [locationFilter, setLocationFilter] = useState<string | null>(null);
+    const [labFilter, setLabFilter] = useState<string | null>(null);
     const [sessionFilter, setSessionFilter] = useState<string | null>(null);
     const [sort, setSort] = useState<SortState<ComputerSortKey> | null>(null);
     const [loading, setLoading] = useState(true);
@@ -152,8 +159,7 @@ export default function VeyonManagementTab() {
     const [wallOpened, setWallOpened] = useState(false);
     const deferredSearch = useDeferredValue(search.trim().toLowerCase());
     const locationFor = useCallback((computer: VeyonComputer) =>
-        identities.lookup({ veyonComputerId: computer.id, macAddress: computer.macAddress })?.lab?.name
-            ?? computer.location, [identities.lookup]);
+        identities.labFor(identityQuery(computer))?.name ?? computer.location, [identities.labFor]);
 
     const filteredComputers = useMemo(
         () => {
@@ -163,9 +169,10 @@ export default function VeyonManagementTab() {
                 const session = user ? (user.login ? 'logged-in' : 'no-user') : 'unavailable';
                 return (!statusFilter || (state?.state ?? 'offline') === statusFilter)
                     && (!locationFilter || JSON.stringify(locationFor(computer) || '') === locationFilter)
+                    && (!labFilter || identities.labFor(identityQuery(computer))?.id === labFilter)
                     && (!sessionFilter || session === sessionFilter)
                     && [computer.name, computer.host, locationFor(computer) ?? '', user?.login ?? '', user?.fullName ?? '',
-                        deviceIdentitySearchText(identities.lookup({ veyonComputerId: computer.id, macAddress: computer.macAddress }))]
+                        deviceIdentitySearchText(identities.lookup(identityQuery(computer)))]
                         .join(' ').toLowerCase().includes(deferredSearch);
             });
             if (!sort) return rows;
@@ -177,14 +184,14 @@ export default function VeyonManagementTab() {
                     return state?.state === 'online' && state.information.user.login
                         ? state.information.user.fullName || state.information.user.login : null;
                 }
-                return computer[sort.key] || null;
+                return identities.lookup(identityQuery(computer))?.hostname || computer.name || computer.host;
             };
             return rows.sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
         },
-        [computers, deferredSearch, live, statusFilter, locationFilter, sessionFilter, sort, identities.lookup, locationFor],
+        [computers, deferredSearch, live, statusFilter, locationFilter, labFilter, sessionFilter, sort, identities.lookup, identities.labFor, locationFor],
     );
     const pagination = useTablePagination(filteredComputers, JSON.stringify([
-        deferredSearch, statusFilter, locationFilter, sessionFilter, sort?.key, sort?.direction,
+        deferredSearch, statusFilter, locationFilter, labFilter, sessionFilter, sort?.key, sort?.direction,
     ]));
     const onlineCount = Object.values(live).filter((value) => value.state === 'online').length;
     const loggedInCount = Object.values(live).filter(
@@ -455,6 +462,9 @@ export default function VeyonManagementTab() {
                         <Select miw={{ base: '100%', sm: 180 }} label='Location' placeholder='All locations' clearable searchable
                             value={locationFilter} onChange={setLocationFilter}
                             data={[...new Set(computers.map((computer) => locationFor(computer) || ''))].sort().map((location) => ({ value: JSON.stringify(location), label: location || 'Unassigned' }))} />
+                        <Select miw={{ base: '100%', sm: 180 }} label='Lab' placeholder='All labs' clearable searchable
+                            value={labFilter} onChange={setLabFilter}
+                            data={identities.labs.map((lab) => ({ value: lab.id, label: lab.name }))} />
                         <Select miw={{ base: '100%', sm: 180 }} label='User session' placeholder='All sessions' clearable
                             value={sessionFilter} onChange={setSessionFilter}
                             data={[{ value: 'logged-in', label: 'Logged in' }, { value: 'no-user', label: 'No user (online)' }, { value: 'unavailable', label: 'Session unavailable' }]} />
@@ -511,6 +521,7 @@ export default function VeyonManagementTab() {
                                         <ComputerRow
                                             key={computer.id}
                                             computer={computer}
+                                            identity={identities.lookup(identityQuery(computer))}
                                             location={locationFor(computer)}
                                             live={live[computer.id]}
                                             selected={selected.includes(computer.id)}
@@ -558,6 +569,8 @@ export default function VeyonManagementTab() {
             />
             <RemoteViewer
                 computer={viewer}
+                identity={viewer ? identities.lookup(identityQuery(viewer)) : null}
+                lab={viewer ? identities.labFor(identityQuery(viewer)) : null}
                 onClose={() => setViewer(null)}
                 onCommand={(action, args, active, uid) => runCommand(action, args, active, uid, viewer ? [viewer.id] : [])}
                 onConfirm={(title, _description, action, color) => {
@@ -584,6 +597,7 @@ export default function VeyonManagementTab() {
 
 function ComputerRow({
     computer,
+    identity,
     location,
     live,
     selected,
@@ -593,6 +607,7 @@ function ComputerRow({
     onDelete,
 }: {
     computer: VeyonComputer;
+    identity: DeviceIdentity | null;
     location: string | null;
     live?: LiveState;
     selected: boolean;
@@ -618,7 +633,8 @@ function ComputerRow({
                     </ThemeIcon>
                     <div>
                         <Group gap={6} wrap='nowrap'>
-                            <Text fw={600} size='sm'>{computer.name}</Text>
+                            <DeviceIdentityDetails identity={identity} hostname={computer.name || computer.host}
+                                address={computer.host} showLab={false} emptyAddressLabel='IP unavailable' />
                             {computer.fogHostId != null ? (
                                 <Tooltip label='Synced from FOG'>
                                     <Box
@@ -634,11 +650,16 @@ function ComputerRow({
                                 </Tooltip>
                             ) : null}
                         </Group>
-                        <Text size='xs' c='dimmed'>{computer.host}</Text>
                     </div>
                 </Group>
             </Table.Td>
-            <Table.Td>{location || <Text c='dimmed'>Unassigned</Text>}</Table.Td>
+            <Table.Td>{location || (
+                <Tooltip label={identity?.addresses.length
+                    ? 'No unique configured lab matches this computer\'s IP addresses.'
+                    : 'No current IP is available to determine the lab.'}>
+                    <Text c='dimmed'>Unassigned</Text>
+                </Tooltip>
+            )}</Table.Td>
             <Table.Td>
                 {information?.user.login ? (
                     <div>
@@ -977,8 +998,10 @@ function ComputerEditor({ state, onClose, onSaved }: { state: EditorState; onClo
     );
 }
 
-function RemoteViewer({ computer, onClose, onCommand, onConfirm }: {
+function RemoteViewer({ computer, identity, lab, onClose, onCommand, onConfirm }: {
     computer: VeyonComputer | null;
+    identity: DeviceIdentity | null;
+    lab: DeviceLab | null;
     onClose: () => void;
     onCommand: (action: VeyonCommandAction, args?: Record<string, unknown>, active?: boolean, uid?: string) => Promise<void>;
     onConfirm: (title: string, description: string, action: VeyonCommandAction, color?: string) => void;
@@ -1020,8 +1043,9 @@ function RemoteViewer({ computer, onClose, onCommand, onConfirm }: {
             ? Math.max(0, Math.round((Date.now() - frame.lastUpdated) / 1000))
             : null;
     return (
-        <Modal opened onClose={onClose} closeButtonProps={{ 'aria-label': 'Close' }} title={`Remote view · ${computer.name}`} size='calc(100vw - 48px)' centered>
+        <Modal opened onClose={onClose} closeButtonProps={{ 'aria-label': 'Close' }} title={`Remote view · ${identity?.hostname || computer.name || computer.host}`} size='calc(100vw - 48px)' centered>
             <Stack>
+                <DeviceIdentityDetails identity={identity} hostname={computer.name || computer.host} address={computer.host} lab={lab} />
                 <Group justify='space-between'>
                     <Group gap='xs'>
                         <Badge color={status === 'Unavailable' ? 'red' : stale ? 'orange' : status === 'Live' ? 'teal' : 'gray'} variant='dot'>{status}</Badge>

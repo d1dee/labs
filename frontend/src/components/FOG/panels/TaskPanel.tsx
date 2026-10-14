@@ -28,12 +28,16 @@ export function TaskPanel({ hosts, taskType, onDone }: Props) {
         const succeeded = results.filter(
             (r) => r.status === 'fulfilled',
         ).length;
-        const failed = results.filter((r) => r.status === 'rejected').length;
+        const failures = results.flatMap((result, index) =>
+            result.status === 'rejected'
+                ? [`${hostsWithImage[index].name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
+                : [],
+        );
 
         if (hostsWithoutImage.length > 0) {
             notifications.show({
                 color: 'red',
-                title: 'Deploy Skipped',
+                title: `${taskType.name} Skipped`,
                 message: `${hostsWithoutImage.length} host${hostsWithoutImage.length !== 1 ? 's' : ''} without an assigned image: ${hostsWithoutImage.map((h) => h.name).join(', ')}`,
                 icon: <IconX size={16} />,
             });
@@ -48,16 +52,16 @@ export function TaskPanel({ hosts, taskType, onDone }: Props) {
                 icon: <IconCheck size={16} />,
             });
         }
-        if (failed > 0) {
+        if (failures.length > 0) {
             notifications.show({
                 color: 'red',
                 title: `${taskType.name} Failed`,
-                message: `Failed for ${failed} host${failed !== 1 ? 's' : ''}`,
+                message: `Failed for ${failures.length} host${failures.length !== 1 ? 's' : ''}: ${failures.join('; ')}`,
                 icon: <IconX size={16} />,
             });
         }
         setLoading(false);
-        onDone();
+        if (succeeded > 0) onDone();
     };
 
     return (

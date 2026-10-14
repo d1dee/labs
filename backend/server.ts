@@ -18,43 +18,19 @@ import { settingsRouter } from './routes/settings';
 import { veyonRouter } from './routes/veyon';
 import { createStreamRouter, streamIdentityMatches, type StreamIdentity } from './routes/stream';
 import { configureLogger, getLogger } from './logger';
+import { logHttpError, logHttpRequest } from './http-logging';
 
 // Configure LogTape before handling any request so every logger in the
 // backend routes to the console and the rotating log file from the start.
 await configureLogger();
 
 const serverLogger = getLogger(['labs', 'server']);
-const httpLogger = getLogger(['labs', 'http']);
 
 // Define Hono app with typed variables for auth
 const app = new Hono<AppEnv>({});
 
-// HTTP request logging middleware. API traffic is logged at info, static
-// assets at debug, and 4xx/5xx responses are escalated to warning/error.
-app.use('*', async (c, next) => {
-    const startedAt = performance.now();
-    await next();
-    const durationMs = Math.round(performance.now() - startedAt);
-    const status = c.res.status;
-    const user = c.get('user');
-    const message = '{method} {path} -> {status} ({durationMs}ms)';
-    const properties = {
-        method: c.req.method,
-        path: c.req.path,
-        status,
-        durationMs,
-        ...(user ? { userId: user.id } : {}),
-    };
-    if (status >= 500) {
-        httpLogger.error(message, properties);
-    } else if (status >= 400) {
-        httpLogger.warn(message, properties);
-    } else if (c.req.path.startsWith('/api/')) {
-        httpLogger.info(message, properties);
-    } else {
-        httpLogger.debug(message, properties);
-    }
-});
+app.onError(logHttpError);
+app.use('*', logHttpRequest);
 
 app.use(
     '*',

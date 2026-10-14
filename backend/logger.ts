@@ -1,20 +1,19 @@
 import { mkdirSync } from 'node:fs';
 import * as path from 'node:path';
+import { inspect } from 'node:util';
 import { getRotatingFileSink } from '@logtape/file';
 import {
     configure,
-    getAnsiColorFormatter,
+    getTextFormatter,
     getConsoleSink,
     getJsonLinesFormatter,
     getLogger,
     type LogLevel,
 } from '@logtape/logtape';
 
-const isDevelopment = process.env.NODE_ENV !== 'production';
 const logFilePath = process.env.LOG_FILE || 'logs/backend.log';
 
-// LOG_LEVEL overrides the default threshold (debug in development, info in
-// production) for every logger under the ["labs"] category root.
+// Routine request traffic is debug-only; operational info stays concise.
 function resolveLevel(): LogLevel {
     const raw = process.env.LOG_LEVEL?.trim().toLowerCase();
     if (
@@ -27,10 +26,25 @@ function resolveLevel(): LogLevel {
     ) {
         return raw;
     }
-    return isDevelopment ? 'debug' : 'info';
+    return 'info';
 }
 
-// One-time LogTape setup for the backend: human-readable ANSI console output
+export const consoleFormatter = getTextFormatter({
+    timestamp: 'time',
+    category: '/',
+    value: (value) => inspect(value, { depth: null, maxArrayLength: null, maxStringLength: null }),
+    format: ({ timestamp, level, category, message, record }) => {
+        const summary = `${timestamp} [${level}] ${category}: ${message}`;
+        if (!['warning', 'error', 'fatal'].includes(record.level) || !Object.keys(record.properties).length) {
+            return summary;
+        }
+        return `${summary}\n${inspect(record.properties, {
+            depth: null, maxArrayLength: null, maxStringLength: null, compact: false,
+        })}`;
+    },
+});
+
+// One-time LogTape setup for the backend: human-readable console output
 // plus a rotating JSON-lines file for post-mortem analysis. All backend
 // modules log under the ["labs"] category root, e.g. getLogger(["labs", "http"]).
 export async function configureLogger(): Promise<void> {
@@ -40,7 +54,7 @@ export async function configureLogger(): Promise<void> {
     await configure({
         sinks: {
             console: getConsoleSink({
-                formatter: getAnsiColorFormatter(),
+                formatter: consoleFormatter,
             }),
             file: getRotatingFileSink(logFilePath, {
                 maxSize: 5 * 0x400 * 0x400,
@@ -69,13 +83,22 @@ export { getLogger };
 
 // Normalize a thrown value into a JSON-serializable property so structured
 // records survive the JSON-lines file sink (raw Error objects do not).
-export function errorProperty(error: unknown): Record<string, unknown> {
+export function errorProperty(error: unknown, seen = new WeakSet<object>()): Record<string, unknown> {
     if (error instanceof Error) {
-        return {
+        if (seen.has(error)) return { message: '[Circular error]' };
+        seen.add(error);
+        const result = {
+            ...error,
             name: error.name,
             message: error.message,
             stack: error.stack,
+            ...(error.cause !== undefined ? { cause: errorProperty(error.cause, seen) } : {}),
+            ...(error instanceof AggregateError ? { errors: Array.from(error.errors, (item) => errorProperty(item, seen)) } : {}),
         };
+        seen.delete(error);
+        return result;
     }
-    return { message: String(error) };
+    return { message: typeof error === 'string' ? error : inspect(error, {
+        depth: null, maxArrayLength: null, maxStringLength: null,
+    }) };
 }

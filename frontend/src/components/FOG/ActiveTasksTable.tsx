@@ -1,4 +1,6 @@
 import { type FogActiveTask, type FogTaskState } from '@/api/fog';
+import type { useDeviceIdentities } from '@/api/useDeviceIdentities';
+import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
@@ -48,6 +50,7 @@ const isTerminalState = (task: FogActiveTask): boolean => {
 };
 
 interface ActiveTasksTableProps {
+    identities: Pick<ReturnType<typeof useDeviceIdentities>, 'lookup' | 'labFor'>;
     loading: boolean;
     tasks: FogActiveTask[];
     filterKey?: string;
@@ -61,7 +64,13 @@ interface ActiveTasksTableProps {
 
 const PAGE_SIZE = 20;
 
+export const fogTaskIdentityQuery = (task: FogActiveTask) => ({
+    fogHostId: task.hostID || task.host?.id,
+    macAddress: task.host?.primac || task.host?.macs?.[0],
+});
+
 const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
+    identities,
     loading,
     tasks,
     filterKey = '',
@@ -83,7 +92,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
             switch (sort.key) {
                 case 'id': return Number(task.id);
                 case 'task': return task.name || `Task #${task.id}`;
-                case 'host': return task.hostName || task.host?.name || `Host #${task.hostID || '?'}`;
+                case 'host': return identities.lookup(fogTaskIdentityQuery(task))?.hostname || task.hostName || task.host?.name || `Host #${task.hostID || task.host?.id || '?'}`;
                 case 'type': return task.typeName || task.type?.name || `Type ${task.typeID || '?'}`;
                 case 'state': return task.state?.name || 'Unknown';
                 case 'progress': {
@@ -94,7 +103,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
             }
         };
         return [...tasks].sort((a, b) => compareTableValues(value(a), value(b), sort.direction));
-    }, [tasks, sort]);
+    }, [tasks, sort, identities.lookup]);
 
     const paginatedTasks = useMemo(
         () => sortedTasks.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
@@ -315,11 +324,12 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                   </Text>
                                               </Table.Td>
                                               <Table.Td>
-                                                  <Text size='sm'>
-                                                      {task.hostName ||
-                                                          task.host?.name ||
-                                                          `Host #${task.hostID || '?'}`}
-                                                  </Text>
+                                                  <DeviceIdentityDetails
+                                                      identity={identities.lookup(fogTaskIdentityQuery(task))}
+                                                      hostname={task.hostName || task.host?.name || `Host #${task.hostID || task.host?.id || '?'}`}
+                                                      address={task.host?.ip}
+                                                      lab={identities.labFor({ ...fogTaskIdentityQuery(task), address: task.host?.ip })}
+                                                  />
                                               </Table.Td>
                                               <Table.Td>
                                                   <Badge

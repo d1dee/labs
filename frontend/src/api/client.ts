@@ -26,13 +26,19 @@ export const $fetch = createFetch({
             durationMs: Math.round(performance.now() - (startedAt ?? performance.now())),
         };
         const message = '<- {method} {url} {status} ({durationMs}ms)';
-        if (response.status >= 500) {
-            apiLogger.error(message, properties);
-        } else if (response.status >= 400) {
-            apiLogger.warn(message, properties);
-        } else {
+        if (response.status < 400) {
             apiLogger.debug(message, properties);
         }
+    },
+    onError: ({ request, response, error }) => {
+        const properties = {
+            method: request.method,
+            url: String(request.url),
+            status: response.status,
+            error,
+        };
+        if (response.status >= 500) apiLogger.error('API request failed', properties);
+        else apiLogger.warn('API request rejected', properties);
     },
 });
 

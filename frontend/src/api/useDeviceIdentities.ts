@@ -2,8 +2,10 @@ import { useSessionContext } from '@/context/SessionContext';
 import { useEffect, useMemo, useState } from 'react';
 import {
     createDeviceIdentityLookup,
+    labForAddresses,
     type DeviceDirectory,
     type DeviceIdentity,
+    type DeviceLookup,
 } from './devices';
 import { useApiStream } from './useApiStream';
 
@@ -100,10 +102,23 @@ export function useDeviceIdentities() {
         : directory && !isFresh
           ? 'Current device associations expired. Waiting for a fresh directory.'
           : sourceErrors.length
-            ? `Device directory sources unavailable: ${sourceErrors.join(', ')}.`
-            : null;
+             ? `Device directory sources unavailable: ${sourceErrors.join(', ')}.`
+             : null;
+    const labs = useMemo(() => isFresh && directory
+        ? [...new Map([
+            ...(directory.labs ?? []),
+            ...directory.devices.flatMap((device) => device.lab ? [device.lab] : []),
+        ].map((lab) => [lab.id, lab])).values()].sort((a, b) => a.name.localeCompare(b.name))
+        : [], [directory, isFresh]);
+    const labFor = useMemo(() => (query: DeviceLookup) => {
+        if (!isFresh || !directory) return null;
+        const device = lookup(query);
+        return device?.lab ?? labForAddresses(device?.addresses ?? (query.address ? [query.address] : []), directory.labs ?? []);
+    }, [directory, isFresh, lookup]);
     return {
         lookup,
+        labFor,
+        labs,
         error,
         warning,
         updatedAt,

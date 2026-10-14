@@ -1,4 +1,11 @@
+import { addressInRange } from './network';
+
 export type DeviceSource = 'dhcp' | 'arp' | 'fog' | 'veyon' | 'pihole';
+export interface DeviceLab {
+    id: string;
+    name: string;
+    dhcpServer: string | null;
+}
 
 export interface DeviceIdentity {
     id: string;
@@ -6,7 +13,7 @@ export interface DeviceIdentity {
     hostnames: string[];
     addresses: string[];
     macAddresses: string[];
-    lab: { id: string; name: string; dhcpServer: string } | null;
+    lab: DeviceLab | null;
     location: string | null;
     sources: DeviceSource[];
     veyonComputerIds: string[];
@@ -17,6 +24,7 @@ export interface DeviceDirectory {
     organizationId: string;
     updatedAt: string;
     devices: DeviceIdentity[];
+    labs?: Array<DeviceLab & { subnet: string | null }>;
     sources: Record<DeviceSource, {
         state: 'available' | 'unconfigured' | 'unavailable' | 'partial';
         updatedAt: string | null;
@@ -29,6 +37,14 @@ export interface DeviceLookup {
     macAddress?: string | null;
     veyonComputerId?: string;
     fogHostId?: number;
+}
+
+export function labForAddresses(addresses: string[], labs: Array<DeviceLab & { subnet: string | null }>): DeviceLab | null {
+    const matches = new Map<string, DeviceLab>();
+    for (const lab of labs) {
+        if (lab.subnet && addresses.some((address) => addressInRange(normalizeDeviceHost(address), lab.subnet!))) matches.set(lab.id, lab);
+    }
+    return matches.size === 1 ? matches.values().next().value! : null;
 }
 
 export function normalizeDeviceMac(value: string) {
