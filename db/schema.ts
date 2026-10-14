@@ -1,4 +1,5 @@
 import { relations } from 'drizzle-orm';
+import type { DeviceDirectory } from '../frontend/src/api/devices';
 import {
     index,
     integer,
@@ -362,6 +363,15 @@ export const lab = sqliteTable(
     },
     (t) => [index('lab_firewallConfigId_idx').on(t.firewallConfigId)],
 );
+
+// Request-driven device observations; no router credentials are stored here.
+export const organizationDeviceCache = sqliteTable('organizationDeviceCache', {
+    organizationId: text('organizationId').primaryKey()
+        .references(() => organization.id, { onDelete: 'cascade' }),
+    signature: text('signature').notNull(),
+    expiresAt: integer('expiresAt').notNull(),
+    snapshot: text('snapshot', { mode: 'json' }).$type<DeviceDirectory>().notNull(),
+});
 
 export const firewallConfigRelations = relations(
     firewallConfig,

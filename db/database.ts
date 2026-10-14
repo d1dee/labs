@@ -130,5 +130,13 @@ if (sqliteDb.query('PRAGMA table_info(user)').all().length) {
     sqliteDb.run("UPDATE user SET emailVerified = 1 WHERE lower(email) LIKE '%@local.lan' AND emailVerified = 0");
 }
 
+sqliteDb.run(`CREATE TABLE IF NOT EXISTS organizationDeviceCache (
+    organizationId TEXT PRIMARY KEY NOT NULL,
+    signature TEXT NOT NULL,
+    expiresAt INTEGER NOT NULL,
+    snapshot TEXT NOT NULL,
+    FOREIGN KEY (organizationId) REFERENCES organization(id) ON DELETE CASCADE
+)`);
+
 // Create Drizzle database instance with Better Auth schema
 export const db = drizzle({ client: sqliteDb, schema });

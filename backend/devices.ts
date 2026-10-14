@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { veyonComputer } from '../db/schema';
+import { organizationDeviceCache, veyonComputer } from '../db/schema';
 import { normalizeDeviceHost, normalizeDeviceMac, type DeviceDirectory, type DeviceIdentity, type DeviceSource } from '../frontend/src/api/devices';
 import { getFirewallConfigWithLabs } from './firewall-config';
 import { credentialsComplete, getFogClient, getFogConfigForOrg } from './fog';
@@ -215,6 +215,18 @@ const dependencies = {
     loadPiholeConfig: getPiholeConfigForOrg,
     loadComputers: async (organizationId: string) => db.query.veyonComputer.findMany({ where: eq(veyonComputer.organizationId, organizationId) }),
     getDHCPLeases, callMikrotik, getFogClient, getPiholeClient,
+    loadCache: async (organizationId: string) => db.query.organizationDeviceCache.findFirst({
+        where: eq(organizationDeviceCache.organizationId, organizationId),
+    }),
+    saveCache: async (entry: typeof organizationDeviceCache.$inferInsert) => {
+        db.insert(organizationDeviceCache).values(entry).onConflictDoUpdate({
+            target: organizationDeviceCache.organizationId,
+            set: { signature: entry.signature, expiresAt: entry.expiresAt, snapshot: entry.snapshot },
+        }).run();
+    },
+    deleteCache: (organizationId: string) => {
+        db.delete(organizationDeviceCache).where(eq(organizationDeviceCache.organizationId, organizationId)).run();
+    },
     now: () => Date.now(),
 };
 
@@ -241,6 +253,13 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
         const cached = cache.get(organizationId);
         if (cached?.signature === signature) return cached.snapshot;
         const snapshot = (async () => {
+            const persisted = await attempt(() => deps.loadCache(organizationId));
+            if (persisted.ok && persisted.value?.signature === signature && persisted.value.expiresAt > deps.now() &&
+                persisted.value.snapshot.organizationId === organizationId) {
+                const entry = cache.get(organizationId);
+                if (entry?.signature === signature && startedGeneration === generation) entry.expiresAt = persisted.value.expiresAt;
+                return persisted.value.snapshot;
+            }
             const updatedAt = new Date(now).toISOString();
             const sources = Object.fromEntries(sourceNames.map((source) => [source, { state: 'unconfigured', updatedAt: null }])) as DeviceDirectory['sources'];
             const input: DeviceDirectoryInput = { organizationId, updatedAt, sources };
@@ -298,7 +317,12 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
                     mark('pihole', good ? 'partial' : 'unavailable');
                 })(),
             ]);
-            return buildDeviceDirectory(input);
+            const directory = buildDeviceDirectory(input);
+            if (startedGeneration === generation) {
+                await attempt(() => deps.saveCache({ organizationId, signature,
+                    expiresAt: now + 30_000, snapshot: directory }));
+            }
+            return directory;
         })();
         if (startedGeneration === generation) {
             cache.delete(organizationId);
@@ -307,7 +331,11 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
         }
         return snapshot;
     };
-    return Object.assign(get, { invalidate: (organizationId: string) => { generation++; cache.delete(organizationId); } });
+    return Object.assign(get, { invalidate: (organizationId: string) => {
+        generation++;
+        cache.delete(organizationId);
+        deps.deleteCache(organizationId);
+    } });
 }
 
 const organizationDeviceService = createOrganizationDeviceService();
