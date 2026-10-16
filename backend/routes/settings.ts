@@ -43,6 +43,13 @@ settingsRouter.use('/settings/*', async (c, next) => {
 
 const settingsLogger = getLogger(['labs', 'settings']);
 
+const dnsSuffixSchema = z.string()
+    .refine((value) => !/^\.+$/.test(value.trim()), 'Invalid DNS suffix')
+    .transform((value) => value.trim().replace(/^\.|\.$/g, '').toLowerCase())
+    .refine((value) => value.length <= 253 && (value === '' || value.split('.').every(
+        (label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+    )), 'Invalid DNS suffix: use DNS labels of 1-63 letters, digits or hyphens, up to 253 characters');
+
 settingsRouter.post('/settings/mikrotik', async (c) => {
     const user = c.get('user');
     if (!user) {
@@ -146,6 +153,7 @@ settingsRouter.post('/settings/labs', async (c) => {
     try {
         const schema = z.object({
             id: z.string().length(12).optional(),
+            defaultDnsSuffix: dnsSuffixSchema.optional(),
             labs: z.array(
                 z.object({
                     id: z.string().optional(),
@@ -155,6 +163,7 @@ settingsRouter.post('/settings/labs', async (c) => {
                     subnet: z.string().optional(),
                     dhcpServer: z.string().optional(),
                     interface: z.string().trim().max(128).optional(),
+                    dnsSuffix: dnsSuffixSchema.nullable().optional(),
                 }),
             ),
         });
@@ -180,6 +189,12 @@ settingsRouter.post('/settings/labs', async (c) => {
             return c.json({ error: 'Invalid or duplicate lab ID' }, 400);
         }
         db.transaction((tx) => {
+            if (body.defaultDnsSuffix !== undefined) {
+                tx.update(firewallConfig).set({
+                    defaultDnsSuffix: body.defaultDnsSuffix,
+                    updatedAt: new Date(),
+                }).where(eq(firewallConfig.id, existingConfig.id)).run();
+            }
             const removedIds = [...existingIds].filter((id) => !submittedIds.includes(id));
             if (removedIds.length) tx.delete(lab).where(inArray(lab.id, removedIds)).run();
             for (const l of body.labs) {
@@ -191,6 +206,7 @@ settingsRouter.post('/settings/labs', async (c) => {
                     subnet: l.subnet ?? null,
                     dhcpServer: l.dhcpServer ?? null,
                     interface: l.interface || null,
+                    ...(l.dnsSuffix !== undefined ? { dnsSuffix: l.dnsSuffix || null } : {}),
                     updatedAt: new Date(),
                 };
                 if (l.id) {
@@ -264,6 +280,7 @@ settingsRouter.get('/settings/firewall', async (c) => {
             id: storedConfig.id,
             mikrotikBaseUrl: storedConfig.mikrotikBaseUrl,
             mikrotikUsername: storedConfig.mikrotikUsername,
+            defaultDnsSuffix: storedConfig.defaultDnsSuffix,
             mikrotikPassword: new Array(storedConfig.mikrotikPassword.length)
                 .fill('*')
                 .join(''),

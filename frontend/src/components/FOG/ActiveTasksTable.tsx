@@ -1,7 +1,7 @@
 import { type FogActiveTask, type FogTaskState } from '@/api/fog';
 import type { useDeviceIdentities } from '@/api/useDeviceIdentities';
 import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
-import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
+import { compareTableValues, onSelectionRowClick, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
     Badge,
@@ -294,6 +294,8 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                         return (
                                             <Table.Tr
                                                 key={task.id}
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={(event) => onSelectionRowClick(event, () => handlers.toggle(task.id))}
                                                 bg={
                                                     selection.includes(task.id)
                                                         ? 'var(--mantine-color-blue-light)'

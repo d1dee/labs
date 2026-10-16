@@ -123,6 +123,14 @@ const labColumns = sqliteDb.query('PRAGMA table_info(lab)').all() as Array<{ nam
 if (labColumns.length && !labColumns.some((column) => column.name === 'interface')) {
     sqliteDb.run('ALTER TABLE lab ADD COLUMN interface TEXT');
 }
+if (labColumns.length && !labColumns.some((column) => column.name === 'dnsSuffix')) {
+    sqliteDb.run('ALTER TABLE lab ADD COLUMN dnsSuffix TEXT');
+}
+
+const firewallColumns = sqliteDb.query('PRAGMA table_info(firewallConfig)').all() as Array<{ name: string }>;
+if (firewallColumns.length && !firewallColumns.some((column) => column.name === 'defaultDnsSuffix')) {
+    sqliteDb.run("ALTER TABLE firewallConfig ADD COLUMN defaultDnsSuffix TEXT NOT NULL DEFAULT ''");
+}
 
 // Preserve username access for accounts created with the old synthetic email flow.
 // New signups cannot use this domain, and real addresses still require verification.
@@ -137,6 +145,42 @@ sqliteDb.run(`CREATE TABLE IF NOT EXISTS organizationDeviceCache (
     snapshot TEXT NOT NULL,
     FOREIGN KEY (organizationId) REFERENCES organization(id) ON DELETE CASCADE
 )`);
+
+sqliteDb.run(`CREATE TABLE IF NOT EXISTS organizationDeviceLab (
+    organizationId TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    labId TEXT,
+    observedAt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (organizationId, fingerprint),
+    FOREIGN KEY (organizationId) REFERENCES organization(id) ON DELETE CASCADE,
+    FOREIGN KEY (labId) REFERENCES lab(id) ON DELETE SET NULL
+)`);
+
+const retainedLabColumns = sqliteDb.query('PRAGMA table_info(organizationDeviceLab)').all() as Array<{ name: string }>;
+if (!retainedLabColumns.some((column) => column.name === 'observedAt')) {
+    sqliteDb.run('ALTER TABLE organizationDeviceLab ADD COLUMN observedAt INTEGER NOT NULL DEFAULT 0');
+}
+// Preserve the newest tombstone on lab deletion instead of revealing older linked history.
+const retainedLabForeignKeys = sqliteDb.query('PRAGMA foreign_key_list(organizationDeviceLab)').all() as Array<{
+    from: string; on_delete: string;
+}>;
+if (retainedLabForeignKeys.some((key) => key.from === 'labId' && key.on_delete !== 'SET NULL')) {
+    sqliteDb.transaction(() => {
+        sqliteDb.run(`CREATE TABLE organizationDeviceLab_upgrade (
+            organizationId TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            labId TEXT,
+            observedAt INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (organizationId, fingerprint),
+            FOREIGN KEY (organizationId) REFERENCES organization(id) ON DELETE CASCADE,
+            FOREIGN KEY (labId) REFERENCES lab(id) ON DELETE SET NULL
+        )`);
+        sqliteDb.run(`INSERT INTO organizationDeviceLab_upgrade (organizationId, fingerprint, labId, observedAt)
+            SELECT organizationId, fingerprint, labId, observedAt FROM organizationDeviceLab`);
+        sqliteDb.run('DROP TABLE organizationDeviceLab');
+        sqliteDb.run('ALTER TABLE organizationDeviceLab_upgrade RENAME TO organizationDeviceLab');
+    }).immediate();
+}
 
 // Create Drizzle database instance with Better Auth schema
 export const db = drizzle({ client: sqliteDb, schema });

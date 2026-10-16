@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
-import { eq } from 'drizzle-orm';
+import { eq, lte } from 'drizzle-orm';
 import { db } from '../db/database';
-import { organizationDeviceCache, veyonComputer } from '../db/schema';
-import { normalizeDeviceHost, normalizeDeviceMac, type DeviceDirectory, type DeviceIdentity, type DeviceSource } from '../frontend/src/api/devices';
+import { organizationDeviceCache, organizationDeviceLab, veyonComputer } from '../db/schema';
+import { formatDeviceHost, normalizeDeviceHost, normalizeDeviceMac, type DeviceDirectory, type DeviceIdentity, type DeviceSource } from '../frontend/src/api/devices';
 import { getFirewallConfigWithLabs } from './firewall-config';
 import { credentialsComplete, getFogClient, getFogConfigForOrg } from './fog';
 import { addressInSubnet, callMikrotik, getDHCPLeases } from './mikrotik';
@@ -18,7 +18,8 @@ const sourceNames: DeviceSource[] = ['dhcp', 'arp', 'fog', 'veyon', 'pihole'];
 export interface DeviceDirectoryInput {
     organizationId: string;
     updatedAt?: string;
-    labs?: ComputerLocationLab[];
+    labs?: (ComputerLocationLab & { dnsSuffix?: string | null })[];
+    defaultDnsSuffix?: string;
     leases?: RouterRow[];
     /** The full lease read succeeded, even though the returned inventory is organization-scoped. */
     dhcpComplete?: boolean;
@@ -28,17 +29,29 @@ export interface DeviceDirectoryInput {
     piholeHosts?: string[];
     piholeClients?: Array<{ ip: string; name: string }>;
     sources?: DeviceDirectory['sources'];
+    retainedLabs?: Array<typeof organizationDeviceLab.$inferSelect>;
+    onLabObservation?: (entry: typeof organizationDeviceLab.$inferSelect) => void;
 }
 
 type Observation = {
     source: DeviceSource; names: string[]; addresses: string[]; macs: string[];
+    displayNames?: string[];
     fogIds: number[]; veyonIds: string[]; location?: string | null;
     server?: string; historical?: boolean; invalidMac?: boolean;
 };
 const unique = <T>(values: T[]) => [...new Set(values)];
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
 const host = (value: unknown) => normalizeDeviceHost(text(value));
-const names = (values: unknown[]) => unique(values.map(host).filter((value) => value && !isIP(value)));
+const names = (values: unknown[]) => {
+    const displayNames = new Map<string, string>();
+    for (const value of values) {
+        const normalized = host(value);
+        if (normalized && !isIP(normalized) && !displayNames.has(normalized)) {
+            displayNames.set(normalized, formatDeviceHost(text(value)));
+        }
+    }
+    return { names: [...displayNames.keys()], displayNames: [...displayNames.values()] };
+};
 const addresses = (values: unknown[]) => unique(values.map(host).filter((value) => isIP(value)));
 const macs = (values: unknown[]) => unique(values.map((value) => normalizeDeviceMac(text(value))).filter(Boolean));
 const flag = (value: unknown) => value === true || value === 'true';
@@ -46,6 +59,9 @@ const flag = (value: unknown) => value === true || value === 'true';
 /** Strong links are grouped first; weak links must be globally unique and noncontradictory. */
 export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirectory {
     const updatedAt = input.updatedAt ?? new Date().toISOString();
+    // Advance durable ordering even when refreshes share a millisecond or the clock moves back.
+    const observedAt = (input.retainedLabs ?? []).filter((entry) => entry.organizationId === input.organizationId)
+        .reduce((time, entry) => Math.max(time, entry.observedAt + 1), Date.parse(updatedAt));
     const configured = { dhcp: input.leases, arp: input.arp, fog: input.fogHosts, veyon: input.computers, pihole: input.piholeHosts ?? input.piholeClients };
     const sources = input.sources ?? Object.fromEntries(sourceNames.map((source) => [source, {
         state: configured[source] === undefined ? 'unconfigured' : 'available',
@@ -68,7 +84,7 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         if (input.labs !== undefined && !leaseMacs.some((mac) => knownMacs.has(mac)) && !input.labs.some((lab) =>
             lab.subnet ? leaseAddresses.some((address) => addressInSubnet(address, lab.subnet!))
                 : lab.dhcpServer && lab.dhcpServer === server)) continue;
-        add({ source: 'dhcp', names: names([row['host-name']]), addresses: leaseAddresses,
+        add({ source: 'dhcp', ...names([row['host-name']]), addresses: leaseAddresses,
             macs: leaseMacs,
             server, fogIds: [], veyonIds: [] });
     }
@@ -85,13 +101,13 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
     }
     for (const row of input.fogHosts ?? []) {
         if (!row) continue;
-        add({ source: 'fog', names: names([row.name]), addresses: addresses([row.ip]),
+        add({ source: 'fog', ...names([row.name]), addresses: addresses([row.ip]),
             macs: macs([row.primac, ...(Array.isArray(row.macs) ? row.macs.map((entry) => typeof entry === 'string' ? entry : entry?.mac) : [])]),
             fogIds: Number.isFinite(Number(row.id)) ? [Number(row.id)] : [], veyonIds: [] });
     }
     for (const row of input.computers ?? []) {
         // The directory name is a friendly label, not evidence of a DNS hostname.
-        add({ source: 'veyon', names: names([row.host]), addresses: addresses([row.host]),
+        add({ source: 'veyon', ...names([row.host]), addresses: addresses([row.host]),
             macs: macs([row.macAddress]), fogIds: row.fogHostId === null ? [] : [row.fogHostId],
             veyonIds: [row.id], location: row.location,
             invalidMac: Boolean(row.macAddress && !normalizeDeviceMac(row.macAddress)) });
@@ -100,10 +116,10 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         if (typeof line !== 'string') continue;
         const [address, ...aliases] = line.trim().split(/\s+/);
         if (!addresses([address]).length) continue;
-        add({ source: 'pihole', names: names(aliases), addresses: addresses([address]), macs: [], fogIds: [], veyonIds: [] });
+        add({ source: 'pihole', ...names(aliases), addresses: addresses([address]), macs: [], fogIds: [], veyonIds: [] });
     }
     for (const row of input.piholeClients ?? []) {
-        add({ source: 'pihole', names: names([row.name]), addresses: addresses([row.ip]), macs: [], fogIds: [], veyonIds: [], historical: true });
+        add({ source: 'pihole', ...names([row.name]), addresses: addresses([row.ip]), macs: [], fogIds: [], veyonIds: [], historical: true });
     }
     let groups = observations.map((row) => [row]);
     const network = observations.filter((row) => row.source === 'dhcp' || row.source === 'arp');
@@ -200,7 +216,15 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
         const deviceMacs = keys(group, 'macs') as string[];
         const fogHostIds = (keys(group, 'fogIds') as number[]).sort((a, b) => a - b);
         const veyonComputerIds = unique(group.flatMap((row) => row.veyonIds)).sort();
-        const hostnames = unique(ordered.filter((row) => !row.historical || !live.length).flatMap((row) => row.names));
+        // Keep the preferred source's spelling, deduplicating by DNS identity.
+        const hostnameVariants = new Map<string, string>();
+        for (const row of ordered.filter((row) => !row.historical || !live.length)) {
+            for (const name of row.displayNames ?? row.names) {
+                const normalized = host(name);
+                if (!hostnameVariants.has(normalized)) hostnameVariants.set(normalized, name);
+            }
+        }
+        const hostnames = [...hostnameVariants.values()];
         const matches = new Map<string, ComputerLocationLab>();
         if (!group.some((row) => row.invalidMac)) for (const lab of input.labs ?? []) {
             if (lab.subnet && deviceAddresses.some((address) => addressInSubnet(address, lab.subnet!))) matches.set(lab.id, lab);
@@ -210,10 +234,32 @@ export function buildDeviceDirectory(input: DeviceDirectoryInput): DeviceDirecto
             for (const lab of input.labs ?? []) if (row.addresses.length && lab.dhcpServer && row.server === lab.dhcpServer &&
                 (!lab.subnet || row.addresses.some((address) => addressInSubnet(address, lab.subnet!)))) matches.set(lab.id, lab);
         }
-        const lab = matches.size === 1 ? [...matches.values()][0]! : null;
+        let lab = matches.size === 1 ? [...matches.values()][0]! : null;
+        const inventory = group.filter((row) => row.source === 'veyon' || row.source === 'fog');
+        // Use each inventory record's own hardware, not MACs learned through an IP/name join.
+        const fingerprints = group.some((row) => row.invalidMac) ? [] : inventory.filter((row) => row.macs.length).map((row) => ({
+            fingerprint: createHash('sha256').update(JSON.stringify([row.source, row.source === 'veyon' ? row.veyonIds : row.fogIds, [...row.macs].sort()])).digest('hex'),
+            observed: live.some((current) => current.macs.some((mac) => row.macs.includes(mac))),
+        }));
+        if (!live.length && inventory.length) {
+            const retained = (input.retainedLabs ?? []).filter((entry) => entry.organizationId === input.organizationId && fingerprints.some((key) => key.fingerprint === entry.fingerprint));
+            const latest = retained.reduce((time, entry) => Math.max(time, entry.observedAt), 0);
+            const labIds = unique(retained.filter((entry) => entry.observedAt === latest).map((entry) => entry.labId));
+            lab = labIds.length === 1 ? (input.labs ?? []).find((item) => item.id === labIds[0]) ?? null : null;
+        }
+        if (live.length && input.labs !== undefined) for (const { fingerprint, observed } of fingerprints) {
+            // A null observation also replaces history, preventing resurrection after ambiguity or a move outside labs.
+            input.onLabObservation?.({ organizationId: input.organizationId, fingerprint, labId: observed ? lab?.id ?? null : null,
+                observedAt });
+        }
+        const hostname = hostnames[0] ?? null;
+        const displaySuffix = [input.defaultDnsSuffix, ...(input.labs ?? []).map((item) => item.dnsSuffix)]
+            .filter((suffix): suffix is string => Boolean(suffix))
+            .sort((a, b) => b.length - a.length)
+            .find((suffix) => hostname?.toLowerCase().endsWith(`.${suffix.toLowerCase()}`));
         const manual = unique(group.map((row) => row.location).filter((value): value is string => Boolean(value)));
-        const id = veyonComputerIds.length ? `veyon:${veyonComputerIds[0]}` : fogHostIds.length ? `fog:${fogHostIds[0]}` : deviceMacs.length ? `mac:${[...deviceMacs].sort()[0]}` : `observed:${createHash('sha256').update(JSON.stringify([hostnames.slice().sort(), deviceAddresses])).digest('hex').slice(0, 20)}`;
-        return { id, hostname: hostnames[0] ?? null, hostnames, addresses: deviceAddresses,
+        const id = veyonComputerIds.length ? `veyon:${veyonComputerIds[0]}` : fogHostIds.length ? `fog:${fogHostIds[0]}` : deviceMacs.length ? `mac:${[...deviceMacs].sort()[0]}` : `observed:${createHash('sha256').update(JSON.stringify([[...hostnameVariants.keys()].sort(), deviceAddresses])).digest('hex').slice(0, 20)}`;
+        return { id, hostname: displaySuffix ? hostname!.slice(0, -(displaySuffix.length + 1)) : hostname, hostnames, addresses: deviceAddresses,
             macAddresses: deviceMacs.sort(), lab: lab ? { id: lab.id, name: lab.name, dhcpServer: lab.dhcpServer } : null,
             location: lab?.name ?? (manual.length === 1 ? manual[0]! : null), sources: unique(ordered.map((row) => row.source)), veyonComputerIds, fogHostIds };
     });
@@ -239,6 +285,19 @@ const dependencies = {
     deleteCache: (organizationId: string) => {
         db.delete(organizationDeviceCache).where(eq(organizationDeviceCache.organizationId, organizationId)).run();
     },
+    loadRetainedLabs: async (organizationId: string) => db.query.organizationDeviceLab.findMany({
+        where: eq(organizationDeviceLab.organizationId, organizationId),
+    }),
+    saveRetainedLabs: async (entries: Array<typeof organizationDeviceLab.$inferSelect>) => {
+        if (!entries.length) return;
+        db.transaction((tx) => {
+            for (const entry of entries) tx.insert(organizationDeviceLab).values(entry).onConflictDoUpdate({
+                target: [organizationDeviceLab.organizationId, organizationDeviceLab.fingerprint],
+                set: { labId: entry.labId, observedAt: entry.observedAt },
+                setWhere: lte(organizationDeviceLab.observedAt, entry.observedAt),
+            }).run();
+        });
+    },
     now: () => Date.now(),
 };
 
@@ -246,20 +305,19 @@ const dependencies = {
 export function createOrganizationDeviceService(overrides: Partial<typeof dependencies> = {}) {
     const deps = { ...dependencies, ...overrides };
     const cache = new Map<string, { signature: string; expiresAt: number; snapshot: Promise<DeviceDirectory> }>();
-    let generation = 0;
+    const activeRequests = new Map<string, Set<{ invalidated: boolean }>>();
     const attempt = async <T>(read: () => T | Promise<T>) => {
         try { return { ok: true as const, value: await read() }; }
         catch { return { ok: false as const }; }
     };
-    const get = async (organizationId: string): Promise<DeviceDirectory> => {
-        const startedGeneration = generation;
+    const getSnapshot = async (organizationId: string, request: { invalidated: boolean }): Promise<DeviceDirectory> => {
         // Re-read persisted settings and directory rows, including updatedAt and credentials,
         // before cache lookup. Hashing keeps secrets out of retained signatures and responses.
         const [firewall, fog, pihole, computers] = await Promise.all([
             attempt(() => deps.loadFirewall(organizationId)), attempt(() => deps.loadFogConfig(organizationId)),
             attempt(() => deps.loadPiholeConfig(organizationId)), attempt(() => deps.loadComputers(organizationId)),
         ]);
-        const signature = createHash('sha256').update(JSON.stringify([3, firewall, fog, pihole, computers])).digest('hex');
+        const signature = createHash('sha256').update(JSON.stringify([7, firewall, fog, pihole, computers])).digest('hex');
         const now = deps.now();
         for (const [org, entry] of cache) if (entry.expiresAt <= now) cache.delete(org);
         const cached = cache.get(organizationId);
@@ -269,7 +327,7 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
             if (persisted.ok && persisted.value?.signature === signature && persisted.value.expiresAt > deps.now() &&
                 persisted.value.snapshot.organizationId === organizationId) {
                 const entry = cache.get(organizationId);
-                if (entry?.signature === signature && startedGeneration === generation) entry.expiresAt = persisted.value.expiresAt;
+                if (entry?.signature === signature && !request.invalidated) entry.expiresAt = persisted.value.expiresAt;
                 return persisted.value.snapshot;
             }
             const updatedAt = new Date(now).toISOString();
@@ -282,6 +340,7 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
             else mark('veyon', 'unavailable');
             if (firewall.ok) input.labs = firewall.value?.labs ?? [];
             const config = firewall.ok ? firewall.value : undefined;
+            input.defaultDnsSuffix = config?.defaultDnsSuffix;
             const routerConfigured = Boolean(config?.mikrotikBaseUrl && config.mikrotikUsername && config.mikrotikPassword);
             const hasDeviceScope = (input.labs ?? []).some((lab) => lab.subnet || lab.interface || lab.dhcpServer) ||
                 (input.computers ?? []).some((computer) => Boolean(normalizeDeviceMac(computer.macAddress ?? ''))) || credentialsComplete(fog.ok ? fog.value : undefined);
@@ -330,22 +389,40 @@ export function createOrganizationDeviceService(overrides: Partial<typeof depend
                     mark('pihole', good ? 'partial' : 'unavailable');
                 })(),
             ]);
+            const retained = await attempt(() => deps.loadRetainedLabs(organizationId));
+            if (retained.ok) input.retainedLabs = retained.value;
+            const observations: Array<typeof organizationDeviceLab.$inferSelect> = [];
+            input.onLabObservation = (entry) => { observations.push(entry); };
             const directory = buildDeviceDirectory(input);
-            if (startedGeneration === generation) {
+            if (!request.invalidated) {
+                await attempt(() => deps.saveRetainedLabs(observations));
+            }
+            if (!request.invalidated) {
                 await attempt(() => deps.saveCache({ organizationId, signature,
                     expiresAt: now + 30_000, snapshot: directory }));
             }
             return directory;
         })();
-        if (startedGeneration === generation) {
+        if (!request.invalidated) {
             cache.delete(organizationId);
             while (cache.size >= 128) cache.delete(cache.keys().next().value!);
             cache.set(organizationId, { signature, expiresAt: now + 30_000, snapshot });
         }
         return snapshot;
     };
+    const get = async (organizationId: string): Promise<DeviceDirectory> => {
+        const request = { invalidated: false };
+        const active = activeRequests.get(organizationId) ?? new Set();
+        active.add(request);
+        activeRequests.set(organizationId, active);
+        try { return await getSnapshot(organizationId, request); }
+        finally {
+            active.delete(request);
+            if (!active.size) activeRequests.delete(organizationId);
+        }
+    };
     return Object.assign(get, { invalidate: (organizationId: string) => {
-        generation++;
+        for (const request of activeRequests.get(organizationId) ?? []) request.invalidated = true;
         cache.delete(organizationId);
         deps.deleteCache(organizationId);
     } });

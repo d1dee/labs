@@ -130,6 +130,7 @@ export type ListFogHosts = {
     count: number;
     hosts: FogHost[];
     truncated?: boolean;
+    inventoryWarning?: string;
 };
 
 export type ListFogImages = {

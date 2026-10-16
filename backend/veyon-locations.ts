@@ -2,6 +2,8 @@ import { addressInSubnet } from './mikrotik';
 import { normalizeMac } from './veyon-sync';
 import { getOrganizationDevices } from './devices';
 import { createDeviceIdentityLookup } from '../frontend/src/api/devices';
+import { getFirewallConfigWithLabs } from './firewall-config';
+import { qualifyFogHostname } from './dns-suffix';
 
 export interface ComputerLocationLab {
     id: string;
@@ -23,7 +25,7 @@ export interface ComputerLocationLease {
     invalid?: boolean | string;
 }
 
-type Computer = { id?: string; host: string; macAddress: string | null; location: string | null };
+type Computer = { id?: string; host: string; macAddress: string | null; location: string | null; fogHostId?: number | null };
 
 function literalIPv4(host: string): string | null {
     const address = host.replace(/:\d+$/, '');
@@ -77,14 +79,20 @@ export async function resolveComputerLocations<T extends Computer>(
 ): Promise<T[]> {
     if (computers.length === 0) return computers;
     try {
-        const directory = await getOrganizationDevices(organizationId);
+        const [directory, firewall] = await Promise.all([
+            getOrganizationDevices(organizationId), getFirewallConfigWithLabs(organizationId).catch(() => undefined),
+        ]);
         const lookup = createDeviceIdentityLookup(directory.devices);
         return computers.map((computer) => {
             if (computer.macAddress && !/^[0-9a-f]{12}$/.test(normalizeMac(computer.macAddress))) return computer;
             const device = (computer.id ? lookup({ veyonComputerId: computer.id, macAddress: computer.macAddress }) : null)
                 ?? (computer.macAddress ? lookup({ macAddress: computer.macAddress })
                     : lookup({ address: literalIPv4(computer.host) }));
-            return device?.lab ? { ...computer, location: device.lab.name } : computer;
+            const labId = device?.lab?.id;
+            const suffix = labId ? firewall?.labs.find((lab) => lab.id === labId)?.dnsSuffix || firewall?.defaultDnsSuffix : undefined;
+            const host = computer.fogHostId != null ? qualifyFogHostname(computer.host, suffix) : computer.host;
+            if (!device?.lab && host === computer.host) return computer;
+            return { ...computer, host, location: device?.lab?.name ?? computer.location };
         });
     } catch {
         return computers;

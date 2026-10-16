@@ -3,6 +3,7 @@ import type { DeviceDirectory } from '../frontend/src/api/devices';
 import {
     index,
     integer,
+    primaryKey,
     sqliteTable,
     text,
     uniqueIndex,
@@ -204,6 +205,7 @@ export const firewallConfig = sqliteTable(
         mikrotikBaseUrl: text('mikrotikBaseUrl').notNull(),
         mikrotikUsername: text('mikrotikUsername').notNull(),
         mikrotikPassword: text('mikrotikPassword').notNull(),
+        defaultDnsSuffix: text('defaultDnsSuffix').notNull().default(''),
 
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .$defaultFn(() => new Date())
@@ -354,6 +356,7 @@ export const lab = sqliteTable(
         interface: text('interface'),
         subnet: text('subnet'),
         description: text('description'),
+        dnsSuffix: text('dnsSuffix'),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .notNull()
             .$defaultFn(() => new Date()),
@@ -372,6 +375,15 @@ export const organizationDeviceCache = sqliteTable('organizationDeviceCache', {
     expiresAt: integer('expiresAt').notNull(),
     snapshot: text('snapshot', { mode: 'json' }).$type<DeviceDirectory>().notNull(),
 });
+
+// Durable lab identity only; never retain network addresses or hostname aliases.
+export const organizationDeviceLab = sqliteTable('organizationDeviceLab', {
+    organizationId: text('organizationId').notNull()
+        .references(() => organization.id, { onDelete: 'cascade' }),
+    fingerprint: text('fingerprint').notNull(),
+    labId: text('labId').references(() => lab.id, { onDelete: 'set null' }),
+    observedAt: integer('observedAt').notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.organizationId, t.fingerprint] })]);
 
 export const firewallConfigRelations = relations(
     firewallConfig,

@@ -4,6 +4,7 @@
 // lives in the frontend API module (same precedent as backend/fog.ts).
 
 import type { VeyonSyncPlan } from '../frontend/src/api/veyon';
+import { qualifyFogHostname } from './dns-suffix';
 
 export type { VeyonSyncPlan };
 
@@ -79,6 +80,7 @@ const tiers: TierPredicate[] = [
 export function buildVeyonSyncPlan(
     fogHosts: SyncFogHost[],
     computers: SyncComputerRow[],
+    dnsSuffixForHost: (host: SyncFogHost) => string | null | undefined = () => undefined,
 ): VeyonSyncPlan {
     // Tier matching runs globally per tier so higher-priority rules win;
     // each host and computer matches at most once.
@@ -91,7 +93,8 @@ export function buildVeyonSyncPlan(
             const computer = computers.find(
                 (candidate) =>
                     !matchedComputerIds.has(candidate.id) &&
-                    matchesTier(host, candidate),
+                    (matchesTier(host, candidate) || (matchesTier === tiers[2] &&
+                        hostWithoutPort(candidate.host).toLowerCase() === qualifyFogHostname(host.name, dnsSuffixForHost(host)).toLowerCase())),
             );
             if (!computer) continue;
             matchedHostIds.add(host.id);
@@ -140,7 +143,7 @@ export function buildVeyonSyncPlan(
             );
             continue;
         }
-        const fallbackHost = host.name.trim() || host.ip?.trim() || '';
+        const fallbackHost = qualifyFogHostname(host.name, dnsSuffixForHost(host)) || host.ip?.trim() || '';
         if (!fallbackHost) {
             plan.warnings.push(
                 `FOG host ${host.id} has no name or IP address and cannot be added`,

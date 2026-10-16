@@ -2,7 +2,7 @@ import type { FogHost, ListFogHosts } from '@/api/fog';
 import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
 import { useFogHostStatus } from '@/api/useFogHostStatus';
 import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
-import { compareTableValues, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
+import { compareTableValues, onSelectionRowClick, SortableTh, toggleTableSort, type SortState } from '@/components/ui/tableUtils';
 import {
     ActionIcon,
     Badge,
@@ -10,7 +10,6 @@ import {
     Card,
     Checkbox,
     Group,
-    HoverCard,
     Loader,
     Menu,
     Modal,
@@ -31,6 +30,7 @@ import {
 } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { HostFilterPanel, useHostFilters } from './HostFilterPanel';
+import { InventoryCard, InventoryHostDetails } from './InventoryDetails';
 
 export interface HostTableProps {
     allHosts: ListFogHosts['hosts'];
@@ -284,15 +284,11 @@ export function HostTable({
                                                 style={{
                                                     cursor: 'pointer',
                                                 }}
-                                                onClick={() =>
-                                                    handlers.toggle(host.id)
+                                                onClick={(event) =>
+                                                    onSelectionRowClick(event, () => handlers.toggle(host.id))
                                                 }
                                             >
-                                                <Table.Td
-                                                    onClick={(e) =>
-                                                        e.stopPropagation()
-                                                    }
-                                                >
+                                                <Table.Td>
                                                     <Checkbox
                                                         aria-label='Select row'
                                                         checked={selection.includes(
@@ -327,11 +323,7 @@ export function HostTable({
                                                             'No image'}
                                                     </Text>
                                                 </Table.Td>
-                                                <Table.Td
-                                                    onClick={(e) =>
-                                                        e.stopPropagation()
-                                                    }
-                                                >
+                                                <Table.Td>
                                                     {host.inventory ? (
                                                         <InventoryCard
                                                             host={host}
@@ -356,9 +348,6 @@ export function HostTable({
                                                     <Group
                                                         justify='flex-end'
                                                         gap='xs'
-                                                        onClick={(e) =>
-                                                            e.stopPropagation()
-                                                        }
                                                         visibleFrom='sm'
                                                     >
                                                         <Tooltip label='Deploy'>
@@ -401,6 +390,12 @@ export function HostTable({
                                                                 <IconTrash
                                                                     size={16}
                                                                 />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                        <Tooltip label='Inventory'>
+                                                            <ActionIcon variant='subtle' aria-label={`Inventory for ${host.name}`}
+                                                                onClick={() => { setInventoryHost(host); openInventory(); }}>
+                                                                <IconInfoCircle size={16} />
                                                             </ActionIcon>
                                                         </Tooltip>
                                                     </Group>
@@ -501,7 +496,7 @@ export function HostTable({
                         size='sm'
                     >
                         {liveInventoryHost ? (
-                            <InventoryDetails host={liveInventoryHost} />
+                            <InventoryHostDetails key={liveInventoryHost.id} host={liveInventoryHost} />
                         ) : null}
                     </Modal>
 
@@ -521,88 +516,5 @@ export function HostTable({
                     )}
                 </Stack>
             </Card>
-    );
-}
-
-function InventoryCard({ host }: { host: FogHost }) {
-    const inventory = host?.inventory;
-    return (
-        <HoverCard width={320} shadow='md' withArrow>
-            <HoverCard.Target>
-                <Badge
-                    radius={'md'}
-                    style={{
-                        cursor: 'help',
-                    }}
-                >
-                    {inventory?.sysman || 'Unknown'} /{' '}
-                    {inventory?.sysproduct || 'Unknown'}
-                </Badge>
-            </HoverCard.Target>
-            <HoverCard.Dropdown>
-                <InventoryDetails host={host} />
-            </HoverCard.Dropdown>
-        </HoverCard>
-    );
-}
-
-function InventoryDetails({ host }: { host: FogHost }) {
-    const inventory = host?.inventory;
-    if (!inventory) {
-        return (
-            <Text c='dimmed' size='sm'>
-                No inventory
-            </Text>
-        );
-    }
-    return (
-        <Stack gap='xs'>
-            <Text size='sm' fw={600}>
-                Inventory
-            </Text>
-            {inventory?.sysman && (
-                <Text size='xs'>
-                    <strong>Manufacturer:</strong> {inventory?.sysman}
-                </Text>
-            )}
-            {inventory?.sysproduct && (
-                <Text size='xs'>
-                    <strong>Model:</strong> {inventory?.sysproduct}
-                </Text>
-            )}
-            {inventory?.sysversion && (
-                <Text size='xs'>
-                    <strong>Version:</strong> {inventory?.sysversion}
-                </Text>
-            )}
-            {inventory?.sysserial && (
-                <Text size='xs'>
-                    <strong>Serial:</strong> {inventory?.sysserial}
-                </Text>
-            )}
-            {inventory?.biosvendor && (
-                <Text size='xs'>
-                    <strong>BIOS:</strong> {inventory?.biosvendor}{' '}
-                    {inventory?.biosversion}
-                </Text>
-            )}
-            {inventory?.cpuman && (
-                <Text size='xs'>
-                    <strong>CPU:</strong> {inventory?.cpuman}{' '}
-                    {inventory?.cpuversion}
-                </Text>
-            )}
-            {inventory?.mem && (
-                <Text size='xs'>
-                    <strong>Memory:</strong> {inventory?.mem}
-                </Text>
-            )}
-            {inventory?.hdmodel && (
-                <Text size='xs'>
-                    <strong>HDD:</strong> {inventory?.hdmodel}{' '}
-                    {inventory?.hdserial}
-                </Text>
-            )}
-        </Stack>
     );
 }

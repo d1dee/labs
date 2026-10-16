@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { streamSSE, type SSEMessage } from 'hono/streaming';
 import { z } from 'zod';
@@ -5,6 +6,8 @@ import type { VeyonSyncApplyResultItem } from '../../frontend/src/api/veyon';
 import { db } from '../../db/database';
 import { veyonComputer, veyonConfig } from '../../db/schema';
 import { getFogClient, isFogConfigured } from '../fog';
+import { getFirewallConfigWithLabs } from '../firewall-config';
+import { getOrganizationDevices } from '../devices';
 import {
     getVeyonClient,
     listOpenConnections,
@@ -193,8 +196,16 @@ async function fetchSyncPlan(organizationId: string): Promise<
         where: eq(veyonComputer.organizationId, organizationId),
         orderBy: [asc(veyonComputer.createdAt), asc(veyonComputer.id)],
     });
+    const firewall = await getFirewallConfigWithLabs(organizationId);
+    const directory = firewall && (firewall.defaultDnsSuffix || firewall.labs.some((lab) => lab.dnsSuffix))
+        ? await getOrganizationDevices(organizationId) : null;
+    const labByFogId = new Map(directory?.devices.flatMap((device) =>
+        device.fogHostIds.map((id) => [id, device.lab?.id] as const)) ?? []);
     return {
-        plan: buildVeyonSyncPlan(hostsResult.data.hosts, computers),
+        plan: buildVeyonSyncPlan(hostsResult.data.hosts, computers, (host) => {
+            const labId = labByFogId.get(host.id);
+            return labId ? firewall?.labs.find((lab) => lab.id === labId)?.dnsSuffix || firewall?.defaultDnsSuffix : undefined;
+        }),
         computers,
     };
 }
@@ -235,12 +246,13 @@ function requireUser(c: any) {
 }
 
 async function ownedComputer(organizationId: string, id: string) {
-    return db.query.veyonComputer.findFirst({
+    const computer = await db.query.veyonComputer.findFirst({
         where: and(
             eq(veyonComputer.id, id),
             eq(veyonComputer.organizationId, organizationId),
         ),
     });
+    return computer ? (await resolveComputerLocations(organizationId, [computer]))[0] : undefined;
 }
 
 veyonRouter.get('/veyon/status', async (c) => {
@@ -583,33 +595,49 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                     const displayedComputers = signature === directorySignature ? resolvedDirectory : computers;
                     await write('directory', { computers: displayedComputers });
                     signal.throwIfAborted();
-                    // DHCP enrichment must not delay the initial directory or Veyon checks.
+                    // Send the directory immediately; only FOG-linked targets need DNS enrichment before connecting.
                     const locations = pending(resolveComputerLocations(auth.user.organizationId, computers)).then(async (resolved) => {
                         if (signal.aborted) return;
                         directorySignature = signature;
                         resolvedDirectory = resolved;
-                        if (resolved.some((computer, index) => computer.location !== displayedComputers[index]?.location)) {
+                        if (resolved.some((computer, index) => computer.location !== displayedComputers[index]?.location || computer.host !== displayedComputers[index]?.host)) {
                             await write('directory', { computers: resolved });
                         }
+                        return resolved;
                     }).catch(abort);
                     try {
+                        const targets = computers.some((computer) => computer.fogHostId != null)
+                            ? await locations ?? computers : computers;
                         const client = await pending(getVeyonClient(auth.user.organizationId, auth.user.id));
-                        let next = 0;
-                        await Promise.all(Array.from({ length: Math.min(6, computers.length) }, async () => {
-                            while (!signal.aborted) {
-                                const computer = computers[next++];
-                                if (!computer) return;
-                                let data;
-                                try {
-                                    const information = await pending(client.information(computer.host, signal));
-                                    data = { computerId: computer.id, state: 'online', information };
-                                } catch (error) {
-                                    if (signal.aborted) return;
-                                    data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
+                        const ipTargets: typeof targets = [];
+                        const hostnameTargets: typeof targets = [];
+                        for (const computer of targets) {
+                            const bracketed = computer.host.match(/^\[([^\]]+)\](?::\d+)?$/);
+                            const ipv4WithPort = computer.host.match(/^([^:]+):\d+$/);
+                            const literal = isIP(computer.host) ||
+                                (bracketed && isIP(bracketed[1]!) === 6) ||
+                                (ipv4WithPort && isIP(ipv4WithPort[1]!) === 4);
+                            (literal ? ipTargets : hostnameTargets).push(computer);
+                        }
+                        // Drain every IP check before starting any hostname check.
+                        for (const phase of [ipTargets, hostnameTargets]) {
+                            let next = 0;
+                            await Promise.all(Array.from({ length: Math.min(6, phase.length) }, async () => {
+                                while (!signal.aborted) {
+                                    const computer = phase[next++];
+                                    if (!computer) return;
+                                    let data;
+                                    try {
+                                        const information = await pending(client.information(computer.host, signal));
+                                        data = { computerId: computer.id, state: 'online', information };
+                                    } catch (error) {
+                                        if (signal.aborted) return;
+                                        data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
+                                    }
+                                    await write('information', data);
                                 }
-                                await write('information', data);
-                            }
-                        }));
+                            }));
+                        }
                     } finally {
                         await locations;
                     }
@@ -776,12 +804,12 @@ veyonRouter.get('/veyon/screenshots/stream', async (c) => {
         if (ids.some((id) => !idSchema.safeParse(id).success)) {
             return c.json({ error: 'Invalid computer id' }, 400);
         }
-        const computers = await db.query.veyonComputer.findMany({
+        const computers = await resolveComputerLocations(organizationId, await db.query.veyonComputer.findMany({
             where: and(
                 eq(veyonComputer.organizationId, organizationId),
                 inArray(veyonComputer.id, ids),
             ),
-        });
+        }));
         if (computers.length !== ids.length) {
             return c.json({ error: 'One or more computers were not found' }, 404);
         }
@@ -1131,7 +1159,8 @@ veyonRouter.post('/veyon/commands', async (c) => {
             where: eq(veyonComputer.organizationId, auth.user.organizationId),
         });
         const requestedIds = new Set(body.computerIds);
-        const targets = computers.filter((computer) => requestedIds.has(computer.id));
+        const targets = await resolveComputerLocations(auth.user.organizationId,
+            computers.filter((computer) => requestedIds.has(computer.id)));
         if (targets.length !== requestedIds.size) {
             return c.json({ error: 'One or more computers were not found' }, 404);
         }

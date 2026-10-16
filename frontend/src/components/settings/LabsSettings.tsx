@@ -36,6 +36,14 @@ import {
 import z from 'zod';
 import { FirewallConfig, Lab } from './FirewallSettings';
 
+const dnsSuffixSchema = z.string().refine((value) => {
+    if (/^\.+$/.test(value.trim())) return false;
+    const suffix = value.trim().replace(/^\.|\.$/g, '');
+    return suffix.length <= 253 && (suffix === '' || suffix.split('.').every(
+        (label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+    ));
+}, 'Use DNS labels of 1-63 letters, digits or hyphens, up to 253 characters');
+
 const labSchema = z.object({
     id: z.string().optional(),
     name: z.string().min(1, 'Lab name is required'),
@@ -43,10 +51,12 @@ const labSchema = z.object({
     dhcpServer: z.string(),
     subnet: z.string(),
     interface: z.string().trim().max(128),
+    dnsSuffix: dnsSuffixSchema,
     key: z.string(),
 });
 
 const labsFormSchema = z.object({
+    defaultDnsSuffix: dnsSuffixSchema,
     labs: z.array(labSchema).superRefine((labs, ctx) => {
         const groups = new Map<string, number[]>();
         labs.forEach((lab, index) => {
@@ -79,6 +89,7 @@ const toFormLab = (lab: Lab) => ({
     dhcpServer: lab.dhcpServer ?? '',
     subnet: lab.subnet ?? '',
     interface: lab.interface ?? '',
+    dnsSuffix: lab.dnsSuffix ?? '',
     key: randomId(),
 });
 
@@ -177,6 +188,7 @@ export function LabsSettings({
 
     const form = useForm<LabsFormValues>({
         initialValues: {
+            defaultDnsSuffix: firewallConfig?.defaultDnsSuffix ?? '',
             labs: firewallConfig?.labs?.map(toFormLab) ?? [],
         },
         validate: schemaResolver(labsFormSchema),
@@ -192,6 +204,7 @@ export function LabsSettings({
             return;
         }
         const values = {
+            defaultDnsSuffix: firewallConfig?.defaultDnsSuffix ?? '',
             labs: firewallConfig?.labs?.map(toFormLab) ?? [],
         };
         form.setValues(values);
@@ -209,6 +222,7 @@ export function LabsSettings({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     id: firewallConfig?.id,
+                    defaultDnsSuffix: values.defaultDnsSuffix,
                     labs: values.labs.map((lab) => ({
                         id: lab.id,
                         firewallId: lab.ruleId,
@@ -216,6 +230,7 @@ export function LabsSettings({
                         subnet: lab.subnet,
                         dhcpServer: lab.dhcpServer,
                         interface: lab.interface,
+                        dnsSuffix: lab.dnsSuffix,
                     })),
                 }),
             });
@@ -273,6 +288,7 @@ export function LabsSettings({
                                     dhcpServer: '',
                                     subnet: '',
                                     interface: '',
+                                    dnsSuffix: '',
                                     key: randomId(),
                                 },
                                 0,
@@ -283,6 +299,12 @@ export function LabsSettings({
                     </Button>
                 </Flex>
                 <Stack>
+                    <TextInput
+                        label='Default DNS suffix'
+                        placeholder='school.example'
+                        description='Used for short FOG connection hostnames only when a lab is identified. Display names stay unchanged. Leave blank to disable. Saved with labs; no router password is required.'
+                        {...form.getInputProps('defaultDnsSuffix')}
+                    />
                     {form.values.labs.length === 0 && (
                         <Text c='dimmed' ta='center' size='sm'>
                             No labs configured. Click &quot;Add Lab&quot; to
@@ -350,6 +372,7 @@ export function LabsSettings({
                                         mt='md'
                                     >
                                         <LabField label='Interface' value={lab.interface} />
+                                        <LabField label='DNS suffix' value={lab.dnsSuffix || `Inherit default${form.values.defaultDnsSuffix ? ` (${form.values.defaultDnsSuffix})` : ''}`} />
                                         <LabField
                                             label='Subnet / IP range'
                                             value={lab.subnet}
@@ -404,6 +427,12 @@ export function LabsSettings({
                                         placeholder='vlan10 or bridge-lab'
                                         description='Exact MikroTik interface name. Usage includes received and transmitted bytes since its counters were reset.'
                                         {...form.getInputProps(`labs.${index}.interface`)}
+                                    />
+                                    <TextInput
+                                        label='Lab DNS suffix'
+                                        placeholder='Inherit default'
+                                        description='Overrides the default DNS suffix for this lab. Leave blank to inherit. Fully qualified hostnames and IP addresses are unchanged.'
+                                        {...form.getInputProps(`labs.${index}.dnsSuffix`)}
                                     />
                                     <TextInput
                                         label='DHCP Server'

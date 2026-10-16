@@ -14,6 +14,7 @@ export interface Lab {
     subnet: string;
     ruleId: string;
     interface?: string;
+    dnsSuffix?: string | null;
 }
 
 export interface FirewallConfig {
@@ -22,6 +23,7 @@ export interface FirewallConfig {
     mikrotikUsername: string;
     mikrotikPassword: string;
     mikrotikInsecure: boolean;
+    defaultDnsSuffix?: string;
     labs?: Lab[];
 }
 

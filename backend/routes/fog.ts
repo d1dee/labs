@@ -93,7 +93,7 @@ fogRouter.get('/fog/hosts', async (c) => {
 
     const search = c.req.query('search');
     const client = await getFogClient(user.organizationId);
-    const result = await client.listHosts(search || undefined);
+    const result = await client.listHosts(search || undefined, true);
     if (!result.success) {
         return c.json({ error: result.error }, 500);
     }

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import { fogConfig } from '../db/schema';
-import type { FogHost, ListFogHosts } from '../frontend/src/api';
+import type { FogHost, FogInventory, ListFogHosts } from '../frontend/src/api';
 import { errorProperty, getLogger } from './logger';
 
 const fogLogger = getLogger(['labs', 'fog']);
@@ -298,6 +298,7 @@ export class FogClient {
 
     async listHosts(
         searchTerm?: string,
+        includeInventory = false,
     ): Promise<FogResult<ListFogHosts>> {
         if (!this.configured) return unconfigured();
         try {
@@ -312,6 +313,29 @@ export class FogClient {
             const envelope = raw as FogPageEnvelope | null;
             if (count > items.length || envelope?.truncated === true ||
                 (typeof envelope?.nextUrl === 'string' && envelope.nextUrl)) data.truncated = true;
+            // Paged host lists can omit related inventory. Load it once for the
+            // management view, not once per host or for identity-only consumers.
+            if (includeInventory && items.some((host) => host.inventory == null)) {
+                try {
+                    const inventoryRes = await this.fogRequest('GET', '/fog/inventory');
+                    if (!inventoryRes.ok) {
+                        data.inventoryWarning = await this.errorFrom(inventoryRes);
+                    } else {
+                        const inventoryRaw = await this.readJson(inventoryRes);
+                        const inventoryList = normalizeList<FogInventory>(inventoryRaw, 'inventorys');
+                        const byHostId = new Map(inventoryList.items.map((inventory) => [String(inventory.hostID), inventory]));
+                        data.hosts = data.hosts.map((host) => host.inventory != null ? host : {
+                            ...host, inventory: byHostId.get(String(host.id)),
+                        });
+                        const inventoryEnvelope = inventoryRaw as FogPageEnvelope;
+                        if (inventoryList.count > inventoryList.items.length || inventoryEnvelope.truncated === true || inventoryEnvelope.nextUrl) {
+                            data.inventoryWarning = 'FOG returned an incomplete inventory list. Some hardware details may be unavailable.';
+                        }
+                    }
+                } catch (err) {
+                    data.inventoryWarning = errorMessage(err);
+                }
+            }
             return { success: true, data };
         } catch (err) {
             return { success: false, error: errorMessage(err) };

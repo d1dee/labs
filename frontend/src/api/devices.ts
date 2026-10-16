@@ -52,10 +52,14 @@ export function normalizeDeviceMac(value: string) {
     return /^[0-9a-f]{12}$/.test(mac) ? mac : '';
 }
 
-export function normalizeDeviceHost(value: string) {
-    const host = value.trim().toLowerCase().replace(/\.$/, '');
+export function formatDeviceHost(value: string) {
+    const host = value.trim().replace(/\.$/, '');
     if (host.startsWith('[')) return host.slice(1, host.indexOf(']') === -1 ? undefined : host.indexOf(']'));
     return host.indexOf(':') === host.lastIndexOf(':') ? host.replace(/:\d+$/, '') : host;
+}
+
+export function normalizeDeviceHost(value: string) {
+    return formatDeviceHost(value).toLowerCase();
 }
 
 /** Build once per snapshot. Conflicting identities are never resolved by first match. */

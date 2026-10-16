@@ -9,6 +9,7 @@ export interface ConfigLab {
     dhcpServer: string;
     subnet: string;
     interface?: string;
+    dnsSuffix?: string | null;
 }
 
 export function mapLabs(labs: typeof lab.$inferSelect[]): ConfigLab[] {
@@ -19,6 +20,7 @@ export function mapLabs(labs: typeof lab.$inferSelect[]): ConfigLab[] {
         dhcpServer: l.dhcpServer ?? '',
         subnet: l.subnet ?? '',
         interface: l.interface ?? '',
+        dnsSuffix: l.dnsSuffix ?? null,
     }));
 }
 

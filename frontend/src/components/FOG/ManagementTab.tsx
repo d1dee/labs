@@ -44,6 +44,7 @@ function ManagementTab() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [allHosts, setAllHosts] = useState<FogHost[]>([]);
+    const [inventoryWarning, setInventoryWarning] = useState<string | null>(null);
 
     // Selection state lives here and is shared down to both table and card
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -72,6 +73,7 @@ function ManagementTab() {
     const refresh = useApiStream<Awaited<ReturnType<typeof listFogHosts>>>(configured ? '/api/fog/hosts' : null, (data) => {
         const freshIds = new Set(data.hosts.map((host) => host.id));
         setAllHosts(data.hosts);
+        setInventoryWarning(data.inventoryWarning ?? null);
         setSelectedIds((prev) => prev.filter((id) => freshIds.has(id)));
         setLoading(false);
         setError(null);
@@ -266,6 +268,7 @@ function ManagementTab() {
             />
 
             {error && <Alert color='red'>{error}</Alert>}
+            {inventoryWarning && <Alert color='yellow' title='Inventory unavailable'>{inventoryWarning}</Alert>}
             <Stack>
                 <SelectedHostCard
                     key={cardKey}

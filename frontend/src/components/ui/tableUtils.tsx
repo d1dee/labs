@@ -1,5 +1,14 @@
 import { Group, Table, UnstyledButton } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconArrowsSort } from '@tabler/icons-react';
+import type { MouseEvent } from 'react';
+
+export function onSelectionRowClick(event: MouseEvent<HTMLTableRowElement>, toggleSelection: () => void) {
+    // Let controls handle their own clicks, including labels that activate checkboxes.
+    if (event.defaultPrevented || (event.target instanceof Element && event.target.closest(
+        'a, button, input, select, textarea, label, [role="button"], [role="checkbox"], [role="switch"], [role="combobox"], [contenteditable]',
+    ))) return;
+    toggleSelection();
+}
 
 export type SortState<K extends string = string> = {
     key: K;
