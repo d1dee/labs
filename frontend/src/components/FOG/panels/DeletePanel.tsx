@@ -19,8 +19,8 @@ export function DeletePanel({ hosts, onDone }: Props) {
     const handleDelete = async () => {
         const confirmed = confirm(
             isBulk
-                ? `Delete ${hosts.length} selected hosts? This cannot be undone.`
-                : `Delete host "${hosts[0]?.name}"? This cannot be undone.`,
+                ? `Delete ${hosts.length} selected FOG hosts? This permanently deletes FOG inventory, not just Veyon management.`
+                : `Delete FOG host "${hosts[0]?.name}"? This permanently deletes FOG inventory, not just Veyon management.`,
         );
         if (!confirmed) return;
 
@@ -61,8 +61,8 @@ export function DeletePanel({ hosts, onDone }: Props) {
         <Stack gap='sm'>
             <Text size='sm' c='dimmed'>
                 {isBulk
-                    ? `You are about to delete ${hosts.length} hosts. This action is permanent.`
-                    : `You are about to delete "${hosts[0]?.name}". This action is permanent.`}
+                    ? `You are about to permanently delete ${hosts.length} hosts from FOG.`
+                    : `You are about to permanently delete "${hosts[0]?.name}" from FOG.`}
             </Text>
             {hosts.length > 0 && (
                 <Stack gap={2}>

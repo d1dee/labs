@@ -159,7 +159,7 @@ export async function getVeyonStatus() {
 
 export async function listVeyonComputers() {
     return throwOnError(
-        await $fetch<{ computers: VeyonComputer[] }>('/api/veyon/computers'),
+        await $fetch<{ computers: VeyonComputer[]; inventoryWarning?: string }>('/api/veyon/computers'),
         'Failed to load computers',
     );
 }

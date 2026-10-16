@@ -1,6 +1,5 @@
 import ActiveTasksTab from '@/components/ActiveTasksTab';
-import FogManagementTab from '@/components/FOG/ManagementTab';
-import VeyonManagementTab from '@/components/VeyonManagementTab';
+import ComputersManagementTab from '@/components/VeyonManagementTab';
 import PiholeTab from '@/components/pihole/PiholeTab';
 import { useSessionContext } from '@/context/SessionContext';
 import {
@@ -23,7 +22,6 @@ import {
     IconDeviceDesktop,
     IconKey,
     IconLogout,
-    IconPackage,
     IconNetwork,
     IconSettings,
     IconShieldCheck,
@@ -37,8 +35,7 @@ import classes from './Dashboard.module.css';
 const navTabs = [
     { value: 'firewall', label: 'Firewall', Icon: IconShieldCheck },
     { value: 'network-block', label: 'Network Block', Icon: IconNetwork },
-    { value: 'management', label: 'Management', Icon: IconDeviceDesktop },
-    { value: 'deployment', label: 'Deployment', Icon: IconPackage },
+    { value: 'management', label: 'Computers', Icon: IconDeviceDesktop },
     { value: 'active-tasks', label: 'Active Tasks', Icon: IconTools },
 ] as const;
 
@@ -199,11 +196,7 @@ const Dashboard: FC<DashboardProps> = ({
                                 </Tabs.Panel>
 
                                 <Tabs.Panel value='management' pt='md'>
-                                    <VeyonManagementTab />
-                                </Tabs.Panel>
-
-                                <Tabs.Panel value='deployment' pt='md'>
-                                    <FogManagementTab />
+                                    <ComputersManagementTab />
                                 </Tabs.Panel>
 
                                 <Tabs.Panel value='active-tasks' pt='md'>

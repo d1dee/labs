@@ -1,13 +1,12 @@
 import { isIP } from 'node:net';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { streamSSE, type SSEMessage } from 'hono/streaming';
 import { z } from 'zod';
 import type { VeyonSyncApplyResultItem } from '../../frontend/src/api/veyon';
 import { db } from '../../db/database';
 import { veyonComputer, veyonConfig } from '../../db/schema';
-import { getFogClient, isFogConfigured } from '../fog';
-import { getFirewallConfigWithLabs } from '../firewall-config';
-import { getOrganizationDevices } from '../devices';
+import { isFogConfigured } from '../fog';
+import { getComputerInventory, resolveVeyonTargets } from '../computer-inventory';
 import {
     getVeyonClient,
     listOpenConnections,
@@ -17,7 +16,7 @@ import {
 import { veyonPoller } from '../veyon-poller';
 import { resolveComputerLocations } from '../veyon-locations';
 import { createVeyonStreamWriter } from '../veyon-stream';
-import { buildVeyonSyncPlan, type VeyonSyncPlan } from '../veyon-sync';
+import type { VeyonSyncPlan } from '../veyon-sync';
 import { errorProperty, getLogger } from '../logger';
 import { isDemoUser } from '../demo';
 import { auth } from '../auth';
@@ -181,32 +180,15 @@ async function fetchSyncPlan(organizationId: string): Promise<
           computers: Array<typeof veyonComputer.$inferSelect>;
       }
 > {
-    const fog = await getFogClient(organizationId);
-    const hostsResult = await fog.listHosts();
-    if (!hostsResult.success || !hostsResult.data) {
-        return { error: hostsResult.error ?? 'Failed to list FOG hosts' };
-    }
-    // Absence from a partial inventory is not evidence that a host was deleted.
-    if (hostsResult.data.truncated || hostsResult.data.count > hostsResult.data.hosts.length) {
-        return { error: 'FOG returned an incomplete host inventory. Sync is unavailable until a complete list can be loaded.' };
-    }
-    // Deterministic ordering: tier matching in buildVeyonSyncPlan is
-    // first-wins, so the preview must not depend on row order luck.
-    const computers = await db.query.veyonComputer.findMany({
-        where: eq(veyonComputer.organizationId, organizationId),
-        orderBy: [asc(veyonComputer.createdAt), asc(veyonComputer.id)],
-    });
-    const firewall = await getFirewallConfigWithLabs(organizationId);
-    const directory = firewall && (firewall.defaultDnsSuffix || firewall.labs.some((lab) => lab.dnsSuffix))
-        ? await getOrganizationDevices(organizationId) : null;
-    const labByFogId = new Map(directory?.devices.flatMap((device) =>
-        device.fogHostIds.map((id) => [id, device.lab?.id] as const)) ?? []);
+    const inventory = await getComputerInventory(organizationId, true);
+    if (inventory.warning) return { error: inventory.warning };
+    // Older clients can still read the sync contract, but there is no second
+    // editable FOG directory to synchronize. Stale apply items cannot match.
     return {
-        plan: buildVeyonSyncPlan(hostsResult.data.hosts, computers, (host) => {
-            const labId = labByFogId.get(host.id);
-            return labId ? firewall?.labs.find((lab) => lab.id === labId)?.dnsSuffix || firewall?.defaultDnsSuffix : undefined;
-        }),
-        computers,
+        plan: { additions: [], renames: [], removals: [], links: [], unchanged: inventory.hosts.length,
+            unmanaged: inventory.computers.filter((computer) => computer.fogHostId == null).map((computer) => ({ computerId: computer.id, name: computer.name, host: computer.host })),
+            warnings: ['FOG inventory is managed automatically; manual synchronization is no longer required.'] },
+        computers: inventory.computers,
     };
 }
 
@@ -246,12 +228,7 @@ function requireUser(c: any) {
 }
 
 async function ownedComputer(organizationId: string, id: string) {
-    const computer = await db.query.veyonComputer.findFirst({
-        where: and(
-            eq(veyonComputer.id, id),
-            eq(veyonComputer.organizationId, organizationId),
-        ),
-    });
+    const computer = (await resolveVeyonTargets(organizationId, [id]))?.[0];
     return computer ? (await resolveComputerLocations(organizationId, [computer]))[0] : undefined;
 }
 
@@ -452,11 +429,8 @@ veyonRouter.post('/veyon/sync/apply', async (c) => {
 veyonRouter.get('/veyon/computers', async (c) => {
     const auth = requireUser(c);
     if (auth.response) return auth.response;
-    const computers = await db.query.veyonComputer.findMany({
-        where: eq(veyonComputer.organizationId, auth.user.organizationId),
-        orderBy: (computer, { asc }) => [asc(computer.location), asc(computer.name)],
-    });
-    return c.json({ computers: await resolveComputerLocations(auth.user.organizationId, computers) });
+    const inventory = await getComputerInventory(auth.user.organizationId);
+    return c.json({ computers: await resolveComputerLocations(auth.user.organizationId, inventory.computers), inventoryWarning: inventory.warning });
 });
 
 veyonRouter.post('/veyon/computers', async (c) => {
@@ -464,6 +438,8 @@ veyonRouter.post('/veyon/computers', async (c) => {
     if (auth.response) return auth.response;
     try {
         const body = computerBodySchema.parse(await c.req.json());
+        const inventory = await getComputerInventory(auth.user.organizationId);
+        if (inventory.computers.some((computer) => computer.host.toLowerCase() === body.host.toLowerCase())) return c.json({ error: 'A computer with this address already exists' }, 409);
         const [computer] = await db
             .insert(veyonComputer)
             .values({
@@ -484,10 +460,14 @@ veyonRouter.put('/veyon/computers/:id', async (c) => {
     if (auth.response) return auth.response;
     try {
         const id = idSchema.parse(c.req.param('id'));
-        if (!(await ownedComputer(auth.user.organizationId, id))) {
+        const owned = await ownedComputer(auth.user.organizationId, id);
+        if (!owned) {
             return c.json({ error: 'Computer not found' }, 404);
         }
+        if (owned.fogHostId != null) return c.json({ error: 'FOG owns this computer identity. Edit the host in FOG, not the Veyon directory.' }, 409);
         const body = computerBodySchema.parse(await c.req.json());
+        const inventory = await getComputerInventory(auth.user.organizationId);
+        if (inventory.computers.some((computer) => computer.id !== id && computer.host.toLowerCase() === body.host.toLowerCase())) return c.json({ error: 'A computer with this address already exists' }, 409);
         const [computer] = await db
             .update(veyonComputer)
             .set({
@@ -512,6 +492,7 @@ veyonRouter.delete('/veyon/computers/:id', async (c) => {
         const id = idSchema.parse(c.req.param('id'));
         const computer = await ownedComputer(auth.user.organizationId, id);
         if (!computer) return c.json({ error: 'Computer not found' }, 404);
+        if (computer.fogHostId != null) return c.json({ error: 'This host is owned by FOG. Deleting FOG inventory is a separate deployment action; it cannot be removed as a manual Veyon target.' }, 409);
         const client = await getVeyonClient(auth.user.organizationId, auth.user.id).catch(
             () => null,
         );
@@ -587,13 +568,11 @@ veyonRouter.get('/veyon/information/stream', (c) => {
         try {
             while (!signal.aborted) {
                 try {
-                    const computers = await pending(db.query.veyonComputer.findMany({
-                        where: eq(veyonComputer.organizationId, auth.user.organizationId),
-                        orderBy: (computer, { asc }) => [asc(computer.location), asc(computer.name)],
-                    }));
+                    const inventory = await pending(getComputerInventory(auth.user.organizationId));
+                    const computers = inventory.computers;
                     const signature = JSON.stringify(computers);
                     const displayedComputers = signature === directorySignature ? resolvedDirectory : computers;
-                    await write('directory', { computers: displayedComputers });
+                    await write('directory', { computers: displayedComputers, inventoryWarning: inventory.warning });
                     signal.throwIfAborted();
                     // Send the directory immediately; only FOG-linked targets need DNS enrichment before connecting.
                     const locations = pending(resolveComputerLocations(auth.user.organizationId, computers)).then(async (resolved) => {
@@ -601,7 +580,7 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                         directorySignature = signature;
                         resolvedDirectory = resolved;
                         if (resolved.some((computer, index) => computer.location !== displayedComputers[index]?.location || computer.host !== displayedComputers[index]?.host)) {
-                            await write('directory', { computers: resolved });
+                            await write('directory', { computers: resolved, inventoryWarning: inventory.warning });
                         }
                         return resolved;
                     }).catch(abort);
@@ -804,15 +783,11 @@ veyonRouter.get('/veyon/screenshots/stream', async (c) => {
         if (ids.some((id) => !idSchema.safeParse(id).success)) {
             return c.json({ error: 'Invalid computer id' }, 400);
         }
-        const computers = await resolveComputerLocations(organizationId, await db.query.veyonComputer.findMany({
-            where: and(
-                eq(veyonComputer.organizationId, organizationId),
-                inArray(veyonComputer.id, ids),
-            ),
-        }));
-        if (computers.length !== ids.length) {
+        const resolved = await resolveVeyonTargets(organizationId, ids);
+        if (!resolved) {
             return c.json({ error: 'One or more computers were not found' }, 404);
         }
+        const computers = await resolveComputerLocations(organizationId, resolved);
         const requestedIds = new Set(computers.map((computer) => computer.id));
 
         return streamSSE(c, async (stream) => {
@@ -975,6 +950,12 @@ veyonRouter.get('/veyon/screenshots/stream', async (c) => {
                 while (!closed && !stream.aborted) {
                     await stream.sleep(SSE_HEARTBEAT_MS);
                     if (closed || stream.aborted) break;
+                    const current = await resolveVeyonTargets(organizationId, ids);
+                    if (closed || stream.aborted) break;
+                    if (!current) { abort(); break; }
+                    const resolved = await resolveComputerLocations(organizationId, current);
+                    if (closed || stream.aborted) break;
+                    for (const computer of resolved) veyonPoller.updateComputer(organizationId, computer);
                     write('heartbeat', () => ({ event: 'heartbeat', data: '' }));
                 }
             } finally {
@@ -1155,15 +1136,12 @@ veyonRouter.post('/veyon/commands', async (c) => {
     if (auth.response) return auth.response;
     try {
         const body = commandSchema.parse(await c.req.json());
-        const computers = await db.query.veyonComputer.findMany({
-            where: eq(veyonComputer.organizationId, auth.user.organizationId),
-        });
         const requestedIds = new Set(body.computerIds);
-        const targets = await resolveComputerLocations(auth.user.organizationId,
-            computers.filter((computer) => requestedIds.has(computer.id)));
-        if (targets.length !== requestedIds.size) {
+        const resolved = await resolveVeyonTargets(auth.user.organizationId, [...requestedIds]);
+        if (!resolved) {
             return c.json({ error: 'One or more computers were not found' }, 404);
         }
+        const targets = await resolveComputerLocations(auth.user.organizationId, resolved);
         const featureByAction = {
             'screen-lock': VEYON_FEATURES.screenLock,
             'input-lock': VEYON_FEATURES.inputDevicesLock,

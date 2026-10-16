@@ -9,6 +9,7 @@ import {
     updateDemoFogHost,
 } from '../demo';
 import { credentialsComplete, getFogClient, getFogCredentials } from '../fog';
+import { getComputerInventory, removeKnownFogHost } from '../computer-inventory';
 import { createApp } from './context';
 import { z } from 'zod';
 import { errorProperty, getLogger } from '../logger';
@@ -44,6 +45,20 @@ fogRouter.use('/fog/*', async (c, next) => {
         }
     }
     await next();
+    if (c.req.method !== 'GET' && c.res.ok && !isDemoUser(user) && /\/fog\/hosts(?:\/[1-9]\d*)?$/.test(path)) {
+        try {
+            await getComputerInventory(user.organizationId, true);
+        } catch (error) {
+            fogLogger.warn('Inventory refresh failed after successful FOG mutation', { error: errorProperty(error) });
+        }
+        if (c.req.method === 'DELETE' && /\/fog\/hosts\/[1-9]\d*$/.test(path)) {
+            try {
+                await removeKnownFogHost(user.organizationId, Number(rawId));
+            } catch (error) {
+                fogLogger.warn('Could not persist known FOG host deletion', { error: errorProperty(error) });
+            }
+        }
+    }
 });
 
 fogRouter.get('/fog/status', async (c) => {
@@ -92,11 +107,9 @@ fogRouter.get('/fog/hosts', async (c) => {
     }
 
     const search = c.req.query('search');
-    const client = await getFogClient(user.organizationId);
-    const result = await client.listHosts(search || undefined, true);
-    if (!result.success) {
-        return c.json({ error: result.error }, 500);
-    }
+    const inventory = await getComputerInventory(user.organizationId);
+    const hosts = inventory.hosts.filter((host) => !search || host.name.toLowerCase().includes(search.toLowerCase()));
+    const result = { data: { count: hosts.length, hosts, inventoryWarning: inventory.warning } };
 
     // Demo mode: apply host overrides
     if (isDemoUser(user)) {
@@ -135,6 +148,11 @@ fogRouter.get('/fog/hosts/:id', async (c) => {
 
     const result = await client.getHost(id);
     if (!result.success) {
+        if (!isDemoUser(user)) {
+            const inventory = await getComputerInventory(user.organizationId);
+            const cached = inventory.hosts.find((host) => host.id === id);
+            if (cached) return c.json({ ...cached, inventoryWarning: inventory.warning ?? 'FOG host details unavailable. Showing the last complete snapshot.' });
+        }
         return c.json({ error: result.error }, 500);
     }
 

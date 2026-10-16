@@ -240,7 +240,7 @@ export class FogClient {
         };
 
         try {
-            const opts: RequestInit = { method, headers, signal: AbortSignal.timeout(15_000) };
+            const opts: RequestInit = { method, headers, redirect: 'error', signal: AbortSignal.timeout(15_000) };
             if (body && (method === 'POST' || method === 'PUT')) {
                 opts.body = JSON.stringify(body);
             }
@@ -296,6 +296,58 @@ export class FogClient {
 
     // ---------- Hosts ----------
 
+    private async completeList<T>(path: string, key: string): Promise<T[]> {
+        const base = new URL(this.fogUrl(path));
+        let next = base;
+        let expected: number | undefined;
+        const visited = new Set<string>();
+        const items: T[] = [];
+        for (let page = 0; page < 1000; page++) {
+            if (visited.has(next.href)) throw new Error('FOG pagination repeated a page');
+            visited.add(next.href);
+            const requestPath = `${path}${next.search}`;
+            const res = await this.fogRequest('GET', requestPath);
+            if (!res.ok) throw new LoggedFogError(await this.errorFrom(res));
+            const raw = await this.readJson(res) as FogPageEnvelope;
+            const result = normalizeList<T>(raw, key);
+            for (const field of ['count', 'recordsTotal', 'recordsFiltered', 'recordsReturned'] as const) {
+                if (raw[field] !== undefined && (!Number.isSafeInteger(raw[field]) || Number(raw[field]) < 0)) {
+                    throw new Error('FOG returned invalid pagination counts');
+                }
+            }
+            const total = raw.recordsFiltered ?? raw.recordsTotal ?? raw.count;
+            if (path === '/fog/host' && raw.recordsTotal !== undefined && raw.recordsFiltered !== undefined && raw.recordsFiltered !== raw.recordsTotal) {
+                throw new Error('FOG returned a filtered inventory for an authoritative host list');
+            }
+            if (total !== undefined) {
+                if (expected !== undefined && expected !== total) throw new Error('FOG inventory changed during pagination; retry required');
+                expected = total;
+            }
+            if (raw.recordsReturned !== undefined && raw.recordsReturned !== result.items.length) throw new Error('FOG returned an incomplete page');
+            items.push(...result.items);
+            if (items.length > 100_000 || (expected !== undefined && items.length > expected)) throw new Error('FOG returned inconsistent pagination counts');
+            if (raw.nextUrl !== undefined && raw.nextUrl !== null && typeof raw.nextUrl !== 'string') throw new Error('FOG returned an invalid next page URL');
+            if (raw.truncated !== undefined && typeof raw.truncated !== 'boolean') throw new Error('FOG returned an invalid pagination flag');
+            if (raw.nextUrl) {
+                const candidate = new URL(raw.nextUrl, next);
+                if (candidate.origin !== base.origin || candidate.pathname !== base.pathname || candidate.username || candidate.password || candidate.hash) {
+                    throw new Error('FOG returned an unsafe next page URL');
+                }
+                if (!result.items.length) throw new Error('FOG pagination made no progress');
+                next = candidate;
+            } else if (expected !== undefined && items.length < expected) {
+                if (!result.items.length) throw new Error('FOG returned an incomplete host inventory');
+                next = new URL(base);
+                next.searchParams.set('start', String(items.length));
+                next.searchParams.set('length', String(result.items.length));
+            } else {
+                if (raw.truncated === true) throw new Error('FOG returned a truncated inventory without a continuation');
+                return items;
+            }
+        }
+        throw new Error('FOG inventory exceeds the pagination limit');
+    }
+
     async listHosts(
         searchTerm?: string,
         includeInventory = false,
@@ -305,33 +357,31 @@ export class FogClient {
             const path = searchTerm?.trim()
                 ? `/fog/host/search/${encodeURIComponent(searchTerm.trim())}`
                 : '/fog/host';
-            const res = await this.fogRequest('GET', path);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const raw = await this.readJson(res);
-            const { count, items } = normalizeList<FogHost>(raw, 'hosts');
-            const data: ListFogHosts = { count, hosts: withSynthesizedMacs(items) };
-            const envelope = raw as FogPageEnvelope | null;
-            if (count > items.length || envelope?.truncated === true ||
-                (typeof envelope?.nextUrl === 'string' && envelope.nextUrl)) data.truncated = true;
+            const rows = await this.completeList<FogHost>(path, 'hosts');
+            const ids = new Set<number>();
+            const items = rows.map((host) => {
+                if (!host || typeof host !== 'object' || !/^[1-9]\d*$/.test(String(host.id)) || !Number.isSafeInteger(Number(host.id)) || typeof host.name !== 'string' || !host.name.trim()) {
+                    throw new Error('FOG returned an invalid host identity');
+                }
+                const id = Number(host.id);
+                if (ids.has(id)) throw new Error('FOG returned duplicate host identities across pages');
+                ids.add(id);
+                if (host.ip != null && typeof host.ip !== 'string') throw new Error('FOG returned an invalid host address');
+                if (host.primac != null && typeof host.primac !== 'string') throw new Error('FOG returned an invalid host MAC');
+                if (host.macs != null && (!Array.isArray(host.macs) || host.macs.some((mac) => typeof mac !== 'string'))) throw new Error('FOG returned invalid host MACs');
+                return { ...host, id, name: host.name.trim() };
+            });
+            const data: ListFogHosts = { count: items.length, hosts: withSynthesizedMacs(items) };
             // Paged host lists can omit related inventory. Load it once for the
             // management view, not once per host or for identity-only consumers.
             if (includeInventory && items.some((host) => host.inventory == null)) {
                 try {
-                    const inventoryRes = await this.fogRequest('GET', '/fog/inventory');
-                    if (!inventoryRes.ok) {
-                        data.inventoryWarning = await this.errorFrom(inventoryRes);
-                    } else {
-                        const inventoryRaw = await this.readJson(inventoryRes);
-                        const inventoryList = normalizeList<FogInventory>(inventoryRaw, 'inventorys');
-                        const byHostId = new Map(inventoryList.items.map((inventory) => [String(inventory.hostID), inventory]));
-                        data.hosts = data.hosts.map((host) => host.inventory != null ? host : {
-                            ...host, inventory: byHostId.get(String(host.id)),
-                        });
-                        const inventoryEnvelope = inventoryRaw as FogPageEnvelope;
-                        if (inventoryList.count > inventoryList.items.length || inventoryEnvelope.truncated === true || inventoryEnvelope.nextUrl) {
-                            data.inventoryWarning = 'FOG returned an incomplete inventory list. Some hardware details may be unavailable.';
-                        }
-                    }
+                    const inventory = await this.completeList<FogInventory>('/fog/inventory', 'inventorys');
+                    if (inventory.some((row) => !row || typeof row !== 'object' || !Number.isSafeInteger(Number(row.hostID)))) throw new Error('FOG returned invalid inventory rows');
+                    const byHostId = new Map(inventory.map((inventory) => [String(inventory.hostID), inventory]));
+                    data.hosts = data.hosts.map((host) => host.inventory != null ? host : {
+                        ...host, inventory: byHostId.get(String(host.id)),
+                    });
                 } catch (err) {
                     data.inventoryWarning = errorMessage(err);
                 }

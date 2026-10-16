@@ -20,14 +20,17 @@ import {
     IconX,
 } from '@tabler/icons-react';
 import { useState } from 'react';
+import { modals } from '@mantine/modals';
 import { DeletePanel } from './panels/DeletePanel';
 import { ImagePanel } from './panels/ImagePanel';
 import { SnapinPanel } from './panels/SnapinPanel';
 import { TaskPanel } from './panels/TaskPanel';
 
 export interface SelectedHostCardProps {
+    embedded?: boolean;
     /** The currently selected host(s) */
     hosts: FogHost[];
+    selectedCount?: number;
     images: FogImage[];
     snapins: FogSnapin[];
     taskTypes: FogTaskType[];
@@ -42,7 +45,9 @@ export interface SelectedHostCardProps {
 }
 
 export function SelectedHostCard({
+    embedded = false,
     hosts,
+    selectedCount = hosts.length,
     images,
     snapins,
     taskTypes,
@@ -61,7 +66,17 @@ export function SelectedHostCard({
     // Toggle active action (opens if different/closed, closes if same)
     const handleToggleAction = (action: string) => {
         if (!hasHosts) return;
-        setActiveAction((prev) => (prev === action ? null : action));
+        const toggle = () => setActiveAction((prev) => (prev === action ? null : action));
+        if (selectedCount > hosts.length) {
+            modals.openConfirmModal({
+                title: 'Use eligible FOG hosts only?',
+                children: <Text size='sm'>{hosts.length} of {selectedCount} selected computers are FOG hosts. The remaining {selectedCount - hosts.length} will not be affected by this deployment action.</Text>,
+                labels: { confirm: `Use ${hosts.length} FOG hosts`, cancel: 'Cancel' },
+                onConfirm: toggle,
+            });
+            return;
+        }
+        toggle();
     };
 
     // Pre-resolve the deploy and capture task types from the reference list
@@ -87,7 +102,7 @@ export function SelectedHostCard({
     let panelTitle = '';
     if (activeAction === 'image') panelTitle = 'Image Assignment';
     else if (activeAction === 'snapin') panelTitle = 'Send Snapin';
-    else if (activeAction === 'delete') panelTitle = 'Delete Hosts';
+    else if (activeAction === 'delete') panelTitle = 'Delete FOG Hosts';
     else if (activeTaskType) panelTitle = `Run Task: ${activeTaskType.name}`;
 
     // ──────────────────────────────────────────────
@@ -111,17 +126,18 @@ export function SelectedHostCard({
             : 'No image assigned';
 
     return (
-        <Card withBorder p='sm'>
+        <Card withBorder={!embedded} p={embedded ? 0 : 'sm'} bg={embedded ? 'transparent' : undefined}>
             <Stack gap='xs'>
                 {/* ── Header ── */}
                 <Group justify='space-between' wrap='nowrap'>
                     <Stack gap={0} style={{ minWidth: 0 }}>
                         <Title order={4}>
-                            Command deck
+                            FOG deployment
                         </Title>
                         <Text size='sm' c='dimmed' truncate title={headerSub}>
                             {headerTitle}
                         </Text>
+                        <Text size='xs' c='dimmed'>{hosts.length} of {selectedCount} selected computers eligible for FOG. Actions below affect only these FOG hosts.</Text>
                     </Stack>
                     <Group gap='xs' wrap='nowrap'>
                         {hasHosts && !isBulk && (
@@ -211,7 +227,7 @@ export function SelectedHostCard({
                                 leftSection={<IconTrash size={14} />}
                                 onClick={() => handleToggleAction('delete')}
                             >
-                                Delete
+                                Delete FOG hosts
                             </Menu.Item>
 
                             {captureTaskType && (

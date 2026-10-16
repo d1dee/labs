@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { eq, lte } from 'drizzle-orm';
 import { db } from '../db/database';
-import { organizationDeviceCache, organizationDeviceLab, veyonComputer } from '../db/schema';
+import { organizationDeviceCache, organizationDeviceLab } from '../db/schema';
+import { getComputerInventory } from './computer-inventory';
 import { formatDeviceHost, normalizeDeviceHost, normalizeDeviceMac, type DeviceDirectory, type DeviceIdentity, type DeviceSource } from '../frontend/src/api/devices';
 import { getFirewallConfigWithLabs } from './firewall-config';
 import { credentialsComplete, getFogClient, getFogConfigForOrg } from './fog';
@@ -271,7 +272,7 @@ const dependencies = {
     loadFirewall: getFirewallConfigWithLabs,
     loadFogConfig: getFogConfigForOrg,
     loadPiholeConfig: getPiholeConfigForOrg,
-    loadComputers: async (organizationId: string) => db.query.veyonComputer.findMany({ where: eq(veyonComputer.organizationId, organizationId) }),
+    loadComputers: async (organizationId: string) => (await getComputerInventory(organizationId)).computers,
     getDHCPLeases, callMikrotik, getFogClient, getPiholeClient,
     loadCache: async (organizationId: string) => db.query.organizationDeviceCache.findFirst({
         where: eq(organizationDeviceCache.organizationId, organizationId),

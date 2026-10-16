@@ -57,6 +57,12 @@ try {
 
 // This project predates checked-in Drizzle migrations. Keep the additive
 // Veyon tables self-initializing so existing installations can upgrade safely.
+sqliteDb.run(`CREATE TABLE IF NOT EXISTS organizationComputerInventory (
+    organizationId TEXT PRIMARY KEY NOT NULL,
+    source TEXT NOT NULL,
+    snapshot TEXT NOT NULL,
+    FOREIGN KEY (organizationId) REFERENCES organization(id) ON DELETE CASCADE
+)`);
 sqliteDb.run(`CREATE TABLE IF NOT EXISTS veyonConfig (
     id TEXT PRIMARY KEY NOT NULL,
     organizationId TEXT NOT NULL UNIQUE,

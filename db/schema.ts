@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import type { DeviceDirectory } from '../frontend/src/api/devices';
+import type { ComputerInventorySnapshot } from '../backend/computer-inventory';
 import {
     index,
     integer,
@@ -304,8 +305,8 @@ export const veyonConfig = sqliteTable(
     ],
 );
 
-// Organization-scoped directory used by the management screen. The host
-// value is passed to a Veyon WebAPI server operating in proxy mode.
+// Manual Veyon targets and legacy stable identity links. FOG-owned identity
+// fields are read from organizationComputerInventory, never edited here.
 export const veyonComputer = sqliteTable(
     'veyonComputer',
     {
@@ -374,6 +375,14 @@ export const organizationDeviceCache = sqliteTable('organizationDeviceCache', {
     signature: text('signature').notNull(),
     expiresAt: integer('expiresAt').notNull(),
     snapshot: text('snapshot', { mode: 'json' }).$type<DeviceDirectory>().notNull(),
+});
+
+// Complete FOG identity snapshots do not expire: an outage must not erase targets.
+export const organizationComputerInventory = sqliteTable('organizationComputerInventory', {
+    organizationId: text('organizationId').primaryKey()
+        .references(() => organization.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    snapshot: text('snapshot', { mode: 'json' }).$type<ComputerInventorySnapshot>().notNull(),
 });
 
 // Durable lab identity only; never retain network addresses or hostname aliases.

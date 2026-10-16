@@ -1,5 +1,15 @@
 import type { DeviceIdentity, DeviceLab } from '@/api/devices';
-import type { FogHost, ListFogHosts } from '@/api/fog';
+import {
+    getFogStatus,
+    listFogImages,
+    listFogSnapins,
+    listFogTaskTypes,
+    type FogHost,
+    type FogImage,
+    type FogSnapin,
+    type FogTaskType,
+    type ListFogHosts,
+} from '@/api/fog';
 import { useApiStream } from '@/api/useApiStream';
 import {
     deviceIdentitySearchText,
@@ -19,6 +29,7 @@ import {
     type VeyonInformationEvent,
 } from '@/api/veyon';
 import { InventoryHostDetails } from '@/components/FOG/InventoryDetails';
+import { SelectedHostCard } from '@/components/FOG/SelectedHostCard';
 import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import {
     MobileFilterPanel,
@@ -38,7 +49,6 @@ import {
     type SortState,
 } from '@/components/ui/tableUtils';
 import VeyonMonitoringWall from '@/components/veyon/VeyonMonitoringWall';
-import VeyonSyncModal from '@/components/veyon/VeyonSyncModal';
 import { useVeyonScreenshots } from '@/components/veyon/useVeyonScreenshots';
 import {
     ActionIcon,
@@ -63,6 +73,7 @@ import {
     Select,
     Stack,
     Table,
+    Tabs,
     Text,
     Textarea,
     TextInput,
@@ -80,7 +91,6 @@ import {
     IconCheck,
     IconChevronDown,
     IconCloud,
-    IconCloudDownload,
     IconCommand,
     IconDeviceDesktop,
     IconDotsVertical,
@@ -168,7 +178,10 @@ function featureName(feature: VeyonFeature) {
 
 function identityQuery(computer: VeyonComputer) {
     return {
-        veyonComputerId: computer.id,
+        veyonComputerId: computer.id.startsWith('fog:')
+            ? undefined
+            : computer.id,
+        fogHostId: computer.fogHostId ?? undefined,
         macAddress: computer.macAddress,
         address: computer.host,
     };
@@ -184,10 +197,10 @@ function fogHostIdFor(
     );
 }
 
-export default function VeyonManagementTab() {
+export default function ComputersManagementTab() {
     const identities = useDeviceIdentities();
     const [configured, setConfigured] = useState<boolean | null>(null);
-    const [computers, setComputers] = useState<VeyonComputer[]>([]);
+    const [directory, setComputers] = useState<VeyonComputer[]>([]);
     const [live, setLive] = useState<Record<string, LiveState>>({});
     const [selected, setSelected] = useState<string[]>([]);
     const [search, setSearch] = useState('');
@@ -214,8 +227,72 @@ export default function VeyonManagementTab() {
     const [inventoryWarning, setInventoryWarning] = useState<string | null>(
         null,
     );
-    const [syncOpened, setSyncOpened] = useState(false);
+    const [fogConfigured, setFogConfigured] = useState<boolean | null>(null);
+    const [fogError, setFogError] = useState<string | null>(null);
+    const [images, setImages] = useState<FogImage[]>([]);
+    const [snapins, setSnapins] = useState<FogSnapin[]>([]);
+    const [taskTypes, setTaskTypes] = useState<FogTaskType[]>([]);
+    const [deploymentErrors, setDeploymentErrors] = useState<
+        Record<string, string>
+    >({});
     const [wallOpened, setWallOpened] = useState(false);
+    // FOG-only rows remain visible even if the live service is unconfigured or down.
+    // Their UI-only IDs are never sent to Veyon; only directory IDs are eligible.
+    const computers = useMemo(() => {
+        const linked = new Set(
+            directory.map((computer) =>
+                fogHostIdFor(
+                    computer,
+                    identities.lookup(identityQuery(computer)),
+                ),
+            ),
+        );
+        return [
+            ...directory,
+            ...(fogHosts ?? [])
+                .filter((host) => !linked.has(host.id))
+                .map(
+                    (host): VeyonComputer => ({
+                        id: `fog:${host.id}`,
+                        name: host.name,
+                        host: host.ip || host.name,
+                        macAddress: host.primac ?? null,
+                        location: null,
+                        fogHostId: host.id,
+                        createdAt: '',
+                        updatedAt: '',
+                    }),
+                ),
+        ];
+    }, [directory, fogHosts, identities.lookup]);
+    useEffect(() => {
+        setSelected((current) => {
+            const next = [
+                ...new Set(
+                    current
+                        .map((id) =>
+                            id.startsWith('fog:')
+                                ? (computers.find(
+                                      (computer) =>
+                                          `fog:${computer.fogHostId}` === id,
+                                  )?.id ?? id)
+                                : id,
+                        )
+                        .filter((id) =>
+                            computers.some((computer) => computer.id === id),
+                        ),
+                ),
+            ];
+            return next.length === current.length &&
+                next.every((id, index) => id === current[index])
+                ? current
+                : next;
+        });
+    }, [computers]);
+    const veyonIds = new Set(
+        configured ? directory.map((computer) => computer.id) : [],
+    );
+    const veyonSelection = selected.filter((id) => veyonIds.has(id));
     const deferredSearch = useDeferredValue(search.trim().toLowerCase());
     const locationFor = useCallback(
         (computer: VeyonComputer) =>
@@ -232,29 +309,126 @@ export default function VeyonManagementTab() {
     const inventoryFogHostId = inventoryComputer
         ? fogHostIdFor(inventoryComputer, inventoryIdentity)
         : null;
-    const needsInventory =
-        configured &&
-        computers.some(
-            (computer) =>
-                fogHostIdFor(
-                    computer,
-                    identities.lookup(identityQuery(computer)),
-                ) != null,
-        );
-    useApiStream<ListFogHosts>(
-        needsInventory ? '/api/fog/hosts' : null,
+    useApiStream<Awaited<ReturnType<typeof getFogStatus>>>(
+        '/api/fog/status',
+        (status) => {
+            setFogConfigured(status.configured);
+            setFogError(null);
+            if (!status.configured) {
+                setFogHosts(null);
+                setInventoryWarning(null);
+            }
+        },
+        (error) => setFogError(error.message),
+    );
+    const refreshFog = useApiStream<ListFogHosts>(
+        fogConfigured ? '/api/fog/hosts' : null,
         (data) => {
             setFogHosts(data.hosts);
             setInventoryWarning(data.inventoryWarning ?? null);
+            setFogError(null);
         },
         (error) => {
-            setInventoryWarning(error.message);
+            setFogError(error.message);
         },
+    );
+    const deploymentStream = (key: string, success: () => void) => {
+        success();
+        setDeploymentErrors((current) => {
+            const next = { ...current };
+            delete next[key];
+            return next;
+        });
+    };
+    useApiStream<Awaited<ReturnType<typeof listFogImages>>>(
+        fogConfigured ? '/api/fog/images' : null,
+        (data) => deploymentStream('images', () => setImages(data.images)),
+        (error) =>
+            setDeploymentErrors((current) => ({
+                ...current,
+                images: error.message,
+            })),
+    );
+    useApiStream<Awaited<ReturnType<typeof listFogSnapins>>>(
+        fogConfigured ? '/api/fog/snapins' : null,
+        (data) => deploymentStream('snapins', () => setSnapins(data.snapins)),
+        (error) =>
+            setDeploymentErrors((current) => ({
+                ...current,
+                snapins: error.message,
+            })),
+    );
+    useApiStream<Awaited<ReturnType<typeof listFogTaskTypes>>>(
+        fogConfigured ? '/api/fog/tasktypes' : null,
+        (data) =>
+            deploymentStream('task types', () => setTaskTypes(data.tasktypes)),
+        (error) =>
+            setDeploymentErrors((current) => ({
+                ...current,
+                'task types': error.message,
+            })),
     );
     const fogHostsById = useMemo(
         () => new Map(fogHosts?.map((host) => [String(host.id), host])),
         [fogHosts],
     );
+    const selectedFogHosts = (fogHosts ?? []).filter((host) =>
+        computers.some(
+            (computer) =>
+                selected.includes(computer.id) &&
+                fogHostIdFor(
+                    computer,
+                    identities.lookup(identityQuery(computer)),
+                ) === host.id,
+        ),
+    );
+    const deployTaskTypeId =
+        taskTypes.find((type) => type.name?.toLowerCase().includes('deploy'))
+            ?.id ?? null;
+    const captureTaskTypeId =
+        taskTypes.find((type) => type.name?.toLowerCase().includes('capture'))
+            ?.id ?? null;
+    useApiStream<{ computers: VeyonComputer[]; inventoryWarning?: string }>(
+        configured !== true ? '/api/veyon/computers' : null,
+        (data) => {
+            setComputers(data.computers);
+            setInventoryWarning(data.inventoryWarning ?? null);
+            setLoading(false);
+        },
+        (error) => {
+            setLoadError(error.message);
+            setLoading(false);
+        },
+    );
+    const handleHostsDeleted = (ids: number[]) => {
+        const deleted = new Set(ids);
+        const removed = new Set(
+            computers
+                .filter(
+                    (computer) =>
+                        computer.fogHostId != null &&
+                        deleted.has(computer.fogHostId),
+                )
+                .map((computer) => computer.id),
+        );
+        setFogHosts(
+            (current) =>
+                current?.filter((host) => !deleted.has(host.id)) ?? null,
+        );
+        setComputers((current) =>
+            current.filter((computer) => !removed.has(computer.id)),
+        );
+        setSelected((current) => current.filter((id) => !removed.has(id)));
+        refreshFog();
+    };
+    const handleHostUpdated = (host: FogHost) => {
+        setFogHosts(
+            (current) =>
+                current?.map((item) => (item.id === host.id ? host : item)) ??
+                null,
+        );
+        refreshFog();
+    };
 
     const filteredComputers = useMemo(() => {
         const rows = computers.filter((computer) => {
@@ -274,9 +448,7 @@ export default function VeyonManagementTab() {
                     JSON.stringify(locationFor(computer) || '') ===
                         locationFilter) &&
                 (!labFilter.length ||
-                    labFilter.includes(
-                        lab ? `lab:${lab.id}` : 'unassigned',
-                    )) &&
+                    labFilter.includes(lab ? `lab:${lab.id}` : 'unassigned')) &&
                 (!sessionFilter || session === sessionFilter) &&
                 [
                     computer.name,
@@ -352,6 +524,9 @@ export default function VeyonManagementTab() {
             setConfigured(status.configured);
             if (!status.configured) {
                 setLoading(false);
+                setLive({});
+                setViewer(null);
+                setWallOpened(false);
                 setLoadError(null);
             }
         },
@@ -375,9 +550,14 @@ export default function VeyonManagementTab() {
                 source = new EventSource('/api/veyon/information/stream');
                 source.addEventListener('directory', (event) => {
                     if (cancelled) return;
-                    const { computers: nextComputers } = JSON.parse(
-                        (event as MessageEvent<string>).data,
-                    ) as { computers: VeyonComputer[] };
+                    const {
+                        computers: nextComputers,
+                        inventoryWarning: directoryWarning,
+                    } = JSON.parse((event as MessageEvent<string>).data) as {
+                        computers: VeyonComputer[];
+                        inventoryWarning?: string;
+                    };
+                    setInventoryWarning(directoryWarning ?? null);
                     const previousHosts = new Map(
                         directoryRef.current.map((computer) => [
                             computer.id,
@@ -386,13 +566,27 @@ export default function VeyonManagementTab() {
                     );
                     directoryRef.current = nextComputers;
                     setComputers(nextComputers);
-                    setSelected((current) =>
-                        current.filter((id) =>
-                            nextComputers.some(
-                                (computer) => computer.id === id,
-                            ),
+                    setSelected((current) => [
+                        ...new Set(
+                            current
+                                .map((id) =>
+                                    id.startsWith('fog:')
+                                        ? (nextComputers.find(
+                                              (computer) =>
+                                                  `fog:${computer.fogHostId}` ===
+                                                  id,
+                                          )?.id ?? id)
+                                        : id,
+                                )
+                                .filter(
+                                    (id) =>
+                                        id.startsWith('fog:') ||
+                                        nextComputers.some(
+                                            (computer) => computer.id === id,
+                                        ),
+                                ),
                         ),
-                    );
+                    ]);
                     setLive((current) =>
                         Object.fromEntries(
                             nextComputers.map((computer) => [
@@ -463,8 +657,35 @@ export default function VeyonManagementTab() {
         featureUidValue?: string,
         targetIds?: string[],
     ) => {
-        const targets = targetIds ?? selected;
+        const requested = targetIds ?? selected;
+        const targets = requested.filter((id) => veyonIds.has(id));
         if (!targets.length) return;
+        if (targets.length !== requested.length) {
+            modals.openConfirmModal({
+                title: 'Apply Veyon command to eligible targets only?',
+                children: (
+                    <Text size='sm'>
+                        {targets.length} of {requested.length} selected
+                        computers are Veyon targets. The remaining{' '}
+                        {requested.length - targets.length} will not receive
+                        this command.
+                    </Text>
+                ),
+                labels: {
+                    confirm: `Apply to ${targets.length} Veyon targets`,
+                    cancel: 'Cancel',
+                },
+                onConfirm: () =>
+                    void runCommand(
+                        action,
+                        argumentsValue,
+                        active,
+                        featureUidValue,
+                        targets,
+                    ),
+            });
+            return;
+        }
         try {
             const result = await sendVeyonCommand({
                 computerIds: targets,
@@ -564,42 +785,25 @@ export default function VeyonManagementTab() {
         });
     };
 
-    if (loading && configured === null) {
-        return (
-            <Stack align='center' py={80} gap='sm'>
-                <Loader color='teal' />
-                <Text c='dimmed'>Opening secure Veyon console...</Text>
-            </Stack>
-        );
-    }
-
-    if (configured === null && loadError) {
-        return (
-            <Alert
-                color='red'
-                title='Veyon unavailable'
-                icon={<IconAlertCircle size={18} />}
-            >
-                {loadError} Retrying automatically.
-            </Alert>
-        );
-    }
-
-    if (!configured) {
-        return (
-            <Alert
-                color='yellow'
-                title='Veyon is not configured'
-                icon={<IconAlertCircle size={18} />}
-            >
-                Configure and verify a Veyon WebAPI proxy in Settings → Veyon
-                before managing computers.
-            </Alert>
-        );
-    }
-
     return (
         <Stack gap='lg'>
+            {configured === false && (
+                <Alert color='yellow' title='Veyon is not configured'>
+                    Configure Veyon in Settings to enable live sessions and
+                    remote commands. FOG deployment remains independent.
+                </Alert>
+            )}
+            {fogError && (
+                <Alert color='yellow' title='FOG unavailable'>
+                    {fogError} Last-known inventory is retained.
+                </Alert>
+            )}
+            {fogConfigured === false && !fogError && (
+                <Alert color='yellow' title='FOG is not configured'>
+                    Configure FOG in Settings to enable inventory and
+                    deployment. Manual Veyon targets remain available.
+                </Alert>
+            )}
             {identities.warning ? (
                 <Text size='xs' c='dimmed' role='status'>
                     {identities.warning}
@@ -614,31 +818,18 @@ export default function VeyonManagementTab() {
                     {loadError}
                 </Alert>
             ) : null}
-            {needsInventory && inventoryWarning ? (
-                <Alert color='yellow' title='Inventory unavailable'>
-                    {inventoryWarning}
-                </Alert>
-            ) : null}
             <PageHero
-                eyebrow='Veyon operations desk'
+                eyebrow='Computers'
                 title='Computer management'
-                description='Monitor active sessions and dispatch classroom controls through the organization proxy.'
+                description='One inventory for live classroom operations and FOG deployment. FOG owns registered computer identities; manual targets are exceptions.'
                 icon={<IconScreenShare size={25} />}
                 actions={
                     <>
                         <Button
                             variant='light'
                             color='teal'
-                            leftSection={<IconCloudDownload size={16} />}
-                            onClick={() => setSyncOpened(true)}
-                        >
-                            Sync with FOG
-                        </Button>
-                        <Button
-                            variant='light'
-                            color='teal'
                             leftSection={<IconLayoutGrid size={16} />}
-                            disabled={computers.length === 0}
+                            disabled={!configured || directory.length === 0}
                             onClick={() => setWallOpened(true)}
                         >
                             Live monitor
@@ -647,30 +838,102 @@ export default function VeyonManagementTab() {
                             variant='white'
                             color='dark'
                             leftSection={<IconPlus size={16} />}
+                            disabled={!configured}
                             onClick={() =>
                                 setEditor({ opened: true, computer: null })
                             }
                         >
-                            Add computer
+                            Add manual target
                         </Button>
                     </>
                 }
                 metrics={[
                     { label: 'Directory', value: computers.length },
-                    { label: 'Online', value: onlineCount, accent: true },
+                    {
+                        label: 'Veyon connected',
+                        value: onlineCount,
+                        accent: true,
+                    },
                     { label: 'Users active', value: loggedInCount },
                     { label: 'Selected', value: selected.length },
                 ]}
             />
 
-            <CommandDeck
-                selectedCount={selected.length}
-                features={Object.values(live).flatMap((value) =>
-                    value.state === 'online' ? value.information.features : [],
-                )}
-                onCommand={runCommand}
-                onConfirm={confirmCommand}
-            />
+            <Group justify='space-between'>
+                <Text size='sm' role='status'>
+                    {selected.length} selected: {veyonSelection.length} Veyon
+                    eligible; {selectedFogHosts.length} FOG eligible. Service
+                    actions apply only to their eligible targets.
+                </Text>
+                <Button
+                    variant='subtle'
+                    size='xs'
+                    disabled={!selected.length}
+                    onClick={() => setSelected([])}
+                >
+                    Clear selection
+                </Button>
+            </Group>
+            <Card withBorder radius='lg' p='sm'>
+                <Tabs defaultValue='veyon' keepMounted={false}>
+                    <Tabs.List aria-label='Computer actions'>
+                        <Tabs.Tab value='veyon'>
+                            Management ({veyonSelection.length})
+                        </Tabs.Tab>
+                        <Tabs.Tab value='fog'>
+                            Deployment ({selectedFogHosts.length})
+                        </Tabs.Tab>
+                    </Tabs.List>
+                    <Tabs.Panel value='veyon' pt='sm'>
+                        <CommandDeck
+                            embedded
+                            selectedCount={veyonSelection.length}
+                            features={Object.values(live).flatMap((value) =>
+                                value.state === 'online'
+                                    ? value.information.features
+                                    : [],
+                            )}
+                            onCommand={runCommand}
+                            onConfirm={confirmCommand}
+                        />
+                    </Tabs.Panel>
+                    <Tabs.Panel value='fog' pt='sm'>
+                        {Object.entries(deploymentErrors).map(
+                            ([key, message]) => (
+                                <Alert
+                                    key={key}
+                                    color='yellow'
+                                    title={`FOG ${key} unavailable`}
+                                >
+                                    {message}
+                                </Alert>
+                            ),
+                        )}
+                        {fogConfigured && (
+                            <SelectedHostCard
+                                embedded
+                                key={selected.slice().sort().join(',')}
+                                hosts={selectedFogHosts}
+                                selectedCount={selected.length}
+                                images={images}
+                                snapins={snapins}
+                                taskTypes={taskTypes}
+                                deployTaskTypeId={deployTaskTypeId}
+                                captureTaskTypeId={captureTaskTypeId}
+                                onHostsDeleted={handleHostsDeleted}
+                                onHostUpdated={handleHostUpdated}
+                                onClose={() => setSelected([])}
+                            />
+                        )}
+                        {!fogConfigured && (
+                            <Text size='sm' c='dimmed'>
+                                Configure FOG in Settings to enable deployment
+                                actions.
+                            </Text>
+                        )}
+                    </Tabs.Panel>
+                </Tabs>
+            </Card>
 
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
@@ -685,7 +948,7 @@ export default function VeyonManagementTab() {
                             miw={0}
                             style={{ overflowWrap: 'anywhere' }}
                         >
-                            <Title order={4}>Live computers</Title>
+                            <Title order={4}>Computers</Title>
                             <Text size='sm' c='dimmed'>
                                 Statuses refresh automatically. Select targets,
                                 then apply controls from the command deck.
@@ -772,7 +1035,10 @@ export default function VeyonManagementTab() {
                                     tabIndex: 0,
                                 }}
                                 data={[
-                                    { value: 'unassigned', label: 'Unassigned' },
+                                    {
+                                        value: 'unassigned',
+                                        label: 'Unassigned',
+                                    },
                                     ...identities.labs.map((lab) => ({
                                         value: `lab:${lab.id}`,
                                         label: lab.name,
@@ -868,7 +1134,7 @@ export default function VeyonManagementTab() {
                                                 ['name', 'Computer'],
                                                 ['location', 'Location'],
                                                 ['user', 'User session'],
-                                                ['status', 'Status'],
+                                                ['status', 'Veyon'],
                                             ] as const
                                         ).map(([key, label]) => (
                                             <SortableTh
@@ -888,14 +1154,15 @@ export default function VeyonManagementTab() {
                                                 }
                                             />
                                         ))}
-
+                                        <Table.Th>Reachability (FOG)</Table.Th>
+                                        <Table.Th>FOG image</Table.Th>
                                         <Table.Th ta='right'>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
                                     {filteredComputers.length === 0 ? (
                                         <Table.Tr>
-                                            <Table.Td colSpan={7}>
+                                            <Table.Td colSpan={8}>
                                                 <Text ta='center' c='dimmed'>
                                                     No computers match the
                                                     current filters.
@@ -922,12 +1189,11 @@ export default function VeyonManagementTab() {
                                                     ),
                                                 ),
                                             )}
-                                            inventoryLoading={
-                                                fogHosts === null &&
-                                                inventoryWarning === null
-                                            }
                                             location={locationFor(computer)}
                                             live={live[computer.id]}
+                                            veyonEligible={veyonIds.has(
+                                                computer.id,
+                                            )}
                                             selected={selected.includes(
                                                 computer.id,
                                             )}
@@ -977,7 +1243,9 @@ export default function VeyonManagementTab() {
                             </ThemeIcon>
                             <Text fw={600}>No computers registered</Text>
                             <Text size='sm' c='dimmed'>
-                                Add a target reachable by the Veyon proxy.
+                                {loading
+                                    ? 'Loading inventory...'
+                                    : 'Register computers in FOG or add a manual Veyon target.'}
                             </Text>
                         </Stack>
                     )}
@@ -1012,27 +1280,127 @@ export default function VeyonManagementTab() {
             <Modal
                 opened={Boolean(inventoryComputer)}
                 onClose={() => setInventoryComputerId(null)}
-                title={`Inventory: ${inventoryIdentity?.hostname || inventoryComputer?.name || 'Computer'}`}
-                size='sm'
+                title={`Computer: ${inventoryIdentity?.hostname || inventoryComputer?.name || 'Computer'}`}
+                size='lg'
             >
-                {inventoryComputer && inventoryFogHostId != null ? (
-                    <InventoryHostDetails
-                        key={`${inventoryComputer.id}:${inventoryFogHostId}`}
-                        host={
-                            fogHostsById.get(String(inventoryFogHostId)) ?? {
-                                id: inventoryFogHostId,
-                                name: inventoryComputer.name,
-                            }
-                        }
-                    />
-                ) : (
-                    <Text size='sm' c='dimmed'>
-                        No unique FOG host is linked to this computer.
-                    </Text>
+                {inventoryComputer && (
+                    <Tabs defaultValue='overview'>
+                        <Tabs.List>
+                            <Tabs.Tab value='overview'>Overview</Tabs.Tab>
+                            <Tabs.Tab value='live'>Live session</Tabs.Tab>
+                            <Tabs.Tab value='hardware'>Hardware</Tabs.Tab>
+                            <Tabs.Tab value='deployment'>Deployment</Tabs.Tab>
+                        </Tabs.List>
+                        <Tabs.Panel value='overview' pt='md'>
+                            <Stack gap='xs'>
+                                {inventoryWarning && (
+                                    <Alert color='yellow'>
+                                        {inventoryWarning}
+                                    </Alert>
+                                )}
+                                <DeviceIdentityDetails
+                                    identity={inventoryIdentity}
+                                    hostname={inventoryComputer.name}
+                                    address={inventoryComputer.host}
+                                />
+                                <Text size='sm'>
+                                    Inventory source:{' '}
+                                    {inventoryComputer.fogHostId != null
+                                        ? 'FOG (authoritative)'
+                                        : 'Manual Veyon target'}
+                                </Text>
+                                <Text size='sm'>
+                                    Veyon ID:{' '}
+                                    {veyonIds.has(inventoryComputer.id)
+                                        ? inventoryComputer.id
+                                        : 'Not managed'}
+                                </Text>
+                                <Text size='sm'>
+                                    FOG ID:{' '}
+                                    {inventoryFogHostId ?? 'Not registered'}
+                                </Text>
+                            </Stack>
+                        </Tabs.Panel>
+                        <Tabs.Panel value='live' pt='md'>
+                            <Stack gap='sm'>
+                                <Text size='sm'>
+                                    {live[inventoryComputer.id]?.state ===
+                                    'online'
+                                        ? `Veyon connected. User: ${(live[inventoryComputer.id] as Extract<LiveState, { state: 'online' }>).information.user.login || 'No user logged in'}`
+                                        : 'Live session unavailable; this does not establish network reachability.'}
+                                </Text>
+                                <Button
+                                    disabled={
+                                        !veyonIds.has(inventoryComputer.id) ||
+                                        live[inventoryComputer.id]?.state !==
+                                            'online'
+                                    }
+                                    onClick={() => {
+                                        setViewer(inventoryComputer);
+                                        setInventoryComputerId(null);
+                                    }}
+                                >
+                                    Open live view
+                                </Button>
+                            </Stack>
+                        </Tabs.Panel>
+                        <Tabs.Panel value='hardware' pt='md'>
+                            {inventoryFogHostId != null ? (
+                                <InventoryHostDetails
+                                    key={`${inventoryComputer.id}:${inventoryFogHostId}`}
+                                    host={
+                                        fogHostsById.get(
+                                            String(inventoryFogHostId),
+                                        ) ?? {
+                                            id: inventoryFogHostId,
+                                            name: inventoryComputer.name,
+                                        }
+                                    }
+                                />
+                            ) : (
+                                <Text size='sm' c='dimmed'>
+                                    No unique FOG host is linked to this
+                                    computer.
+                                </Text>
+                            )}
+                        </Tabs.Panel>
+                        <Tabs.Panel value='deployment' pt='md'>
+                            {fogHostsById.get(String(inventoryFogHostId)) ? (
+                                <SelectedHostCard
+                                    key={inventoryComputer.id}
+                                    hosts={[
+                                        fogHostsById.get(
+                                            String(inventoryFogHostId),
+                                        )!,
+                                    ]}
+                                    images={images}
+                                    snapins={snapins}
+                                    taskTypes={taskTypes}
+                                    deployTaskTypeId={deployTaskTypeId}
+                                    captureTaskTypeId={captureTaskTypeId}
+                                    onHostsDeleted={(ids) => {
+                                        handleHostsDeleted(ids);
+                                        setInventoryComputerId(null);
+                                    }}
+                                    onHostUpdated={handleHostUpdated}
+                                    onClose={() => setInventoryComputerId(null)}
+                                />
+                            ) : (
+                                <Text size='sm' c='dimmed'>
+                                    This computer is not available in the FOG
+                                    inventory.
+                                </Text>
+                            )}
+                        </Tabs.Panel>
+                    </Tabs>
                 )}
             </Modal>
             <RemoteViewer
-                computer={viewer}
+                computer={
+                    directory.find((computer) => computer.id === viewer?.id) ??
+                    null
+                }
+                live={viewer ? live[viewer.id] : undefined}
                 identity={
                     viewer ? identities.lookup(identityQuery(viewer)) : null
                 }
@@ -1058,14 +1426,9 @@ export default function VeyonManagementTab() {
                         );
                 }}
             />
-            <VeyonSyncModal
-                opened={syncOpened}
-                onClose={() => setSyncOpened(false)}
-                onApplied={() => void load()}
-            />
             <VeyonMonitoringWall
                 opened={wallOpened}
-                computers={computers}
+                computers={directory}
                 live={live}
                 initialSelection={selected}
                 onClose={() => setWallOpened(false)}
@@ -1080,9 +1443,9 @@ function ComputerRow({
     computer,
     identity,
     fogHost,
-    inventoryLoading,
     location,
     live,
+    veyonEligible,
     selected,
     onSelected,
     onView,
@@ -1093,9 +1456,9 @@ function ComputerRow({
     computer: VeyonComputer;
     identity: DeviceIdentity | null;
     fogHost?: FogHost;
-    inventoryLoading: boolean;
     location: string | null;
     live?: LiveState;
+    veyonEligible: boolean;
     selected: boolean;
     onSelected: (checked: boolean) => void;
     onView: () => void;
@@ -1109,7 +1472,9 @@ function ComputerRow({
         <Table.Tr
             bg={selected ? 'var(--mantine-color-teal-light)' : undefined}
             style={{ cursor: 'pointer' }}
-            onClick={(event) => onSelectionRowClick(event, () => onSelected(!selected))}
+            onClick={(event) =>
+                onSelectionRowClick(event, () => onSelected(!selected))
+            }
         >
             <Table.Td>
                 <Checkbox
@@ -1131,17 +1496,24 @@ function ComputerRow({
                     <div>
                         <Group gap={6} wrap='nowrap'>
                             <DeviceIdentityDetails
-                                identity={identity}
+                                identity={
+                                    computer.fogHostId != null && identity
+                                        ? {
+                                              ...identity,
+                                              hostname: computer.name,
+                                          }
+                                        : identity
+                                }
                                 hostname={computer.name || computer.host}
                                 address={computer.host}
                                 showLab={false}
                                 emptyAddressLabel='IP unavailable'
                             />
                             {computer.fogHostId != null ? (
-                                <Tooltip label='Synced from FOG'>
+                                <Tooltip label='FOG authoritative inventory'>
                                     <Box
                                         component='span'
-                                        aria-label='Synced from FOG'
+                                        aria-label='FOG authoritative inventory'
                                         style={{
                                             display: 'flex',
                                             color: 'var(--mantine-color-blue-6)',
@@ -1181,12 +1553,16 @@ function ComputerRow({
                     </div>
                 ) : (
                     <Text size='sm' c='dimmed'>
-                        No user
+                        {information ? 'No user' : 'Session unavailable'}
                     </Text>
                 )}
             </Table.Td>
             <Table.Td>
-                {live?.state === 'loading' ? (
+                {!veyonEligible ? (
+                    <Badge color='gray' variant='outline'>
+                        Not managed
+                    </Badge>
+                ) : live?.state === 'loading' ? (
                     <Loader size='xs' />
                 ) : live?.state === 'online' ? (
                     <Badge color='teal' variant='light'>
@@ -1201,12 +1577,37 @@ function ComputerRow({
                         }
                     >
                         <Badge color='gray' variant='light'>
-                            Offline
+                            Unavailable
                         </Badge>
                     </Tooltip>
                 )}
             </Table.Td>
-
+            <Table.Td>
+                <Tooltip
+                    label={
+                        fogHost?.pingstatustext ||
+                        'FOG port 445 probe; independent of Veyon authentication'
+                    }
+                >
+                    <Text size='sm' c='dimmed'>
+                        {fogHost?.pingstatuscode === 0 ||
+                        fogHost?.pingstatuscode === 111
+                            ? 'Reachable'
+                            : fogHost?.pingstatustext
+                              ? 'Not reachable'
+                              : 'Unknown'}
+                    </Text>
+                </Tooltip>
+            </Table.Td>
+            <Table.Td>
+                <Text size='sm'>
+                    {fogHost?.imagename ||
+                        fogHost?.image?.name ||
+                        (fogHostId != null
+                            ? 'No image assigned'
+                            : 'Not registered')}
+                </Text>
+            </Table.Td>
             <Table.Td>
                 <Group justify='flex-end' gap={4} wrap='nowrap'>
                     <Tooltip label='Open live view'>
@@ -1214,22 +1615,20 @@ function ComputerRow({
                             variant='subtle'
                             aria-label={`View ${computer.name}`}
                             onClick={onView}
-                            disabled={!information}
+                            disabled={!veyonEligible || !information}
                         >
                             <IconEye size={18} />
                         </ActionIcon>
                     </Tooltip>
-                    {fogHostId != null ? (
-                        <Tooltip label='Inventory'>
-                            <ActionIcon
-                                variant='subtle'
-                                aria-label={`Inventory for ${computer.name}`}
-                                onClick={onInventory}
-                            >
-                                <IconInfoCircle size={18} />
-                            </ActionIcon>
-                        </Tooltip>
-                    ) : null}
+                    <Tooltip label='Computer details'>
+                        <ActionIcon
+                            variant='subtle'
+                            aria-label={`Inventory for ${computer.name}`}
+                            onClick={onInventory}
+                        >
+                            <IconInfoCircle size={18} />
+                        </ActionIcon>
+                    </Tooltip>
                     <Menu position='bottom-end' shadow='md'>
                         <Menu.Target>
                             <ActionIcon
@@ -1244,15 +1643,21 @@ function ComputerRow({
                             <Menu.Item
                                 leftSection={<IconEdit size={16} />}
                                 onClick={onEdit}
+                                disabled={
+                                    computer.fogHostId != null || !veyonEligible
+                                }
                             >
-                                Edit target
+                                Edit manual target
                             </Menu.Item>
                             <Menu.Item
                                 leftSection={<IconTrash size={16} />}
                                 color='red'
                                 onClick={onDelete}
+                                disabled={
+                                    computer.fogHostId != null || !veyonEligible
+                                }
                             >
-                                Remove target
+                                Remove manual Veyon target
                             </Menu.Item>
                         </Menu.Dropdown>
                     </Menu>
@@ -1268,6 +1673,7 @@ function CommandDeck({
     onCommand,
     onConfirm,
     targetName,
+    embedded = false,
 }: {
     selectedCount: number;
     features: VeyonFeature[];
@@ -1284,6 +1690,7 @@ function CommandDeck({
         color?: string,
     ) => void;
     targetName?: string;
+    embedded?: boolean;
 }) {
     const [mode, setMode] = useState<string | null>(null);
     const [text, setText] = useState('');
@@ -1315,7 +1722,7 @@ function CommandDeck({
             {!targetName ? (
                 <Group justify='space-between'>
                     <Stack gap={0}>
-                        <Title order={4}>Command deck</Title>
+                        <Title order={4}>Veyon controls</Title>
                         <Text size='sm' c='dimmed'>
                             {selectedCount
                                 ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed`
@@ -1650,7 +2057,7 @@ function CommandDeck({
             ) : null}
         </Stack>
     );
-    return targetName ? (
+    return targetName || embedded ? (
         controls
     ) : (
         <Card withBorder radius='lg' p='sm' miw={0}>
@@ -1818,11 +2225,10 @@ function ComputerEditor({
                     <Alert
                         color='blue'
                         icon={<IconCloud size={16} />}
-                        title='Managed by FOG sync'
+                        title='Managed by FOG'
                     >
-                        This computer is linked to a FOG host. Its display name
-                        is managed by FOG synchronization and will be renamed on
-                        the next sync; all fields remain editable.
+                        FOG owns this computer identity. Update its host record
+                        in FOG; the manual Veyon editor cannot override it.
                     </Alert>
                 ) : null}
                 <TextInput
@@ -1874,6 +2280,7 @@ function ComputerEditor({
 
 function RemoteViewer({
     computer,
+    live,
     identity,
     lab,
     onClose,
@@ -1881,6 +2288,7 @@ function RemoteViewer({
     onConfirm,
 }: {
     computer: VeyonComputer | null;
+    live?: LiveState;
     identity: DeviceIdentity | null;
     lab: DeviceLab | null;
     onClose: () => void;
@@ -1897,10 +2305,8 @@ function RemoteViewer({
         color?: string,
     ) => void;
 }) {
-    const [information, setInformation] = useState<VeyonInformation | null>(
-        null,
-    );
-    const [error, setError] = useState('');
+    const information = live?.state === 'online' ? live.information : null;
+    const error = live?.state === 'offline' ? live.error : '';
     const [failedImage, setFailedImage] = useState<string | null>(null);
 
     // One backend polling worker per machine feeds this view; the browser
@@ -1917,20 +2323,8 @@ function RemoteViewer({
     const frame = computer ? frames[computer.id] : undefined;
 
     useEffect(() => {
-        setInformation(null);
-        setError('');
         setFailedImage(null);
     }, [computer?.id]);
-    useApiStream<VeyonInformation>(
-        computer
-            ? `/api/veyon/computers/${encodeURIComponent(computer.id)}/information`
-            : null,
-        (value) => {
-            setInformation(value);
-            setError('');
-        },
-        (value) => setError(value.message),
-    );
 
     if (!computer) return null;
     const failed = Boolean(frame?.consecutiveFailures || frame?.lastError);

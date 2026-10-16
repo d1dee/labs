@@ -1,15 +1,15 @@
-import {
-    type VeyonCommandAction,
-    type VeyonComputer,
-} from '@/api/veyon';
-import type { LiveState } from '@/components/VeyonManagementTab';
 import type { DeviceIdentity, DeviceLab } from '@/api/devices';
-import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
+import {
+    deviceIdentitySearchText,
+    useDeviceIdentities,
+} from '@/api/useDeviceIdentities';
+import { type VeyonCommandAction, type VeyonComputer } from '@/api/veyon';
 import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import {
     useVeyonScreenshots,
     type VeyonScreenshotFrame,
 } from '@/components/veyon/useVeyonScreenshots';
+import type { LiveState } from '@/components/VeyonManagementTab';
 import {
     ActionIcon,
     Box,
@@ -75,7 +75,10 @@ export default function VeyonMonitoringWall({
     initialSelection?: string[];
     onClose: () => void;
     onOpenViewer: (computer: VeyonComputer) => void;
-    onCommand: (computerId: string, action: VeyonCommandAction) => void | Promise<void>;
+    onCommand: (
+        computerId: string,
+        action: VeyonCommandAction,
+    ) => void | Promise<void>;
 }) {
     const identities = useDeviceIdentities();
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -88,7 +91,8 @@ export default function VeyonMonitoringWall({
     const [viewport, setViewport] = useState({ width: 1024, height: 600 });
     const [activeIds, setActiveIds] = useState<string[]>([]);
     const [pinnedId, setPinnedId] = useState<string | null>(null);
-    const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
+    const [viewportElement, setViewportElement] =
+        useState<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (!opened) return;
@@ -110,43 +114,105 @@ export default function VeyonMonitoringWall({
     const refreshMs = refresh === 'paused' ? null : Number(refresh);
 
     const selectedSet = new Set(selectedIds);
-    const selectedComputers = computers.filter((computer) => selectedSet.has(computer.id));
+    const selectedComputers = computers.filter((computer) =>
+        selectedSet.has(computer.id),
+    );
     const identityQuery = (computer: VeyonComputer) => ({
-        veyonComputerId: computer.id, macAddress: computer.macAddress, address: computer.host,
+        veyonComputerId: computer.id,
+        macAddress: computer.macAddress,
+        address: computer.host,
     });
-    const matchesLab = (computer: VeyonComputer) => !labFilter || identities.labFor(identityQuery(computer))?.id === labFilter;
+    const matchesLab = (computer: VeyonComputer) =>
+        !labFilter ||
+        identities.labFor(identityQuery(computer))?.id === labFilter;
     const matchesSearch = (computer: VeyonComputer, query: string) =>
-        [computer.name, computer.host, computer.location ?? '', identities.labFor(identityQuery(computer))?.name ?? '',
-            deviceIdentitySearchText(identities.lookup(identityQuery(computer)))]
-            .join(' ').toLowerCase().includes(query.trim().toLowerCase());
-    const filteredComputers = selectedComputers.filter((computer) => matchesLab(computer) && matchesSearch(computer, search));
-    const availableColumns = viewport.width < 600 ? 1 : viewport.width < 900 ? 2 : viewport.width < 1200 ? 3 : 4;
-    const gridColumns = columns === 'auto'
-        ? Math.min(availableColumns, Math.max(1, Math.ceil(Math.sqrt(filteredComputers.length))))
-        : Number(columns);
-    const tileWidth = Math.max(1, (viewport.width - GRID_GAP * (gridColumns - 1)) / gridColumns);
-    const rowHeight = Math.ceil(Math.max(1, tileWidth - 22) * 9 / 16 + ROW_CHROME + GRID_GAP);
+        [
+            computer.name,
+            computer.host,
+            computer.location ?? '',
+            identities.labFor(identityQuery(computer))?.name ?? '',
+            deviceIdentitySearchText(
+                identities.lookup(identityQuery(computer)),
+            ),
+        ]
+            .join(' ')
+            .toLowerCase()
+            .includes(query.trim().toLowerCase());
+    const filteredComputers = selectedComputers.filter(
+        (computer) => matchesLab(computer) && matchesSearch(computer, search),
+    );
+    const availableColumns =
+        viewport.width < 600
+            ? 1
+            : viewport.width < 900
+              ? 2
+              : viewport.width < 1200
+                ? 3
+                : 4;
+    const gridColumns =
+        columns === 'auto'
+            ? Math.min(
+                  availableColumns,
+                  Math.max(1, Math.ceil(Math.sqrt(filteredComputers.length))),
+              )
+            : Number(columns);
+    const tileWidth = Math.max(
+        1,
+        (viewport.width - GRID_GAP * (gridColumns - 1)) / gridColumns,
+    );
+    const rowHeight = Math.ceil(
+        (Math.max(1, tileWidth - 22) * 9) / 16 + ROW_CHROME + GRID_GAP,
+    );
     const rowCount = Math.ceil(filteredComputers.length / gridColumns);
-    const firstRow = Math.min(Math.max(0, rowCount - 1), Math.floor(scrollTop / rowHeight));
-    const endRow = Math.min(rowCount, Math.ceil((scrollTop + viewport.height) / rowHeight));
+    const firstRow = Math.min(
+        Math.max(0, rowCount - 1),
+        Math.floor(scrollTop / rowHeight),
+    );
+    const endRow = Math.min(
+        rowCount,
+        Math.ceil((scrollTop + viewport.height) / rowHeight),
+    );
     const startBufferedRow = Math.max(0, firstRow - 1);
     const endBufferedRow = Math.min(rowCount, endRow + 1);
-    const bufferedComputers = filteredComputers.slice(startBufferedRow * gridColumns, endBufferedRow * gridColumns);
+    const bufferedComputers = filteredComputers.slice(
+        startBufferedRow * gridColumns,
+        endBufferedRow * gridColumns,
+    );
     const mountedComputers = [...bufferedComputers];
-    const pinnedComputer = selectedComputers.find((computer) => computer.id === pinnedId);
-    if (pinnedComputer && !mountedComputers.some((computer) => computer.id === pinnedId)) mountedComputers.push(pinnedComputer);
-    const visibleComputers = filteredComputers.slice(firstRow * gridColumns, endRow * gridColumns);
+    const pinnedComputer = selectedComputers.find(
+        (computer) => computer.id === pinnedId,
+    );
+    if (
+        pinnedComputer &&
+        !mountedComputers.some((computer) => computer.id === pinnedId)
+    )
+        mountedComputers.push(pinnedComputer);
+    const visibleComputers = filteredComputers.slice(
+        firstRow * gridColumns,
+        endRow * gridColumns,
+    );
     // Prioritize what is actually visible before overscan when an extreme
     // viewport exceeds the shared stream's active-machine bound.
-    const subscriptionKey = [...new Set([
-        ...(pinnedComputer ? [pinnedComputer.id] : []),
-        ...visibleComputers.map((computer) => computer.id),
-        ...bufferedComputers.map((computer) => computer.id),
-    ])].slice(0, MAX_ACTIVE).join(',');
+    const subscriptionKey = [
+        ...new Set([
+            ...(pinnedComputer ? [pinnedComputer.id] : []),
+            ...visibleComputers.map((computer) => computer.id),
+            ...bufferedComputers.map((computer) => computer.id),
+        ]),
+    ]
+        .slice(0, MAX_ACTIVE)
+        .join(',');
 
     useEffect(() => {
-        if (!opened) { setActiveIds([]); return; }
-        const timer = window.setTimeout(() => setActiveIds(subscriptionKey ? subscriptionKey.split(',') : []), 150);
+        if (!opened) {
+            setActiveIds([]);
+            return;
+        }
+        const timer = window.setTimeout(
+            () =>
+                setActiveIds(subscriptionKey ? subscriptionKey.split(',') : []),
+            150,
+        );
         return () => window.clearTimeout(timer);
     }, [opened, subscriptionKey]);
 
@@ -170,25 +236,40 @@ export default function VeyonMonitoringWall({
     }, [search, labFilter, columns, selectedIds, viewportElement]);
 
     useEffect(() => {
-        const pinFullscreen = () => setPinnedId(document.fullscreenElement?.getAttribute('data-tile-id') ?? null);
+        const pinFullscreen = () =>
+            setPinnedId(
+                document.fullscreenElement?.getAttribute('data-tile-id') ??
+                    null,
+            );
         document.addEventListener('fullscreenchange', pinFullscreen);
-        return () => document.removeEventListener('fullscreenchange', pinFullscreen);
+        return () =>
+            document.removeEventListener('fullscreenchange', pinFullscreen);
     }, []);
 
-    const { frames, connected, refreshOnce: refreshGrid } = useVeyonScreenshots(opened ? activeIds.filter((id) => id !== pinnedComputer?.id) : [], {
-        paused: refresh === 'paused',
-        minFrameIntervalMs: refreshMs,
-        width: gridColumns >= 3 ? 320 : 640,
-        quality: gridColumns >= 3 ? 50 : 65,
-        priority: 'grid',
-    });
-    const fullscreen = useVeyonScreenshots(opened && pinnedComputer ? [pinnedComputer.id] : [], {
-        paused: refresh === 'paused',
-        minFrameIntervalMs: 10_000,
-        width: 1280,
-        quality: 75,
-        priority: 'viewer',
-    });
+    const {
+        frames,
+        connected,
+        refreshOnce: refreshGrid,
+    } = useVeyonScreenshots(
+        opened ? activeIds.filter((id) => id !== pinnedComputer?.id) : [],
+        {
+            paused: refresh === 'paused',
+            minFrameIntervalMs: refreshMs,
+            width: gridColumns >= 3 ? 320 : 640,
+            quality: gridColumns >= 3 ? 50 : 65,
+            priority: 'grid',
+        },
+    );
+    const fullscreen = useVeyonScreenshots(
+        opened && pinnedComputer ? [pinnedComputer.id] : [],
+        {
+            paused: refresh === 'paused',
+            minFrameIntervalMs: 10_000,
+            width: 1280,
+            quality: 75,
+            priority: 'viewer',
+        },
+    );
     const refreshOnce = () => {
         refreshGrid();
         if (pinnedComputer) fullscreen.refreshOnce();
@@ -203,7 +284,8 @@ export default function VeyonMonitoringWall({
     );
 
     const handleCommand = useCallback(
-        (computerId: string, action: VeyonCommandAction) => onCommand(computerId, action),
+        (computerId: string, action: VeyonCommandAction) =>
+            onCommand(computerId, action),
         [onCommand],
     );
 
@@ -216,23 +298,49 @@ export default function VeyonMonitoringWall({
     };
 
     return (
-        <Modal opened={opened} onClose={onClose} title='Live monitoring wall' fullScreen
+        <Modal
+            opened={opened}
+            onClose={onClose}
+            title='Live monitoring wall'
+            fullScreen
             styles={{
-                content: { height: '100dvh', maxHeight: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+                content: {
+                    height: '100dvh',
+                    maxHeight: '100dvh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                },
                 header: { flexShrink: 0 },
-                body: { flex: 1, minHeight: 0, display: 'flex', overflow: 'auto' },
-            }}>
+                body: {
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    overflow: 'auto',
+                },
+            }}
+        >
             <Stack gap='md' style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-                <Group justify='space-between' wrap='wrap' style={{ flexShrink: 0 }}>
+                <Group
+                    justify='space-between'
+                    wrap='wrap'
+                    style={{ flexShrink: 0 }}
+                >
                     <Group gap='xs'>
-                        <IconInfoCircle size={16} style={{ color: 'var(--mantine-color-gray-6)' }} />
+                        <IconInfoCircle
+                            size={16}
+                            style={{ color: 'var(--mantine-color-gray-6)' }}
+                        />
                         <Text size='sm' c='dimmed'>
-                             {selectedComputers.length} selected · {onlineCount} online · {visibleComputers.length} visible
+                            {selectedComputers.length} selected · {onlineCount}{' '}
+                            online · {visibleComputers.length} visible
                             {refresh === 'paused'
                                 ? ' · paused'
-                                : !connected && !fullscreen.connected && selectedComputers.length > 0
-                                ? ' · reconnecting'
-                                : ''}
+                                : !connected &&
+                                    !fullscreen.connected &&
+                                    selectedComputers.length > 0
+                                  ? ' · reconnecting'
+                                  : ''}
                         </Text>
                     </Group>
                     <Group gap='xs'>
@@ -254,42 +362,166 @@ export default function VeyonMonitoringWall({
                     </Group>
                 </Group>
 
-                <Group justify='space-between' align='flex-end' wrap='wrap' style={{ flexShrink: 0 }}>
-                    <Group gap='xs' align='flex-end' w={{ base: '100%', md: 'auto' }} style={{ flex: '1 1 auto', minWidth: 0 }}>
-                        <Popover width={320} position='bottom-start' shadow='md' withinPortal={false}>
+                <Group
+                    justify='space-between'
+                    align='flex-end'
+                    wrap='wrap'
+                    style={{ flexShrink: 0 }}
+                >
+                    <Group
+                        gap='xs'
+                        align='flex-end'
+                        w={{ base: '100%', md: 'auto' }}
+                        style={{ flex: '1 1 auto', minWidth: 0 }}
+                    >
+                        <Popover
+                            width={320}
+                            position='bottom-start'
+                            shadow='md'
+                            withinPortal={false}
+                        >
                             <Popover.Target>
-                                <Button variant='default' size='sm' aria-label='Choose monitored computers' style={{ flexShrink: 0 }}>
+                                <Button
+                                    variant='default'
+                                    size='sm'
+                                    aria-label='Choose monitored computers'
+                                    style={{ flexShrink: 0 }}
+                                >
                                     {selectedComputers.length} selected
                                 </Button>
                             </Popover.Target>
                             <Popover.Dropdown>
                                 <Stack gap='sm'>
-                                    <TextInput label='Find computers to select' value={selectionSearch}
-                                        onChange={(event) => setSelectionSearch(event.currentTarget.value)} />
-                                    <Button variant='subtle' size='xs' onClick={() => setSelectedIds([])}>Clear selection</Button>
-                                    <Box style={{ maxHeight: 280, overflowY: 'auto' }}>
+                                    <TextInput
+                                        label='Find computers to select'
+                                        value={selectionSearch}
+                                        onChange={(event) =>
+                                            setSelectionSearch(
+                                                event.currentTarget.value,
+                                            )
+                                        }
+                                    />
+                                    <Button
+                                        variant='subtle'
+                                        size='xs'
+                                        onClick={() => setSelectedIds([])}
+                                    >
+                                        Clear selection
+                                    </Button>
+                                    <Box
+                                        style={{
+                                            maxHeight: 280,
+                                            overflowY: 'auto',
+                                        }}
+                                    >
                                         <Stack gap='xs'>
-                                            {computers.filter((computer) => matchesLab(computer) && matchesSearch(computer, selectionSearch)).map((computer) => (
-                                                <Checkbox key={computer.id} aria-label={computer.name} label={
-                                                    <DeviceIdentityDetails identity={identities.lookup(identityQuery(computer))}
-                                                        hostname={computer.name || computer.host} address={computer.host}
-                                                        lab={identities.labFor(identityQuery(computer))} />
-                                                } checked={selectedSet.has(computer.id)}
-                                                    onChange={(event) => {
-                                                        const checked = event.currentTarget.checked;
-                                                        setSelectedIds((ids) => checked ? [...ids, computer.id] : ids.filter((id) => id !== computer.id));
-                                                    }} />
-                                            ))}
+                                            {computers
+                                                .filter(
+                                                    (computer) =>
+                                                        matchesLab(computer) &&
+                                                        matchesSearch(
+                                                            computer,
+                                                            selectionSearch,
+                                                        ),
+                                                )
+                                                .map((computer) => (
+                                                    <Checkbox
+                                                        key={computer.id}
+                                                        aria-label={
+                                                            computer.name
+                                                        }
+                                                        label={
+                                                            <DeviceIdentityDetails
+                                                                identity={identities.lookup(
+                                                                    identityQuery(
+                                                                        computer,
+                                                                    ),
+                                                                )}
+                                                                hostname={
+                                                                    computer.name ||
+                                                                    computer.host
+                                                                }
+                                                                address={
+                                                                    computer.host
+                                                                }
+                                                                lab={identities.labFor(
+                                                                    identityQuery(
+                                                                        computer,
+                                                                    ),
+                                                                )}
+                                                            />
+                                                        }
+                                                        checked={selectedSet.has(
+                                                            computer.id,
+                                                        )}
+                                                        onChange={(event) => {
+                                                            const checked =
+                                                                event
+                                                                    .currentTarget
+                                                                    .checked;
+                                                            setSelectedIds(
+                                                                (ids) =>
+                                                                    checked
+                                                                        ? [
+                                                                              ...ids,
+                                                                              computer.id,
+                                                                          ]
+                                                                        : ids.filter(
+                                                                              (
+                                                                                  id,
+                                                                              ) =>
+                                                                                  id !==
+                                                                                  computer.id,
+                                                                          ),
+                                                            );
+                                                        }}
+                                                    />
+                                                ))}
                                         </Stack>
                                     </Box>
                                 </Stack>
                             </Popover.Dropdown>
                         </Popover>
-                        <Button variant='light' size='sm' style={{ flexShrink: 0 }} onClick={() => setSelectedIds((ids) => [...new Set([...ids, ...computers.filter(matchesLab).map((computer) => computer.id)])])}>Select all</Button>
-                        <Select label='Lab' placeholder='All labs' clearable searchable size='sm' value={labFilter} onChange={setLabFilter}
-                            data={identities.labs.map((lab) => ({ value: lab.id, label: lab.name }))} miw={180} />
-                        <TextInput aria-label='Search computers' placeholder='Search name, host or location...' value={search}
-                            onChange={(event) => setSearch(event.currentTarget.value)} size='sm' style={{ flex: 1, minWidth: 180 }} />
+                        <Button
+                            variant='light'
+                            size='sm'
+                            style={{ flexShrink: 0 }}
+                            onClick={() =>
+                                setSelectedIds((ids) => [
+                                    ...new Set([
+                                        ...ids,
+                                        ...computers
+                                            .filter(matchesLab)
+                                            .map((computer) => computer.id),
+                                    ]),
+                                ])
+                            }
+                        >
+                            Select all
+                        </Button>
+                        <Select
+                            placeholder='All labs'
+                            clearable
+                            searchable
+                            size='sm'
+                            value={labFilter}
+                            onChange={setLabFilter}
+                            data={identities.labs.map((lab) => ({
+                                value: lab.id,
+                                label: lab.name,
+                            }))}
+                            miw={180}
+                        />
+                        <TextInput
+                            aria-label='Search computers'
+                            placeholder='Search name, host or location...'
+                            value={search}
+                            onChange={(event) =>
+                                setSearch(event.currentTarget.value)
+                            }
+                            size='sm'
+                            style={{ flex: 1, minWidth: 180 }}
+                        />
                     </Group>
                     <Stack gap={4}>
                         <Text size='xs' c='dimmed' fw={600}>
@@ -315,49 +547,119 @@ export default function VeyonMonitoringWall({
                     </Stack>
                 </Group>
 
-                <Box ref={setViewportElement} data-testid='monitoring-viewport'
-                    data-selected-count={selectedComputers.length} data-filtered-count={filteredComputers.length}
-                    data-visible-count={visibleComputers.length} data-mounted-count={mountedComputers.length}
-                    data-active-count={opened ? activeIds.length : 0} data-grid-columns={gridColumns} data-row-height={rowHeight}
-                    onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-                    style={{ flex: 1, minHeight: 300, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}>
-                {mountedComputers.length ? (
-                    <Box
-                        data-cols={columns === 'auto' ? 'auto' : Number(columns)}
-                        style={{ height: rowCount * rowHeight, position: 'relative' }}
-                    >
-                        {mountedComputers.map((computer) => {
-                            const index = filteredComputers.findIndex((item) => item.id === computer.id);
-                            return <Box key={computer.id} style={{
-                                position: 'absolute', top: Math.floor(Math.max(0, index) / gridColumns) * rowHeight,
-                                left: (Math.max(0, index) % gridColumns) * (tileWidth + GRID_GAP),
-                                width: tileWidth, height: rowHeight - GRID_GAP,
-                            }}>
-                            <WallTile
-                                computer={computer}
-                                identity={identities.lookup(identityQuery(computer))}
-                                lab={identities.labFor(identityQuery(computer))}
-                                live={live[computer.id]}
-                                frame={computer.id === pinnedComputer?.id ? fullscreen.frames[computer.id] : frames[computer.id]}
-                                streaming={(computer.id === pinnedComputer?.id ? fullscreen.connected : connected) && refresh !== 'paused'}
-                                transportStale={!(computer.id === pinnedComputer?.id ? fullscreen.connected : connected) && refresh !== 'paused'}
-                                onOpenViewer={handleOpenViewer}
-                                onCommand={handleCommand}
-                            />
-                            </Box>;
-                        })}
-                    </Box>
-                ) : (
-                    <Stack align='center' py={80} gap='sm'>
-                        <ThemeIcon variant='light' color='gray' size={56} radius='xl'>
-                            <IconLayoutGrid size={28} />
-                        </ThemeIcon>
-                        <Text fw={600}>{selectedComputers.length ? 'No matching computers' : 'No computers on the wall'}</Text>
-                        <Text size='sm' c='dimmed'>
-                            {selectedComputers.length ? 'Change the search or lab filter to find a selected computer.' : 'Pick computers above to start live monitoring.'}
-                        </Text>
-                    </Stack>
-                )}
+                <Box
+                    ref={setViewportElement}
+                    data-testid='monitoring-viewport'
+                    data-selected-count={selectedComputers.length}
+                    data-filtered-count={filteredComputers.length}
+                    data-visible-count={visibleComputers.length}
+                    data-mounted-count={mountedComputers.length}
+                    data-active-count={opened ? activeIds.length : 0}
+                    data-grid-columns={gridColumns}
+                    data-row-height={rowHeight}
+                    onScroll={(event) =>
+                        setScrollTop(event.currentTarget.scrollTop)
+                    }
+                    style={{
+                        flex: 1,
+                        minHeight: 300,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        position: 'relative',
+                    }}
+                >
+                    {mountedComputers.length ? (
+                        <Box
+                            data-cols={
+                                columns === 'auto' ? 'auto' : Number(columns)
+                            }
+                            style={{
+                                height: rowCount * rowHeight,
+                                position: 'relative',
+                            }}
+                        >
+                            {mountedComputers.map((computer) => {
+                                const index = filteredComputers.findIndex(
+                                    (item) => item.id === computer.id,
+                                );
+                                return (
+                                    <Box
+                                        key={computer.id}
+                                        style={{
+                                            position: 'absolute',
+                                            top:
+                                                Math.floor(
+                                                    Math.max(0, index) /
+                                                        gridColumns,
+                                                ) * rowHeight,
+                                            left:
+                                                (Math.max(0, index) %
+                                                    gridColumns) *
+                                                (tileWidth + GRID_GAP),
+                                            width: tileWidth,
+                                            height: rowHeight - GRID_GAP,
+                                        }}
+                                    >
+                                        <WallTile
+                                            computer={computer}
+                                            identity={identities.lookup(
+                                                identityQuery(computer),
+                                            )}
+                                            lab={identities.labFor(
+                                                identityQuery(computer),
+                                            )}
+                                            live={live[computer.id]}
+                                            frame={
+                                                computer.id ===
+                                                pinnedComputer?.id
+                                                    ? fullscreen.frames[
+                                                          computer.id
+                                                      ]
+                                                    : frames[computer.id]
+                                            }
+                                            streaming={
+                                                (computer.id ===
+                                                pinnedComputer?.id
+                                                    ? fullscreen.connected
+                                                    : connected) &&
+                                                refresh !== 'paused'
+                                            }
+                                            transportStale={
+                                                !(computer.id ===
+                                                pinnedComputer?.id
+                                                    ? fullscreen.connected
+                                                    : connected) &&
+                                                refresh !== 'paused'
+                                            }
+                                            onOpenViewer={handleOpenViewer}
+                                            onCommand={handleCommand}
+                                        />
+                                    </Box>
+                                );
+                            })}
+                        </Box>
+                    ) : (
+                        <Stack align='center' py={80} gap='sm'>
+                            <ThemeIcon
+                                variant='light'
+                                color='gray'
+                                size={56}
+                                radius='xl'
+                            >
+                                <IconLayoutGrid size={28} />
+                            </ThemeIcon>
+                            <Text fw={600}>
+                                {selectedComputers.length
+                                    ? 'No matching computers'
+                                    : 'No computers on the wall'}
+                            </Text>
+                            <Text size='sm' c='dimmed'>
+                                {selectedComputers.length
+                                    ? 'Change the search or lab filter to find a selected computer.'
+                                    : 'Pick computers above to start live monitoring.'}
+                            </Text>
+                        </Stack>
+                    )}
                 </Box>
             </Stack>
         </Modal>
@@ -476,7 +778,10 @@ const WallTile = memo(function WallTile({
     streaming: boolean;
     transportStale: boolean;
     onOpenViewer: (computer: VeyonComputer) => void;
-    onCommand: (computerId: string, action: VeyonCommandAction) => void | Promise<void>;
+    onCommand: (
+        computerId: string,
+        action: VeyonCommandAction,
+    ) => void | Promise<void>;
 }) {
     const tileRef = useRef<HTMLDivElement>(null);
     const [imageFailed, setImageFailed] = useState(false);
@@ -492,11 +797,19 @@ const WallTile = memo(function WallTile({
         return () => document.removeEventListener('fullscreenchange', handler);
     }, []);
 
-    const handleImageError = useCallback((failed: boolean) => setImageFailed(failed), []);
+    const handleImageError = useCallback(
+        (failed: boolean) => setImageFailed(failed),
+        [],
+    );
 
     const information = live?.state === 'online' ? live.information : null;
-    const online = streaming && Boolean(frame?.image) &&
-        !frame?.stale && !frame?.consecutiveFailures && !frame?.lastError && !imageFailed;
+    const online =
+        streaming &&
+        Boolean(frame?.image) &&
+        !frame?.stale &&
+        !frame?.consecutiveFailures &&
+        !frame?.lastError &&
+        !imageFailed;
 
     const toggleFullscreen = async () => {
         try {
@@ -508,7 +821,8 @@ const WallTile = memo(function WallTile({
                 notifications.show({
                     color: 'orange',
                     title: 'Fullscreen unavailable',
-                    message: 'This browser does not support fullscreen for the monitoring wall.',
+                    message:
+                        'This browser does not support fullscreen for the monitoring wall.',
                 });
             }
         } catch {
@@ -531,7 +845,11 @@ const WallTile = memo(function WallTile({
             tabIndex={0}
             aria-label={`Monitoring tile for ${computer.name}`}
             onKeyDown={(event) => {
-                if (event.key === 'Enter' && event.target === event.currentTarget) onOpenViewer(computer);
+                if (
+                    event.key === 'Enter' &&
+                    event.target === event.currentTarget
+                )
+                    onOpenViewer(computer);
             }}
         >
             <Stack gap='xs' style={{ height: '100%', minHeight: 0 }}>
@@ -550,13 +868,25 @@ const WallTile = memo(function WallTile({
                             }}
                         />
                         <div style={{ minWidth: 0 }}>
-                            <DeviceIdentityDetails identity={identity} hostname={computer.name || computer.host}
-                                address={computer.host} lab={lab} />
-                            {!lab && !identity?.lab ? <Text size='xs' c='dimmed'>{computer.location || 'Unassigned'}</Text> : null}
+                            <DeviceIdentityDetails
+                                identity={identity}
+                                hostname={computer.name || computer.host}
+                                address={computer.host}
+                                lab={lab}
+                            />
+                            {!lab && !identity?.lab ? (
+                                <Text size='xs' c='dimmed'>
+                                    {computer.location || 'Unassigned'}
+                                </Text>
+                            ) : null}
                         </div>
                     </Group>
                     <Group gap={2} wrap='nowrap'>
-                        <Tooltip label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                        <Tooltip
+                            label={
+                                isFullscreen ? 'Exit fullscreen' : 'Fullscreen'
+                            }
+                        >
                             <ActionIcon
                                 variant='subtle'
                                 size='sm'
@@ -586,7 +916,9 @@ const WallTile = memo(function WallTile({
                                 size='sm'
                                 color='orange'
                                 aria-label={`Lock screen ${computer.name}`}
-                                onClick={() => void onCommand(computer.id, 'screen-lock')}
+                                onClick={() =>
+                                    void onCommand(computer.id, 'screen-lock')
+                                }
                             >
                                 <IconLock size={15} />
                             </ActionIcon>
@@ -605,7 +937,8 @@ const WallTile = memo(function WallTile({
                     <Group gap={4} wrap='nowrap'>
                         <IconUser size={13} style={{ flexShrink: 0 }} />
                         <Text size='xs' c='dimmed' truncate>
-                            {information.user.fullName || information.user.login}
+                            {information.user.fullName ||
+                                information.user.login}
                         </Text>
                     </Group>
                 ) : (
