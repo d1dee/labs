@@ -46,10 +46,12 @@ app.use(
 
 // Auth middleware - populate user/session/organization in context
 app.use('*', async (c, next) => {
-    const session = await auth.api.getSession({
+    const authSession = await auth.api.getSession({
         headers: c.req.raw.headers,
         query: { disableCookieCache: true },
     });
+    // Unverified sessions may use auth endpoints, but never protected app APIs.
+    const session = authSession?.user.emailVerified ? authSession : null;
 
     // This binding is injected only by the in-process stream dispatcher, never
     // parsed from an HTTP header. A session or membership change ends the stream.

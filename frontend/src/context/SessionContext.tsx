@@ -69,7 +69,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, [user?.id, user?.organizationId, setOrganization]);
 
     useApiStream<{ organizations: Organization[] }>(
-        session ? '/api/organizations' : null,
+        user?.emailVerified ? '/api/organizations' : null,
         (data) => setOrganization(data.organizations[0] ?? null),
         (error) => {
             // Keep the last good organization on transport errors, but never

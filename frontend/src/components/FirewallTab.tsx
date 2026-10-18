@@ -14,7 +14,8 @@ import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
 
 const FirewallTab: FC = () => {
-    const { order } = useLabOrder();
+    const { order, saveOrder } = useLabOrder();
+    const [orderError, setOrderError] = useState<string | null>(null);
     const [labs, setLabs] = useState<Lab[]>([]);
     const [labStats, setLabStats] = useState<Record<string, LabStats>>({});
     const [labHistory, setLabHistory] = useState<
@@ -45,6 +46,15 @@ const FirewallTab: FC = () => {
     const blockedLabs = labs.filter(
         (lab) => labStats[lab.id]?.firewall.disabled,
     ).length;
+    const sortedLabs = orderLabs(labs, order);
+    const moveLab = (id: string, targetId: string) => {
+        const ids = sortedLabs.map((lab) => lab.id);
+        const from = ids.indexOf(id);
+        const to = ids.indexOf(targetId);
+        if (from < 0 || to < 0 || from === to) return;
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        setOrderError(saveOrder(ids) ? null : 'Unable to save your preferences. Browser storage may be disabled.');
+    };
 
     return (
         <Stack gap='md'>
@@ -75,6 +85,7 @@ const FirewallTab: FC = () => {
             ) : (
                 <>
                     {error && <Alert color='red'>{error}</Alert>}
+                    {orderError && <Alert color='red'>{orderError}</Alert>}
                     <PageHero
                         eyebrow='Network security'
                         title='Firewall & lab access'
@@ -89,7 +100,7 @@ const FirewallTab: FC = () => {
                     />
 
                     <Grid grow>
-                        {orderLabs(labs, order)
+                        {sortedLabs
                             .map((lab) => (
                                 <LabCard
                                     key={lab.id}
@@ -97,6 +108,7 @@ const FirewallTab: FC = () => {
                                     stats={labStats[lab.id]}
                                     history={labHistory[lab.id]}
                                     onToggle={refresh}
+                                    onMove={(targetId) => moveLab(lab.id, targetId)}
                                 />
                             ))}
                     </Grid>

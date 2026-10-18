@@ -23,16 +23,21 @@ import {
 import dayjs from 'dayjs';
 import { FC, useState } from 'react';
 import NetworkAccessTimeline from '@/components/NetworkAccessTimeline';
+import { useLabDrag } from '@/lib/use-lab-drag';
 
 interface LabCardProps {
     lab: Lab;
     stats: LabStats;
     history: ActivationHistoryEntry[];
     onToggle: (labId: string) => void;
+    onMove?: (targetId: string) => void;
 }
 
-const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
+const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove }) => {
     const [toggling, setToggling] = useState<boolean>(false);
+    const { cardRef, style, dragHandle } = useLabDrag({
+        id: lab.id, name: lab.name, grid: true, disabled: !onMove, onMove: (targetId) => onMove?.(targetId),
+    });
 
     const handleToggle = async (): Promise<void> => {
         setToggling(true);
@@ -76,22 +81,25 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle }) => {
     const usageDivisor = usageUnit === 'TB' ? 1024 ** 2 : usageUnit === 'GB' ? 1024 : 1;
 
     return (
-        <Grid.Col span={{ base: 12, sm: 6, md: 4 }} h='100%'>
+        <Grid.Col ref={cardRef} data-lab-order-id={lab.id} style={style} span={{ base: 12, sm: 6, md: 4 }} h='100%'>
             <Card shadow='md' padding='lg' radius='md' withBorder>
                 <Card.Section p='md' pb={0}>
                     <Group justify='space-between' mb='md'>
                         <Text fw={600} size='lg'>
                             {lab.name}
                         </Text>
-                        <Badge
-                            leftSection={statusIcon}
-                            color={statusColor}
-                            radius='md'
-                            size='md'
-                            variant='filled'
-                        >
-                            {statusLabel}
-                        </Badge>
+                        <Group gap={4} wrap='nowrap'>
+                            <Badge
+                                leftSection={statusIcon}
+                                color={statusColor}
+                                radius='md'
+                                size='md'
+                                variant='filled'
+                            >
+                                {statusLabel}
+                            </Badge>
+                            {onMove && dragHandle}
+                        </Group>
                     </Group>
                 </Card.Section>
 

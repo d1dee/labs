@@ -1,7 +1,7 @@
 import { SessionProvider, useSessionContext } from '@/context/SessionContext';
 import { authClient } from '@/lib/auth-client';
 import { LoadingOverlay } from '@mantine/core';
-import { type FC, useState } from 'react';
+import { type FC, useEffect, useState } from 'react';
 import ChangePassword from './pages/ChangePassword';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
@@ -11,6 +11,11 @@ const AppContent: FC = () => {
     const { isAuthenticated, isLoading, user, organizationId } = useSessionContext();
     const [changePasswordOpened, setChangePasswordOpened] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [initialLoadComplete, setInitialLoadComplete] = useState(!isLoading);
+
+    useEffect(() => {
+        if (!isLoading) setInitialLoadComplete(true);
+    }, [isLoading]);
 
     const handleLogout = async (): Promise<void> => {
         try {
@@ -22,12 +27,17 @@ const AppContent: FC = () => {
         }
     };
 
-    if (isLoading) {
+    // Background session checks must not unmount signup/verification drafts.
+    if (isLoading && !initialLoadComplete) {
         return <LoadingOverlay visible>Loading...</LoadingOverlay>;
     }
 
     if (!isAuthenticated || new URLSearchParams(window.location.search).get('auth') === 'reset') {
         return <Login />;
+    }
+
+    if (user && !user.emailVerified) {
+        return <Login verificationEmail={user.email} />;
     }
 
     return (

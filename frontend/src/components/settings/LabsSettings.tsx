@@ -1,7 +1,9 @@
 import { betterFetch } from '@better-fetch/fetch';
 import { useApiStream } from '@/api/useApiStream';
+import { orderLabs, useLabOrder } from '@/lib/lab-order';
 import {
     ActionIcon,
+    Alert,
     Badge,
     Button,
     Card,
@@ -35,6 +37,7 @@ import {
 } from 'react';
 import z from 'zod';
 import { FirewallConfig, Lab } from './FirewallSettings';
+import { DraggableLabCard } from './DraggableLabCard';
 
 const dnsSuffixSchema = z.string().refine((value) => {
     if (/^\.+$/.test(value.trim())) return false;
@@ -182,6 +185,8 @@ export function LabsSettings({
     onSaved: () => void;
 }) {
     const [saving, setSaving] = useState(false);
+    const { order, saveOrder } = useLabOrder();
+    const [orderError, setOrderError] = useState<string | null>(null);
     // Tracks which saved labs are currently expanded into their edit form.
     // Labs without an id are always in edit mode.
     const [editingKeys, setEditingKeys] = useState<Set<string>>(new Set());
@@ -193,6 +198,22 @@ export function LabsSettings({
         },
         validate: schemaResolver(labsFormSchema),
     });
+
+    // Sort only the presentation so input paths and unsaved edits stay intact.
+    const displayedLabs = orderLabs(form.values.labs.map((lab, index) => ({
+        ...lab, id: lab.id ?? lab.key, index,
+    })), order);
+    const saveDisplayOrder = (ids: string[]) => {
+        setOrderError(saveOrder(ids) ? null : 'Unable to save your preferences. Browser storage may be disabled.');
+    };
+    const moveLab = (id: string, targetId: string) => {
+        const ids = displayedLabs.filter((lab) => form.values.labs[lab.index].id).map((lab) => lab.id);
+        const from = ids.indexOf(id);
+        const to = ids.indexOf(targetId);
+        if (from < 0 || to < 0 || from === to) return;
+        ids.splice(to, 0, ids.splice(from, 1)[0]);
+        saveDisplayOrder(ids);
+    };
 
     useEffect(() => {
         if (form.isDirty() || editingKeys.size) {
@@ -305,20 +326,27 @@ export function LabsSettings({
                         description='Used for short FOG connection hostnames only when a lab is identified. Display names stay unchanged. Leave blank to disable. Saved with labs; no router password is required.'
                         {...form.getInputProps('defaultDnsSuffix')}
                     />
+                    <Text size='sm' c='dimmed'>Drag lab handles to change your display order, or focus a handle and use the Up and Down arrow keys. Order is saved automatically for your account in this browser, separately for each organization. Other teachers are not affected. Save new labs before reordering them.</Text>
+                    {orderError && <Alert color='red'>{orderError}</Alert>}
+                    <Button type='button' variant='subtle' size='sm' disabled={!order.length} onClick={() => saveDisplayOrder([])}>
+                        Reset to alphabetical order
+                    </Button>
                     {form.values.labs.length === 0 && (
                         <Text c='dimmed' ta='center' size='sm'>
                             No labs configured. Click &quot;Add Lab&quot; to
                             create one.
                         </Text>
                     )}
-                    {form.values.labs.map((lab, index) => {
+                    {displayedLabs.map(({ index }) => {
+                        const lab = form.values.labs[index];
                         const isExisting = !!lab.id;
                         const isEditing =
                             !isExisting || editingKeys.has(lab.key);
 
                         if (!isEditing) {
                             return (
-                                <Card key={lab.key} withBorder p='md'>
+                                <DraggableLabCard key={lab.key} id={lab.id} name={lab.name} disabled={!enabled || saving} onMove={(targetId) => moveLab(lab.id!, targetId)}>
+                                    {(dragHandle) => <>
                                     <Group
                                         justify='space-between'
                                         align='flex-start'
@@ -335,7 +363,8 @@ export function LabsSettings({
                                                 {lab.ruleId || 'No rule'}
                                             </Badge>
                                         </Stack>
-                                        <Group gap={4}>
+                                        <Group gap={4} wrap='nowrap'>
+                                            {dragHandle}
                                             <ActionIcon
                                                 variant='subtle'
                                                 title='Edit'
@@ -382,16 +411,20 @@ export function LabsSettings({
                                             value={lab.dhcpServer}
                                         />
                                     </SimpleGrid>
-                                </Card>
+                                    </>}
+                                </DraggableLabCard>
                             );
                         }
 
                         return (
-                            <Card
+                            <DraggableLabCard
                                 key={lab.key}
-                                withBorder
-                                style={{ position: 'relative' }}
+                                id={lab.id}
+                                name={lab.name}
+                                disabled={!lab.id || !enabled || saving}
+                                onMove={(targetId) => moveLab(lab.id!, targetId)}
                             >
+                                {(dragHandle) => (
                                 <Stack>
                                     <TextInput
                                         label='Lab Name'
@@ -451,6 +484,7 @@ export function LabsSettings({
                                         )}
                                     />
                                     <Flex justify='flex-end' gap='md'>
+                                        {dragHandle}
                                         {isExisting ? (
                                             <Button
                                                 title='Done'
@@ -490,7 +524,8 @@ export function LabsSettings({
                                         </Button>
                                     </Flex>
                                 </Stack>
-                            </Card>
+                                )}
+                            </DraggableLabCard>
                         );
                     })}
                 </Stack>
