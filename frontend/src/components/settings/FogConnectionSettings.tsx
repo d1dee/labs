@@ -4,6 +4,7 @@ import {
 } from '@/api/fog';
 import { useApiStream } from '@/api/useApiStream';
 import {
+    Badge,
     Button,
     Card,
     Group,
@@ -26,9 +27,11 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved, enabled = true }) =>
     const [userToken, setUserToken] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [savedConfig, setSavedConfig] = useState<FogSettingsConfig | null>(null);
 
     const seeded = useRef(false);
     const refresh = useApiStream<FogSettingsConfig>(enabled ? '/api/settings/fog' : null, (cfg) => {
+        setSavedConfig(cfg);
         if (!seeded.current) {
             setUrl(cfg.url);
             seeded.current = true;
@@ -77,7 +80,10 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved, enabled = true }) =>
     return (
         <Card withBorder p='md'>
             <Stack gap='sm'>
-                <Title order={5}>FOG Connection</Title>
+                <Group justify='space-between'>
+                    <Title order={5}>FOG Connection</Title>
+                    {savedConfig?.configured ? <Badge color='teal'>Configured</Badge> : null}
+                </Group>
                 <TextInput
                     label='FOG URL'
                     placeholder='https://fog.example.edu'
@@ -89,7 +95,7 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved, enabled = true }) =>
                 <TextInput
                     label='API Token'
                     description='FOG 1.6: bearer token from the user API tab (starts with "fog_")'
-                    placeholder='fog_… or legacy fog-api-token'
+                    placeholder={savedConfig?.apiToken || 'fog_… or legacy fog-api-token'}
                     value={apiToken}
                     onChange={(e) => setApiToken(e.currentTarget.value)}
                     required
@@ -98,7 +104,7 @@ export const FogConnectionSettings: FC<Props> = ({ onSaved, enabled = true }) =>
                     <TextInput
                         label='User Token'
                         description='Required for legacy (non-bearer) API tokens'
-                        placeholder='fog-user-token'
+                        placeholder={savedConfig?.userToken || 'fog-user-token'}
                         value={userToken}
                         onChange={(e) => setUserToken(e.currentTarget.value)}
                         required

@@ -14,6 +14,27 @@ sqliteDb.run('PRAGMA foreign_keys = ON');
 // Serialize concurrent startups instead of failing instantly on lock.
 sqliteDb.run('PRAGMA busy_timeout = 5000');
 
+export function migrateOrganizationAccounts(client: Database) {
+    client.transaction(() => {
+        for (const [table, column, type] of [
+            ['organization', 'createdByUserId', 'TEXT'],
+            ['user', 'lastLoginAt', 'INTEGER'],
+        ] as const) {
+            const columns = client.query(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
+            // Fresh databases are still bootstrapped from the Drizzle schema.
+            if (columns.length && !columns.some((entry) => entry.name === column)) {
+                client.run(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${type}`);
+            }
+        }
+        if (client.query('PRAGMA table_info(organization)').all().length) {
+            client.run('CREATE INDEX IF NOT EXISTS organization_createdByUserId_idx ON organization(createdByUserId)');
+        }
+    }).immediate();
+}
+
+// Never infer historical ownership or login timestamps from membership/sessions.
+migrateOrganizationAccounts(sqliteDb);
+
 // SQLite cannot drop NOT NULL in place. Preserve explicit rowids because they
 // break ties between history events with the same timestamp. Disable FK checks
 // outside the transaction so legacy orphaned actors are preserved as well.

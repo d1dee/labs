@@ -1,6 +1,6 @@
-import { betterFetch } from '@better-fetch/fetch';
 import { useApiStream } from '@/api/useApiStream';
 import { orderLabs, useLabOrder } from '@/lib/lab-order';
+import { betterFetch } from '@better-fetch/fetch';
 import {
     ActionIcon,
     Alert,
@@ -17,11 +17,7 @@ import {
     Title,
 } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
-import {
-    randomId,
-    useDebouncedValue,
-    useMask,
-} from '@mantine/hooks';
+import { randomId, useDebouncedValue, useMask } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
     IconCheck,
@@ -30,21 +26,23 @@ import {
     IconTrash,
     IconX,
 } from '@tabler/icons-react';
-import {
-    type ReactNode,
-    useEffect,
-    useState,
-} from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import z from 'zod';
-import { FirewallConfig, Lab } from './FirewallSettings';
 import { DraggableLabCard } from './DraggableLabCard';
+import { FirewallConfig, Lab } from './FirewallSettings';
 
 const dnsSuffixSchema = z.string().refine((value) => {
     if (/^\.+$/.test(value.trim())) return false;
     const suffix = value.trim().replace(/^\.|\.$/g, '');
-    return suffix.length <= 253 && (suffix === '' || suffix.split('.').every(
-        (label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
-    ));
+    return (
+        suffix.length <= 253 &&
+        (suffix === '' ||
+            suffix
+                .split('.')
+                .every((label) =>
+                    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+                ))
+    );
 }, 'Use DNS labels of 1-63 letters, digits or hyphens, up to 253 characters');
 
 const labSchema = z.object({
@@ -111,7 +109,10 @@ interface LabRuleIdInputProps {
     error?: ReactNode;
     enabled: boolean;
     onChangeRuleId: (masked: string) => void;
-    onDetails: (index: number, details: { subnet?: string; dhcpServer?: string }) => void;
+    onDetails: (
+        index: number,
+        details: { subnet?: string; dhcpServer?: string },
+    ) => void;
 }
 
 /**
@@ -134,20 +135,39 @@ function LabRuleIdInput({
     const [debounced] = useDebouncedValue(ruleId, 600);
 
     const [loadedRule, setLoadedRule] = useState('');
-    const path = enabled && debounced === ruleId && ruleId.replace(/^\*/, '').trim()
-        ? `/api/labs/by-rule/${encodeURIComponent(ruleId)}` : null;
-    useApiStream<{ success: boolean; data: { subnet?: string; dhcpServer?: string }; error?: string }>(path,
+    const path =
+        enabled && debounced === ruleId && ruleId.replace(/^\*/, '').trim()
+            ? `/api/labs/by-rule/${encodeURIComponent(ruleId)}`
+            : null;
+    useApiStream<{
+        success: boolean;
+        data: { subnet?: string; dhcpServer?: string };
+        error?: string;
+    }>(
+        path,
         (snapshot) => {
             setLoadedRule(ruleId);
             if (snapshot.success && snapshot.data) {
                 onDetails(index, snapshot.data);
             } else {
-                notifications.show({ title: 'Error', message: snapshot.error ?? 'Failed to fetch lab details', color: 'red', icon: <IconX size={16} /> });
+                notifications.show({
+                    title: 'Error',
+                    message: snapshot.error ?? 'Failed to fetch lab details',
+                    color: 'red',
+                    icon: <IconX size={16} />,
+                });
             }
-        }, (error) => {
+        },
+        (error) => {
             setLoadedRule(ruleId);
-            notifications.show({ title: 'Error', message: error.message, color: 'red', icon: <IconX size={16} /> });
-        });
+            notifications.show({
+                title: 'Error',
+                message: error.message,
+                color: 'red',
+                icon: <IconX size={16} />,
+            });
+        },
+    );
 
     return (
         <TextInput
@@ -157,7 +177,9 @@ function LabRuleIdInput({
             error={error}
             ref={ref}
             defaultValue={ruleId}
-            rightSection={path && loadedRule !== ruleId ? <Loader size={16} /> : undefined}
+            rightSection={
+                path && loadedRule !== ruleId ? <Loader size={16} /> : undefined
+            }
         />
     );
 }
@@ -200,14 +222,25 @@ export function LabsSettings({
     });
 
     // Sort only the presentation so input paths and unsaved edits stay intact.
-    const displayedLabs = orderLabs(form.values.labs.map((lab, index) => ({
-        ...lab, id: lab.id ?? lab.key, index,
-    })), order);
+    const displayedLabs = orderLabs(
+        form.values.labs.map((lab, index) => ({
+            ...lab,
+            id: lab.id ?? lab.key,
+            index,
+        })),
+        order,
+    );
     const saveDisplayOrder = (ids: string[]) => {
-        setOrderError(saveOrder(ids) ? null : 'Unable to save your preferences. Browser storage may be disabled.');
+        setOrderError(
+            saveOrder(ids)
+                ? null
+                : 'Unable to save your preferences. Browser storage may be disabled.',
+        );
     };
     const moveLab = (id: string, targetId: string) => {
-        const ids = displayedLabs.filter((lab) => form.values.labs[lab.index].id).map((lab) => lab.id);
+        const ids = displayedLabs
+            .filter((lab) => form.values.labs[lab.index].id)
+            .map((lab) => lab.id);
         const from = ids.indexOf(id);
         const to = ids.indexOf(targetId);
         if (from < 0 || to < 0 || from === to) return;
@@ -218,10 +251,21 @@ export function LabsSettings({
     useEffect(() => {
         if (form.isDirty() || editingKeys.size) {
             // Keep editable drafts and stable keys, but reconcile read-only metadata.
-            form.setValues({ labs: form.getValues().labs.map((lab) => {
-                const saved = firewallConfig?.labs?.find((item) => item.id === lab.id && item.ruleId === lab.ruleId);
-                return saved ? { ...lab, subnet: saved.subnet ?? '', dhcpServer: saved.dhcpServer ?? '' } : lab;
-            }) });
+            form.setValues({
+                labs: form.getValues().labs.map((lab) => {
+                    const saved = firewallConfig?.labs?.find(
+                        (item) =>
+                            item.id === lab.id && item.ruleId === lab.ruleId,
+                    );
+                    return saved
+                        ? {
+                              ...lab,
+                              subnet: saved.subnet ?? '',
+                              dhcpServer: saved.dhcpServer ?? '',
+                          }
+                        : lab;
+                }),
+            });
             return;
         }
         const values = {
@@ -323,14 +367,16 @@ export function LabsSettings({
                     <TextInput
                         label='Default DNS suffix'
                         placeholder='school.example'
-                        description='Used for short FOG connection hostnames only when a lab is identified. Display names stay unchanged. Leave blank to disable. Saved with labs; no router password is required.'
+                        description='Used for hostname only when a lab is identified. Display names stay unchanged. Leave blank to disable.'
                         {...form.getInputProps('defaultDnsSuffix')}
                     />
-                    <Text size='sm' c='dimmed'>Drag lab handles to change your display order, or focus a handle and use the Up and Down arrow keys. Order is saved automatically for your account in this browser, separately for each organization. Other teachers are not affected. Save new labs before reordering them.</Text>
+                    <Text size='xs' c='dimmed'>
+                        Drag lab handles to change your display order. Order is
+                        saved automatically for your account in this browser,
+                        separately from others.
+                    </Text>
                     {orderError && <Alert color='red'>{orderError}</Alert>}
-                    <Button type='button' variant='subtle' size='sm' disabled={!order.length} onClick={() => saveDisplayOrder([])}>
-                        Reset to alphabetical order
-                    </Button>
+
                     {form.values.labs.length === 0 && (
                         <Text c='dimmed' ta='center' size='sm'>
                             No labs configured. Click &quot;Add Lab&quot; to
@@ -345,73 +391,97 @@ export function LabsSettings({
 
                         if (!isEditing) {
                             return (
-                                <DraggableLabCard key={lab.key} id={lab.id} name={lab.name} disabled={!enabled || saving} onMove={(targetId) => moveLab(lab.id!, targetId)}>
-                                    {(dragHandle) => <>
-                                    <Group
-                                        justify='space-between'
-                                        align='flex-start'
-                                    >
-                                        <Stack gap={2}>
-                                            <Text fw={600} size='lg'>
-                                                {lab.name || 'Unnamed Lab'}
-                                            </Text>
-                                            <Badge
-                                                variant='light'
-                                                size='sm'
-                                                color='gray'
+                                <DraggableLabCard
+                                    key={lab.key}
+                                    id={lab.id}
+                                    name={lab.name}
+                                    disabled={!enabled || saving}
+                                    onMove={(targetId) =>
+                                        moveLab(lab.id!, targetId)
+                                    }
+                                >
+                                    {(dragHandle) => (
+                                        <>
+                                            <Group
+                                                justify='space-between'
+                                                align='flex-start'
                                             >
-                                                {lab.ruleId || 'No rule'}
-                                            </Badge>
-                                        </Stack>
-                                        <Group gap={4} wrap='nowrap'>
-                                            {dragHandle}
-                                            <ActionIcon
-                                                variant='subtle'
-                                                title='Edit'
-                                                onClick={() =>
-                                                    setEditingKeys((prev) =>
-                                                        new Set(prev).add(
-                                                            lab.key,
-                                                        ),
-                                                    )
-                                                }
+                                                <Stack gap={2}>
+                                                    <Text fw={600} size='lg'>
+                                                        {lab.name ||
+                                                            'Unnamed Lab'}
+                                                    </Text>
+                                                    <Badge
+                                                        variant='light'
+                                                        size='sm'
+                                                        color='gray'
+                                                    >
+                                                        {lab.ruleId ||
+                                                            'No rule'}
+                                                    </Badge>
+                                                </Stack>
+                                                <Group gap={4} wrap='nowrap'>
+                                                    {dragHandle}
+                                                    <ActionIcon
+                                                        variant='subtle'
+                                                        title='Edit'
+                                                        onClick={() =>
+                                                            setEditingKeys(
+                                                                (prev) =>
+                                                                    new Set(
+                                                                        prev,
+                                                                    ).add(
+                                                                        lab.key,
+                                                                    ),
+                                                            )
+                                                        }
+                                                    >
+                                                        <IconPencil
+                                                            size={16}
+                                                            color='var(--mantine-color-blue-6)'
+                                                        />
+                                                    </ActionIcon>
+                                                    <ActionIcon
+                                                        color='red'
+                                                        variant='subtle'
+                                                        title='Delete'
+                                                        onClick={() =>
+                                                            form.removeListItem(
+                                                                'labs',
+                                                                index,
+                                                            )
+                                                        }
+                                                    >
+                                                        <IconTrash size={16} />
+                                                    </ActionIcon>
+                                                </Group>
+                                            </Group>
+                                            <SimpleGrid
+                                                cols={{ base: 1, sm: 2 }}
+                                                mt='md'
                                             >
-                                                <IconPencil
-                                                    size={16}
-                                                    color='var(--mantine-color-blue-6)'
+                                                <LabField
+                                                    label='Interface'
+                                                    value={lab.interface}
                                                 />
-                                            </ActionIcon>
-                                            <ActionIcon
-                                                color='red'
-                                                variant='subtle'
-                                                title='Delete'
-                                                onClick={() =>
-                                                    form.removeListItem(
-                                                        'labs',
-                                                        index,
-                                                    )
-                                                }
-                                            >
-                                                <IconTrash size={16} />
-                                            </ActionIcon>
-                                        </Group>
-                                    </Group>
-                                    <SimpleGrid
-                                        cols={{ base: 1, sm: 2 }}
-                                        mt='md'
-                                    >
-                                        <LabField label='Interface' value={lab.interface} />
-                                        <LabField label='DNS suffix' value={lab.dnsSuffix || `Inherit default${form.values.defaultDnsSuffix ? ` (${form.values.defaultDnsSuffix})` : ''}`} />
-                                        <LabField
-                                            label='Subnet / IP range'
-                                            value={lab.subnet}
-                                        />
-                                        <LabField
-                                            label='DHCP Server'
-                                            value={lab.dhcpServer}
-                                        />
-                                    </SimpleGrid>
-                                    </>}
+                                                <LabField
+                                                    label='DNS suffix'
+                                                    value={
+                                                        lab.dnsSuffix ||
+                                                        `Inherit default${form.values.defaultDnsSuffix ? ` (${form.values.defaultDnsSuffix})` : ''}`
+                                                    }
+                                                />
+                                                <LabField
+                                                    label='Subnet / IP range'
+                                                    value={lab.subnet}
+                                                />
+                                                <LabField
+                                                    label='DHCP Server'
+                                                    value={lab.dhcpServer}
+                                                />
+                                            </SimpleGrid>
+                                        </>
+                                    )}
                                 </DraggableLabCard>
                             );
                         }
@@ -422,108 +492,136 @@ export function LabsSettings({
                                 id={lab.id}
                                 name={lab.name}
                                 disabled={!lab.id || !enabled || saving}
-                                onMove={(targetId) => moveLab(lab.id!, targetId)}
+                                onMove={(targetId) =>
+                                    moveLab(lab.id!, targetId)
+                                }
                             >
                                 {(dragHandle) => (
-                                <Stack>
-                                    <TextInput
-                                        label='Lab Name'
-                                        placeholder='Lab name'
-                                        required
-                                        {...form.getInputProps(
-                                            `labs.${index}.name`,
-                                        )}
-                                    />
-                                    <LabRuleIdInput
-                                        index={index}
-                                        ruleId={lab.ruleId}
-                                        enabled={enabled}
-                                        error={
-                                            form.getInputProps(
-                                                `labs.${index}.ruleId`,
-                                            ).error
-                                        }
-                                        onChangeRuleId={(masked) =>
-                                            form.setFieldValue(
-                                                `labs.${index}.ruleId`,
-                                                masked,
-                                            )
-                                        }
-                                        onDetails={(currentIndex, details) => {
-                                            form.setValues({ labs: form.getValues().labs.map((item, itemIndex) => itemIndex === currentIndex
-                                                ? { ...item, subnet: details.subnet ?? '', dhcpServer: details.dhcpServer ?? '' }
-                                                : item) });
-                                        }}
-                                    />
-                                    <TextInput
-                                        label='Lab Interface'
-                                        placeholder='vlan10 or bridge-lab'
-                                        description='Exact MikroTik interface name. Usage includes received and transmitted bytes since its counters were reset.'
-                                        {...form.getInputProps(`labs.${index}.interface`)}
-                                    />
-                                    <TextInput
-                                        label='Lab DNS suffix'
-                                        placeholder='Inherit default'
-                                        description='Overrides the default DNS suffix for this lab. Leave blank to inherit. Fully qualified hostnames and IP addresses are unchanged.'
-                                        {...form.getInputProps(`labs.${index}.dnsSuffix`)}
-                                    />
-                                    <TextInput
-                                        label='DHCP Server'
-                                        readOnly
-                                        placeholder='Fetched from MikroTik'
-                                        {...form.getInputProps(
-                                            `labs.${index}.dhcpServer`,
-                                        )}
-                                    />
-                                    <TextInput
-                                        label='Subnet / IP range'
-                                        readOnly
-                                        placeholder='Fetched from MikroTik'
-                                        {...form.getInputProps(
-                                            `labs.${index}.subnet`,
-                                        )}
-                                    />
-                                    <Flex justify='flex-end' gap='md'>
-                                        {dragHandle}
-                                        {isExisting ? (
-                                            <Button
-                                                title='Done'
-                                                type='submit'
-                                                loading={saving}
-                                                leftSection={
-                                                    <IconCheck size={16} />
-                                                }
-                                            >
-                                                Save
-                                            </Button>
-                                        ) : (
-                                            <Button
-                                                leftSection={
-                                                    <IconCheck size={16} />
-                                                }
-                                                type='submit'
-                                                loading={saving}
-                                            >
-                                                Save
-                                            </Button>
-                                        )}
-                                        <Button
-                                            color='red'
-                                            title='Delete'
-                                            onClick={() =>
-                                                form.removeListItem(
-                                                    'labs',
-                                                    index,
+                                    <Stack>
+                                        <TextInput
+                                            label='Lab Name'
+                                            placeholder='Lab name'
+                                            required
+                                            {...form.getInputProps(
+                                                `labs.${index}.name`,
+                                            )}
+                                        />
+                                        <LabRuleIdInput
+                                            index={index}
+                                            ruleId={lab.ruleId}
+                                            enabled={enabled}
+                                            error={
+                                                form.getInputProps(
+                                                    `labs.${index}.ruleId`,
+                                                ).error
+                                            }
+                                            onChangeRuleId={(masked) =>
+                                                form.setFieldValue(
+                                                    `labs.${index}.ruleId`,
+                                                    masked,
                                                 )
                                             }
-                                            leftSection={
-                                                <IconTrash size={16} />
-                                            }
-                                        >
-                                            Delete
-                                        </Button>
-                                    </Flex>
-                                </Stack>
+                                            onDetails={(
+                                                currentIndex,
+                                                details,
+                                            ) => {
+                                                form.setValues({
+                                                    labs: form
+                                                        .getValues()
+                                                        .labs.map(
+                                                            (
+                                                                item,
+                                                                itemIndex,
+                                                            ) =>
+                                                                itemIndex ===
+                                                                currentIndex
+                                                                    ? {
+                                                                          ...item,
+                                                                          subnet:
+                                                                              details.subnet ??
+                                                                              '',
+                                                                          dhcpServer:
+                                                                              details.dhcpServer ??
+                                                                              '',
+                                                                      }
+                                                                    : item,
+                                                        ),
+                                                });
+                                            }}
+                                        />
+                                        <TextInput
+                                            label='Lab Interface'
+                                            placeholder='vlan10 or bridge-lab'
+                                            description='Exact MikroTik interface name. Usage includes received and transmitted bytes since its counters were reset.'
+                                            {...form.getInputProps(
+                                                `labs.${index}.interface`,
+                                            )}
+                                        />
+                                        <TextInput
+                                            label='Lab DNS suffix'
+                                            placeholder='Inherit default'
+                                            description='Overrides the default DNS suffix for this lab. Leave blank to inherit. Fully qualified hostnames and IP addresses are unchanged.'
+                                            {...form.getInputProps(
+                                                `labs.${index}.dnsSuffix`,
+                                            )}
+                                        />
+                                        <TextInput
+                                            label='DHCP Server'
+                                            readOnly
+                                            placeholder='Fetched from MikroTik'
+                                            {...form.getInputProps(
+                                                `labs.${index}.dhcpServer`,
+                                            )}
+                                        />
+                                        <TextInput
+                                            label='Subnet / IP range'
+                                            readOnly
+                                            placeholder='Fetched from MikroTik'
+                                            {...form.getInputProps(
+                                                `labs.${index}.subnet`,
+                                            )}
+                                        />
+                                        <Flex justify='flex-end' gap='md'>
+                                            {dragHandle}
+                                            {isExisting ? (
+                                                <Button
+                                                    title='Done'
+                                                    type='submit'
+                                                    loading={saving}
+                                                    leftSection={
+                                                        <IconCheck size={16} />
+                                                    }
+                                                >
+                                                    Save
+                                                </Button>
+                                            ) : (
+                                                <Button
+                                                    leftSection={
+                                                        <IconCheck size={16} />
+                                                    }
+                                                    type='submit'
+                                                    loading={saving}
+                                                >
+                                                    Save
+                                                </Button>
+                                            )}
+                                            <Button
+                                                color='red'
+                                                title='Delete'
+                                                onClick={() =>
+                                                    form.removeListItem(
+                                                        'labs',
+                                                        index,
+                                                    )
+                                                }
+                                                leftSection={
+                                                    <IconTrash size={16} />
+                                                }
+                                            >
+                                                Delete
+                                            </Button>
+                                        </Flex>
+                                    </Stack>
                                 )}
                             </DraggableLabCard>
                         );

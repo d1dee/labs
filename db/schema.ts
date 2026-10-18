@@ -21,6 +21,7 @@ export const user = sqliteTable(
         username: text('username'),
         displayUsername: text('displayUsername'),
         image: text('image'),
+        lastLoginAt: integer('lastLoginAt', { mode: 'timestamp' }),
         organizationId: text('organizationId').references(
             () => organization.id,
             {
@@ -49,6 +50,8 @@ export const organization = sqliteTable('organization', {
     name: text('name').notNull(),
     phoneNumber: text('phoneNumber').notNull(),
     email: text('email').notNull(),
+    // Immutable creator identity, independent of the creator's current membership.
+    createdByUserId: text('createdByUserId'),
     joinKey: text('joinKey')
         .notNull()
         .$defaultFn(() => crypto.randomUUID().replace(/-/g, '')),
@@ -60,7 +63,7 @@ export const organization = sqliteTable('organization', {
         .notNull()
         .$defaultFn(() => new Date())
         .$defaultFn(() => new Date()),
-});
+}, (t) => [index('organization_createdByUserId_idx').on(t.createdByUserId)]);
 
 // Accounts table — stores OAuth/credential provider links
 export const account = sqliteTable(

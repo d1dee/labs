@@ -1,0 +1,42 @@
+.member {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 164px 32px;
+    align-items: center;
+    gap: var(--mantine-spacing-md);
+    padding-block: var(--mantine-spacing-md);
+}
+
+.member + .member {
+    border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.identity {
+    min-width: 0;
+}
+
+.email {
+    overflow-wrap: anywhere;
+}
+
+.confirmation {
+    border-color: var(--mantine-color-red-outline);
+    background: var(--mantine-color-red-light);
+}
+
+@media (max-width: 40em) {
+    .member {
+        grid-template-columns: minmax(0, 1fr) 32px;
+        gap: var(--mantine-spacing-xs);
+    }
+
+    .activity {
+        grid-column: 1;
+        grid-row: 2;
+        padding-left: 52px;
+    }
+
+    .action {
+        grid-column: 2;
+        grid-row: 1;
+    }
+}

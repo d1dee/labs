@@ -17,6 +17,10 @@ export interface OrganizationMember {
     name: string;
     email: string;
     username: string | null;
+    lastLoginAt: string | null;
+    hasActiveSession: boolean;
+    canDeleteAccount: boolean;
+    deletionProtectionReason: 'institution_creator' | 'self' | 'demo' | null;
 }
 
 export interface Organization {
@@ -25,6 +29,8 @@ export interface Organization {
     email: string;
     phoneNumber: string;
     joinKey: string;
+    createdByUserId: string | null;
+    canDeleteMembers: boolean;
     members?: OrganizationMember[];
 }
 

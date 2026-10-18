@@ -1,6 +1,6 @@
 import { type PiholeSettingsConfig, savePiholeSettings } from '@/api/pihole';
 import { useApiStream } from '@/api/useApiStream';
-import { Button, Card, Checkbox, Group, Stack, Text, TextInput, Title } from '@mantine/core';
+import { Badge, Button, Card, Checkbox, Group, Stack, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
 import { type FC, useRef, useState } from 'react';
@@ -16,9 +16,11 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved, enabled = true })
     const [verifyTls, setVerifyTls] = useState(true);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [savedConfig, setSavedConfig] = useState<PiholeSettingsConfig | null>(null);
 
     const seeded = useRef(false);
     const refresh = useApiStream<PiholeSettingsConfig>(enabled ? '/api/settings/pihole' : null, (cfg) => {
+        setSavedConfig(cfg);
         if (!seeded.current) {
             setUrl(cfg.url);
             setVerifyTls(cfg.verifyTls ?? true);
@@ -56,7 +58,10 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved, enabled = true })
     return (
         <Card withBorder p='md'>
             <Stack gap='sm'>
-                <Title order={5}>Pi-hole Connection</Title>
+                <Group justify='space-between'>
+                    <Title order={5}>Pi-hole Connection</Title>
+                    {savedConfig?.configured ? <Badge color='teal'>Configured</Badge> : null}
+                </Group>
                 <TextInput
                     label='Pi-hole URL'
                     placeholder='https://192.168.1.xx'
@@ -68,7 +73,8 @@ export const PiholeConnectionSettings: FC<Props> = ({ onSaved, enabled = true })
                 <TextInput
                     label='Web Interface Password'
                     type='password'
-                    placeholder='Enter password'
+                    placeholder={savedConfig?.password ? '********' : 'Enter password'}
+                    description={savedConfig?.password ? 'Password is set. Re-enter it to test and save changes.' : undefined}
                     value={password}
                     onChange={(e) => setPassword(e.currentTarget.value)}
                     required

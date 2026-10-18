@@ -1,4 +1,6 @@
 import type { DeviceIdentity, DeviceLab } from '@/api/devices';
+import { wakeDevice } from '@/api/device-actions';
+import { useSessionContext } from '@/context/SessionContext';
 import {
     getFogStatus,
     listFogImages,
@@ -187,6 +189,13 @@ function identityQuery(computer: VeyonComputer) {
     };
 }
 
+function wakeUnavailableReason(identity: DeviceIdentity | null) {
+    return !identity ? 'Device identity is unavailable'
+        : !identity.lab ? 'A detected lab is required for Wake on LAN'
+        : identity.macAddresses.length !== 1 ? 'One unambiguous MAC address is required'
+        : null;
+}
+
 function fogHostIdFor(
     computer: VeyonComputer,
     identity: DeviceIdentity | null,
@@ -198,11 +207,20 @@ function fogHostIdFor(
 }
 
 export default function ComputersManagementTab() {
+    const { user, organizationId } = useSessionContext();
+    const wakeScope = `${user?.id ?? ''}:${organizationId ?? ''}`;
+    const wakeScopeRef = useRef<string | null>(wakeScope);
+    wakeScopeRef.current = wakeScope;
+    useEffect(() => {
+        wakeScopeRef.current = wakeScope;
+        return () => { wakeScopeRef.current = null; };
+    }, [wakeScope]);
     const identities = useDeviceIdentities();
     const [configured, setConfigured] = useState<boolean | null>(null);
     const [directory, setComputers] = useState<VeyonComputer[]>([]);
     const [live, setLive] = useState<Record<string, LiveState>>({});
     const [selected, setSelected] = useState<string[]>([]);
+    const [bulkWaking, setBulkWaking] = useState(false);
     const [search, setSearch] = useState('');
     const mobileFilters = useMobileTableFilters();
     const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -749,10 +767,53 @@ export default function ComputersManagementTab() {
     }, []);
 
     const handleWallCommand = useCallback(
-        (computerId: string, action: VeyonCommandAction) =>
-            runCommandRef.current(action, {}, true, undefined, [computerId]),
+        (computerId: string, action: VeyonCommandAction, active = true) =>
+            runCommandRef.current(action, {}, active, undefined, [computerId]),
         [],
     );
+
+    const wakeSelection = computers.filter((computer) => selected.includes(computer.id))
+        .map((computer) => ({ computer, identity: identities.lookup(identityQuery(computer)) }))
+        .filter((target): target is { computer: VeyonComputer; identity: DeviceIdentity } =>
+            target.identity !== null && wakeUnavailableReason(target.identity) === null);
+
+    const wakeSelected = () => {
+        if (bulkWaking || !wakeSelection.length) return;
+        const targets = [...new Map(wakeSelection.map(({ computer, identity }) =>
+            [identity.id, { id: identity.id, name: computer.name }])).values()];
+        const skipped = selected.length - wakeSelection.length;
+        const send = async () => {
+            setBulkWaking(true);
+            const results: VeyonCommandResult[] = [];
+            try {
+                // Keep router commands sequential rather than flooding its REST queue.
+                for (const target of targets) {
+                    try {
+                        if (wakeScopeRef.current !== wakeScope) throw new Error('Session changed; wake cancelled');
+                        await wakeDevice(target.id);
+                        results.push({ ...target, success: true });
+                    } catch (error) {
+                        results.push({ ...target, success: false, error: errorMessage(error) });
+                    }
+                }
+                reportCommandResults(results,
+                    ['Wake packets sent', 'Wake partially completed', 'Wake failed'],
+                    `${results.filter((result) => result.success).length}/${results.length} wake packets sent. ${skipped ? `${skipped} skipped. ` : ''}Startup not verified.`);
+            } finally {
+                setBulkWaking(false);
+            }
+        };
+        if (skipped) {
+            modals.openConfirmModal({
+                title: 'Wake eligible computers only?',
+                children: <Text size='sm'>{wakeSelection.length} of {selected.length} selected computers have a known MAC and detected lab. The remaining {skipped} will be skipped. The server also verifies the lab interface before sending.</Text>,
+                labels: { confirm: `Wake ${targets.length} computers`, cancel: 'Cancel' },
+                onConfirm: () => void send(),
+            });
+        } else {
+            void send();
+        }
+    };
 
     const removeComputer = (computer: VeyonComputer) => {
         modals.openConfirmModal({
@@ -895,6 +956,7 @@ export default function ComputersManagementTab() {
                             )}
                             onCommand={runCommand}
                             onConfirm={confirmCommand}
+                            wake={{ count: wakeSelection.length, busy: bulkWaking, onWake: wakeSelected }}
                         />
                     </Tabs.Panel>
                     <Tabs.Panel value='fog' pt='sm'>
@@ -1466,8 +1528,22 @@ function ComputerRow({
     onEdit: () => void;
     onDelete: () => void;
 }) {
+    const [waking, setWaking] = useState(false);
     const information = live?.state === 'online' ? live.information : null;
     const fogHostId = fogHostIdFor(computer, identity);
+    const wakeUnavailable = wakeUnavailableReason(identity);
+    async function wake() {
+        if (!identity || waking) return;
+        setWaking(true);
+        try {
+            const result = await wakeDevice(identity.id);
+            notifications.show({ color: 'teal', title: `Wake requested for ${computer.name}`, message: result.message });
+        } catch (error) {
+            notifications.show({ color: 'red', title: 'Wake request failed', message: notificationError(error) });
+        } finally {
+            setWaking(false);
+        }
+    }
     return (
         <Table.Tr
             bg={selected ? 'var(--mantine-color-teal-light)' : undefined}
@@ -1641,6 +1717,14 @@ function ComputerRow({
                         </Menu.Target>
                         <Menu.Dropdown>
                             <Menu.Item
+                                leftSection={waking ? <Loader size={16} /> : <IconPower size={16} />}
+                                onClick={() => void wake()}
+                                disabled={waking || Boolean(wakeUnavailable)}
+                                title={wakeUnavailable ?? 'Send a wake packet through the lab MikroTik interface'}
+                            >
+                                {waking ? 'Sending wake packet...' : 'Wake on LAN'}
+                            </Menu.Item>
+                            <Menu.Item
                                 leftSection={<IconEdit size={16} />}
                                 onClick={onEdit}
                                 disabled={
@@ -1672,6 +1756,7 @@ function CommandDeck({
     features,
     onCommand,
     onConfirm,
+    wake,
     targetName,
     embedded = false,
 }: {
@@ -1691,6 +1776,7 @@ function CommandDeck({
     ) => void;
     targetName?: string;
     embedded?: boolean;
+    wake?: { count: number; busy: boolean; onWake: () => void };
 }) {
     const [mode, setMode] = useState<string | null>(null);
     const [text, setText] = useState('');
@@ -1807,7 +1893,7 @@ function CommandDeck({
                             <Button
                                 size='sm'
                                 variant='default'
-                                disabled={disabled}
+                                disabled={disabled && !wake?.count}
                                 rightSection={<IconChevronDown size={14} />}
                                 style={{ flexShrink: 0 }}
                             >
@@ -1815,6 +1901,16 @@ function CommandDeck({
                             </Button>
                         </Menu.Target>
                         <Menu.Dropdown>
+                            {wake ? (
+                                <Menu.Item
+                                    leftSection={wake.busy ? <Loader size={16} /> : <IconPower size={16} />}
+                                    disabled={wake.busy || !wake.count}
+                                    onClick={wake.onWake}
+                                    title='Wake selected computers through MikroTik, independently of Veyon'
+                                >
+                                    {wake.busy ? 'Sending wake packets...' : `Wake on LAN (${wake.count})`}
+                                </Menu.Item>
+                            ) : null}
                             {(
                                 [
                                     ['message', 'Message', IconMessage],
@@ -1827,6 +1923,7 @@ function CommandDeck({
                                 <Menu.Item
                                     key={value}
                                     leftSection={<Icon size={16} />}
+                                    disabled={disabled}
                                     onClick={() => setMode(value)}
                                 >
                                     {label}

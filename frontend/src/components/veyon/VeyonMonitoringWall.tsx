@@ -31,10 +31,13 @@ import { notifications } from '@mantine/notifications';
 import {
     IconArrowsMaximize,
     IconArrowsMinimize,
+    IconBolt,
     IconEye,
     IconInfoCircle,
+    IconKey,
     IconLayoutGrid,
     IconLock,
+    IconLockOpen,
     IconPlayerStop,
     IconRefresh,
     IconUser,
@@ -78,6 +81,7 @@ export default function VeyonMonitoringWall({
     onCommand: (
         computerId: string,
         action: VeyonCommandAction,
+        active?: boolean,
     ) => void | Promise<void>;
 }) {
     const identities = useDeviceIdentities();
@@ -284,8 +288,8 @@ export default function VeyonMonitoringWall({
     );
 
     const handleCommand = useCallback(
-        (computerId: string, action: VeyonCommandAction) =>
-            onCommand(computerId, action),
+        (computerId: string, action: VeyonCommandAction, active = true) =>
+            onCommand(computerId, action, active),
         [onCommand],
     );
 
@@ -500,6 +504,7 @@ export default function VeyonMonitoringWall({
                             Select all
                         </Button>
                         <Select
+                            aria-label='Lab'
                             placeholder='All labs'
                             clearable
                             searchable
@@ -781,6 +786,7 @@ const WallTile = memo(function WallTile({
     onCommand: (
         computerId: string,
         action: VeyonCommandAction,
+        active?: boolean,
     ) => void | Promise<void>;
 }) {
     const tileRef = useRef<HTMLDivElement>(null);
@@ -921,6 +927,45 @@ const WallTile = memo(function WallTile({
                                 }
                             >
                                 <IconLock size={15} />
+                            </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label='Unlock screen'>
+                            <ActionIcon
+                                variant='subtle'
+                                size='sm'
+                                color='teal'
+                                aria-label={`Unlock screen ${computer.name}`}
+                                onClick={() =>
+                                    void onCommand(computer.id, 'screen-lock', false)
+                                }
+                            >
+                                <IconLockOpen size={15} />
+                            </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label='Lock input'>
+                            <ActionIcon
+                                variant='subtle'
+                                size='sm'
+                                color='orange'
+                                aria-label={`Lock input ${computer.name}`}
+                                onClick={() =>
+                                    void onCommand(computer.id, 'input-lock')
+                                }
+                            >
+                                <IconKey size={15} />
+                            </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label='Unlock input'>
+                            <ActionIcon
+                                variant='subtle'
+                                size='sm'
+                                color='teal'
+                                aria-label={`Unlock input ${computer.name}`}
+                                onClick={() =>
+                                    void onCommand(computer.id, 'input-lock', false)
+                                }
+                            >
+                                <IconBolt size={15} />
                             </ActionIcon>
                         </Tooltip>
                     </Group>

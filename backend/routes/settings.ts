@@ -43,6 +43,12 @@ settingsRouter.use('/settings/*', async (c, next) => {
 
 const settingsLogger = getLogger(['labs', 'settings']);
 
+function maskKey(value: string): string {
+    if (!value) return '';
+    // Never reveal an entire short credential or its length.
+    return `${value.length > 5 ? value.slice(0, 5) : ''}********`;
+}
+
 const dnsSuffixSchema = z.string()
     .refine((value) => !/^\.+$/.test(value.trim()), 'Invalid DNS suffix')
     .transform((value) => value.trim().replace(/^\.|\.$/g, '').toLowerCase())
@@ -469,9 +475,8 @@ settingsRouter.get('/settings/fog', async (c) => {
         return c.json({
             configured: true,
             url: stored.url,
-            // Mask tokens so secrets are never exposed to the client
-            apiToken: new Array(stored.apiToken.length).fill('*').join(''),
-            userToken: new Array(stored.userToken.length).fill('*').join(''),
+            apiToken: maskKey(stored.apiToken),
+            userToken: maskKey(stored.userToken),
         });
     } catch (error) {
         settingsLogger.error('Failed to load FOG settings: {error}', {
@@ -576,12 +581,8 @@ settingsRouter.post('/settings/fog', async (c) => {
             data: {
                 configured: true,
                 url: body.url,
-                apiToken: new Array(body.apiToken.length)
-                    .fill('*')
-                    .join(''),
-                userToken: new Array(body.userToken.length)
-                    .fill('*')
-                    .join(''),
+                apiToken: maskKey(body.apiToken),
+                userToken: maskKey(body.userToken),
             },
         });
     } catch (error) {
@@ -612,6 +613,7 @@ settingsRouter.get('/settings/veyon', async (c) => {
         url: stored?.url ?? '',
         keyName: stored?.keyName ?? '',
         keyConfigured: Boolean(stored?.keyData),
+        keyPreview: maskKey(stored?.keyData ?? ''),
         verifyTls: stored?.verifyTls ?? true,
     });
 });
@@ -682,6 +684,7 @@ settingsRouter.post('/settings/veyon', async (c) => {
             url: body.url,
             keyName: body.keyName,
             keyConfigured: true,
+            keyPreview: maskKey(credentials.keyData),
             verifyTls: body.verifyTls,
         });
     } catch (error) {

@@ -1,5 +1,5 @@
 import { betterFetch } from '@better-fetch/fetch';
-import { Button, Card, Group, Stack, TextInput, Title } from '@mantine/core';
+import { Badge, Button, Card, Group, Stack, TextInput, Title } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
@@ -114,9 +114,10 @@ export function MikroTikSettings({
 
     return (
         <Card withBorder p='md'>
-            <Title order={5} mb='md'>
-                MikroTik Configuration
-            </Title>
+            <Group justify='space-between' mb='md'>
+                <Title order={5}>MikroTik Configuration</Title>
+                {config?.mikrotikBaseUrl && config.mikrotikPassword ? <Badge color='teal'>Configured</Badge> : null}
+            </Group>
 
             <form onSubmit={form.onSubmit(submit)}>
                 <Stack gap='sm'>
@@ -136,7 +137,7 @@ export function MikroTikSettings({
                         label='Password'
                         type='password'
                         {...form.getInputProps('mikrotikPassword')}
-                        placeholder='Enter password'
+                        placeholder={config?.mikrotikPassword ? '********' : 'Enter password'}
                         description='Re-enter the router password to test and save changes.'
                         required
                     />

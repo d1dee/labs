@@ -111,6 +111,7 @@ export interface VeyonSettings {
     url: string;
     keyName: string;
     keyConfigured: boolean;
+    keyPreview?: string;
     verifyTls: boolean;
 }
 

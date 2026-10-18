@@ -28,6 +28,7 @@ export function VeyonConnectionSettings({ enabled = true }: { enabled?: boolean 
     const [keyData, setKeyData] = useState('');
     const [keyFileName, setKeyFileName] = useState('');
     const [keyConfigured, setKeyConfigured] = useState(false);
+    const [keyPreview, setKeyPreview] = useState('');
     const [configured, setConfigured] = useState(false);
     const [testHost, setTestHost] = useState('localhost');
     const [verifyTls, setVerifyTls] = useState(true);
@@ -44,6 +45,7 @@ export function VeyonConnectionSettings({ enabled = true }: { enabled?: boolean 
             seeded.current = true;
         }
         setKeyConfigured(settings.keyConfigured);
+        setKeyPreview(settings.keyPreview ?? '');
         setConfigured(settings.configured);
         setLoading(false);
     }, () => setLoading(false));
@@ -94,6 +96,7 @@ export function VeyonConnectionSettings({ enabled = true }: { enabled?: boolean 
             setKeyData('');
             setKeyFileName('');
             setKeyConfigured(false);
+            setKeyPreview('');
             setConfigured(false);
             refresh();
             notifications.show({
@@ -163,7 +166,7 @@ export function VeyonConnectionSettings({ enabled = true }: { enabled?: boolean 
                             ? 'Leave empty to keep the stored private key'
                             : 'Paste the private key PEM or upload the key file'
                     }
-                    placeholder='-----BEGIN PRIVATE KEY-----'
+                    placeholder={keyConfigured ? keyPreview || '********' : '-----BEGIN PRIVATE KEY-----'}
                     value={keyData}
                     onChange={(event) => setKeyData(event.currentTarget.value)}
                     minRows={5}

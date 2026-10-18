@@ -23,40 +23,86 @@ const Settings: FC<SettingsProps> = ({ opened, onClose }) => {
             closeButtonProps={{ 'aria-label': 'Close settings' }}
             title={
                 <>
-                    <Title component='span' order={3}>Settings</Title>
-                    <Text component='span' display='block' size='sm' color='dimmed'>
+                    <Title component='span' order={3}>
+                        Settings
+                    </Title>
+                    <Text
+                        component='span'
+                        display='block'
+                        size='sm'
+                        color='dimmed'
+                    >
                         Manage your organization and firewall configuration
                     </Text>
                 </>
             }
-            size='lg'
+            size='xl'
             centered
         >
             <Stack pos='relative'>
-                <Tabs value={activeTab} onChange={setActiveTab} keepMounted keepMountedMode='display-none'>
+                <Tabs
+                    value={activeTab}
+                    onChange={setActiveTab}
+                    keepMounted
+                    keepMountedMode='display-none'
+                >
                     <Tabs.List>
                         <Tabs.Tab value='organization'>Organization</Tabs.Tab>
                         <Tabs.Tab value='firewall' disabled={!organization}>
                             Firewall
                         </Tabs.Tab>
-                        <Tabs.Tab value='pihole'>DNS</Tabs.Tab>
-                        <Tabs.Tab value='fog'>FOG</Tabs.Tab>
-                        <Tabs.Tab value='veyon'>Veyon</Tabs.Tab>
+                        <Tabs.Tab value='pihole' disabled={!organization}>
+                            DNS
+                        </Tabs.Tab>
+                        <Tabs.Tab value='fog' disabled={!organization}>
+                            FOG
+                        </Tabs.Tab>
+                        <Tabs.Tab value='veyon' disabled={!organization}>
+                            Veyon
+                        </Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel value='organization' pt='md'>
-                        <OrganizationSettings enabled={opened && activeTab === 'organization'} />
+                        <OrganizationSettings
+                            enabled={opened && activeTab === 'organization'}
+                        />
                     </Tabs.Panel>
                     <Tabs.Panel value='firewall' pt='md'>
-                        <FirewallSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'firewall' && !!organization} />
+                        <FirewallSettings
+                            key={organization?.id ?? 'none'}
+                            enabled={
+                                opened &&
+                                activeTab === 'firewall' &&
+                                !!organization
+                            }
+                        />
                     </Tabs.Panel>
                     <Tabs.Panel value='pihole' pt='md'>
-                        <PiholeSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'pihole' && !!organization} />
+                        <PiholeSettings
+                            key={organization?.id ?? 'none'}
+                            enabled={
+                                opened &&
+                                activeTab === 'pihole' &&
+                                !!organization
+                            }
+                        />
                     </Tabs.Panel>
                     <Tabs.Panel value='fog' pt='md'>
-                        <FogConnectionSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'fog' && !!organization} />
+                        <FogConnectionSettings
+                            key={organization?.id ?? 'none'}
+                            enabled={
+                                opened && activeTab === 'fog' && !!organization
+                            }
+                        />
                     </Tabs.Panel>
                     <Tabs.Panel value='veyon' pt='md'>
-                        <VeyonConnectionSettings key={organization?.id ?? 'none'} enabled={opened && activeTab === 'veyon' && !!organization} />
+                        <VeyonConnectionSettings
+                            key={organization?.id ?? 'none'}
+                            enabled={
+                                opened &&
+                                activeTab === 'veyon' &&
+                                !!organization
+                            }
+                        />
                     </Tabs.Panel>
                 </Tabs>
             </Stack>

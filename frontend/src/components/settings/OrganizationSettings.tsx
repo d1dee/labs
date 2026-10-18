@@ -26,16 +26,16 @@ import {
     IconInfoCircle,
     IconKey,
     IconMail,
+    IconLogout,
     IconPhone,
     IconPlus,
-    IconTrash,
     IconUserPlus,
-    IconUsers,
     IconX,
 } from '@tabler/icons-react';
 import { useState } from 'react';
 import { z } from 'zod';
 import { PhoneNumberInput } from '../PhoneNumberInput';
+import { OrganizationMembersCard } from './OrganizationMembersCard';
 
 export type { Organization };
 
@@ -348,204 +348,91 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
         );
     }
 
-    const memberColors = [
-        'blue',
-        'teal',
-        'grape',
-        'orange',
-        'indigo',
-        'pink',
-        'cyan',
-    ];
-
     return (
-        <Card withBorder p={{ base: 'sm', md: 'md' }} radius='md'>
+        <Stack gap='md'>
+        <Card component='section' aria-labelledby='institution-title' withBorder p={{ base: 'md', sm: 'lg' }} radius='md'>
             <Stack gap='md'>
-                {/* Header */}
                 <Group
                     justify='space-between'
                     align='flex-start'
-                    wrap='nowrap'
+                    wrap='wrap'
                     gap='md'
                 >
-                    <Group gap='sm' wrap='nowrap'>
+                    <Group gap='sm' wrap='nowrap' style={{ minWidth: 0, flex: 1 }}>
                         <ThemeIcon
                             size='xl'
                             variant='light'
-                            color='blue'
+                            color='teal'
                             radius='md'
                         >
                             <IconBuilding size={22} />
                         </ThemeIcon>
                         <Stack gap={2} style={{ minWidth: 0 }}>
-                            <Title order={4} lineClamp={1}>
+                            <Title order={3} id='institution-title' style={{ overflowWrap: 'anywhere' }}>
                                 {userOrganization.name}
                             </Title>
                             <Text size='xs' color='dimmed'>
-                                Organization ID: {userOrganization.id}
+                                Institution details
                             </Text>
                         </Stack>
                     </Group>
                     <Button
-                        variant='light'
-                        color='red'
+                        variant='subtle'
+                        color='gray'
                         size='xs'
-                        leftSection={<IconTrash size={14} />}
+                        leftSection={<IconLogout size={14} />}
                         onClick={leaveOrganization}
                         loading={joining}
                     >
-                        Leave
+                        Leave institution
                     </Button>
                 </Group>
 
                 <Divider />
 
-                {/* Join key */}
-                <Group
-                    justify='space-between'
-                    align='center'
-                    wrap='wrap'
-                    gap='sm'
-                >
-                    <Group gap='sm' wrap='nowrap'>
-                        <ThemeIcon variant='light' color='green' size='lg'>
-                            <IconKey size={16} />
-                        </ThemeIcon>
-                        <Stack gap={2}>
-                            <Text size='sm' fw={500}>
-                                Join Key
-                            </Text>
-                            <Text size='xs' color='dimmed'>
-                                Share this code so others can join
-                            </Text>
-                        </Stack>
-                    </Group>
-                    <Group gap='xs'>
-                        <Badge
-                            size='lg'
-                            variant='light'
-                            color='green'
-                            ff='monospace'
-                            style={{ letterSpacing: '0.15em' }}
-                        >
-                            {userOrganization.joinKey}
-                        </Badge>
-                        <ActionIcon
-                            variant='subtle'
-                            color='gray'
-                            onClick={copyJoinKey}
-                            aria-label='Copy join key'
-                        >
-                            <IconCopy size={16} />
-                        </ActionIcon>
-                    </Group>
-                </Group>
-
-                {/* Contact information */}
                 <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
-                    <Card withBorder p='sm' radius='md'>
-                        <Group gap='sm' align='center'>
-                            <ThemeIcon variant='light' color='indigo' size='lg'>
-                                <IconMail size={16} />
-                            </ThemeIcon>
+                        <Group gap='sm' align='flex-start' wrap='nowrap'>
+                            <IconMail size={18} aria-hidden style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0, marginTop: 3 }} />
                             <Stack gap={2} style={{ minWidth: 0 }}>
                                 <Text size='xs' color='dimmed'>
-                                    Email
+                                    Contact email
                                 </Text>
-                                <Text size='sm' fw={500} lineClamp={1}>
+                                <Text size='sm' fw={500} style={{ overflowWrap: 'anywhere' }}>
                                     {userOrganization.email}
                                 </Text>
                             </Stack>
                         </Group>
-                    </Card>
-
-                    <Card withBorder p='sm' radius='md'>
-                        <Group gap='sm' align='center'>
-                            <ThemeIcon variant='light' color='teal' size='lg'>
-                                <IconPhone size={16} />
-                            </ThemeIcon>
+                        <Group gap='sm' align='flex-start' wrap='nowrap'>
+                            <IconPhone size={18} aria-hidden style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0, marginTop: 3 }} />
                             <Stack gap={2} style={{ minWidth: 0 }}>
                                 <Text size='xs' color='dimmed'>
-                                    Phone
+                                    Contact phone
                                 </Text>
                                 <Text size='sm' fw={500} lineClamp={1}>
-                                    {userOrganization.phoneNumber || '—'}
+                                    {userOrganization.phoneNumber || 'Not provided'}
                                 </Text>
                             </Stack>
                         </Group>
-                    </Card>
                 </SimpleGrid>
-
-                {/* Members */}
-                <Card withBorder p='sm' radius='md'>
-                    <Group justify='space-between' mb='sm'>
-                        <Group gap='xs'>
-                            <ThemeIcon variant='light' color='gray' size='md'>
-                                <IconUsers size={16} />
-                            </ThemeIcon>
-                            <Text size='sm' fw={500}>
-                                Members
-                            </Text>
-                        </Group>
-                        <Badge variant='light' size='sm'>
-                            {userOrganization.members?.length || 0}
-                        </Badge>
+                <Group justify='space-between' gap='sm' p='sm' bg='var(--mantine-color-default-hover)' style={{ borderRadius: 'var(--mantine-radius-sm)' }}>
+                    <Group gap='sm' wrap='nowrap'>
+                        <IconKey size={18} aria-hidden style={{ flexShrink: 0 }} />
+                        <Stack gap={2}>
+                            <Text size='sm' fw={500}>Invite your colleagues</Text>
+                            <Text size='xs' c='dimmed'>Share the join key to give access to this institution.</Text>
+                        </Stack>
                     </Group>
-
-                    <Stack gap='xs'>
-                        {userOrganization.members?.map((member, index) => (
-                            <Group
-                                key={member.id}
-                                justify='space-between'
-                                wrap='nowrap'
-                                gap='sm'
-                            >
-                                <Group gap='sm' wrap='nowrap'>
-                                    <ThemeIcon
-                                        variant='light'
-                                        color={
-                                            memberColors[
-                                                index % memberColors.length
-                                            ]
-                                        }
-                                        size='lg'
-                                        radius='xl'
-                                    >
-                                        {member.name.charAt(0).toUpperCase()}
-                                    </ThemeIcon>
-                                    <Stack gap={2} style={{ minWidth: 0 }}>
-                                        <Text size='sm' fw={500} lineClamp={1}>
-                                            {member.name}
-                                        </Text>
-                                        <Text
-                                            size='xs'
-                                            color='dimmed'
-                                            lineClamp={1}
-                                        >
-                                            {member.email}
-                                        </Text>
-                                    </Stack>
-                                </Group>
-                                {member.username && (
-                                    <Badge
-                                        variant='light'
-                                        size='sm'
-                                        color='gray'
-                                    >
-                                        @{member.username}
-                                    </Badge>
-                                )}
-                            </Group>
-                        ))}
-                        {(!userOrganization.members ||
-                            userOrganization.members.length === 0) && (
-                            <Text size='sm' color='dimmed' ta='center'>
-                                No members yet
-                            </Text>
-                        )}
-                    </Stack>
-                </Card>
+                    <Group gap='xs' wrap='nowrap'>
+                        <Badge size='lg' variant='light' color='teal' tt='none' style={{ maxWidth: 220 }} title={userOrganization.joinKey}>
+                            {userOrganization.joinKey || 'Unavailable'}
+                        </Badge>
+                        <ActionIcon variant='subtle' color='gray' onClick={copyJoinKey} disabled={!userOrganization.joinKey} aria-label='Copy join key'><IconCopy size={16} /></ActionIcon>
+                    </Group>
+                </Group>
+                <Text size='xs' c='dimmed'>Institution ID: {userOrganization.id}</Text>
             </Stack>
         </Card>
+        <OrganizationMembersCard key={userOrganization.id} organization={userOrganization} enabled={enabled} onDeleted={refresh} />
+        </Stack>
     );
 }

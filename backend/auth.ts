@@ -7,6 +7,12 @@ import { db } from '../db/database';
 import * as schema from '../db/schema';
 import { requireAuthEmailConfig, sendAuthEmail } from './auth-email';
 
+export const trustedOrigins = () => [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    ...(process.env.TRUSTED_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || []),
+];
+
 export const createAuth = (database = db) =>
     betterAuth({
         database: drizzleAdapter(database, {
@@ -14,11 +20,7 @@ export const createAuth = (database = db) =>
             provider: 'sqlite',
         }),
 
-        trustedOrigins: [
-            'http://localhost:5173',
-            'http://localhost:3000',
-            ...(process.env.TRUSTED_ORIGINS?.split(',') || []),
-        ],
+        trustedOrigins: trustedOrigins(),
 
         emailAndPassword: {
             enabled: true,
@@ -136,6 +138,12 @@ export const createAuth = (database = db) =>
             }),
             after: createAuthMiddleware(async (ctx) => {
                 const returned = ctx.context.returned;
+                if (['/sign-in/email', '/sign-in/username'].includes(ctx.path) &&
+                    !(returned instanceof APIError) && ctx.context.newSession?.user.emailVerified) {
+                    await database.update(schema.user)
+                        .set({ lastLoginAt: new Date() })
+                        .where(eq(schema.user.id, ctx.context.newSession.user.id));
+                }
                 if (!['/sign-in/email', '/sign-in/username'].includes(ctx.path) ||
                     !(returned instanceof APIError) || returned.body?.code !== 'EMAIL_NOT_VERIFIED') return;
                 // Both credential endpoints verify the password before returning this error.
