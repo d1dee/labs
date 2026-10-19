@@ -110,7 +110,38 @@ const MAX_REQUESTS = 8;
 const MAX_QUEUED_REQUESTS = 256;
 let activeRequests = 0;
 const requestQueue: Array<() => void> = [];
+let informationActive = false;
+const informationQueue: Array<() => void> = [];
 let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+
+// One information batch uses up to three HTTP slots; leave at least five for other work.
+function acquireInformation(signal: AbortSignal): Promise<() => void> {
+    signal.throwIfAborted();
+    if (informationActive && informationQueue.length >= MAX_QUEUED_REQUESTS) {
+        return Promise.reject(new VeyonApiError('Veyon information queue is full', 503, 'VEYON_BUSY'));
+    }
+    return new Promise((resolve, reject) => {
+        const grant = () => {
+            signal.removeEventListener('abort', abort);
+            informationActive = true;
+            resolve(() => {
+                informationActive = false;
+                informationQueue.shift()?.();
+            });
+        };
+        const abort = () => {
+            const index = informationQueue.indexOf(grant);
+            if (index !== -1) informationQueue.splice(index, 1);
+            signal.removeEventListener('abort', abort);
+            reject(signal.reason);
+        };
+        if (!informationActive) grant();
+        else {
+            informationQueue.push(grant);
+            signal.addEventListener('abort', abort, { once: true });
+        }
+    });
+}
 
 // One process-wide budget covers every endpoint, user and screenshot worker.
 function acquireRequest(signal: AbortSignal): Promise<() => void> {
@@ -585,16 +616,25 @@ export class VeyonClient {
     }
 
     async information(host: string, signal?: AbortSignal) {
-        const [userResponse, sessionResponse, featuresResponse] = await Promise.all([
-            this.authenticatedRequest(host, '/user', { signal }),
-            this.authenticatedRequest(host, '/session', { signal }),
-            this.authenticatedRequest(host, '/feature', { signal }),
-        ]);
-        return {
-            user: await userResponse.json(),
-            session: await sessionResponse.json(),
-            features: await featuresResponse.json(),
-        };
+        return withDeadline(signal, 12_000, async (deadline) => {
+            const release = await acquireInformation(deadline);
+            const requests = [
+                this.authenticatedRequest(host, '/user', { signal: deadline }),
+                this.authenticatedRequest(host, '/session', { signal: deadline }),
+                this.authenticatedRequest(host, '/feature', { signal: deadline }),
+            ] as const;
+            try {
+                const [userResponse, sessionResponse, featuresResponse] = await Promise.all(requests);
+                return {
+                    user: await userResponse.json(),
+                    session: await sessionResponse.json(),
+                    features: await featuresResponse.json(),
+                };
+            } finally {
+                // A failed request must not release the batch while its siblings still run.
+                void Promise.allSettled(requests).then(release);
+            }
+        });
     }
 
     // GET /api/v1/user — logged-on user information.

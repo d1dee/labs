@@ -63,7 +63,7 @@ export function resolveVeyonPollerConfig(
         return Math.min(max, Math.max(min, parsed));
     };
     return {
-        pollIntervalMs: int('VEYON_POLL_INTERVAL_MS', 10_000, 250, 60_000),
+        pollIntervalMs: int('VEYON_POLL_INTERVAL_MS', 1_000, 250, 60_000),
         requestTimeoutMs: int('VEYON_POLL_TIMEOUT_MS', 5_000, 500, 120_000),
         maxBackoffMs: int('VEYON_POLL_MAX_BACKOFF_MS', 10_000, 1_000, 300_000),
         jitterMs: int('VEYON_POLL_JITTER_MS', 300, 0, 5_000),
@@ -71,7 +71,7 @@ export function resolveVeyonPollerConfig(
         idleLingerMs: int('VEYON_POLL_IDLE_LINGER_MS', 5_000, 0, 300_000),
         frameWidth: int('VEYON_POLL_FRAME_WIDTH', 320, 160, 1_920),
         frameQuality: int('VEYON_POLL_FRAME_QUALITY', 50, 1, 100),
-        viewerIntervalMs: int('VEYON_VIEWER_INTERVAL_MS', 10_000, 250, 60_000),
+        viewerIntervalMs: int('VEYON_VIEWER_INTERVAL_MS', 1_000, 250, 60_000),
         viewerWidth: int('VEYON_VIEWER_FRAME_WIDTH', 1_280, 160, 1_920),
         viewerQuality: int('VEYON_VIEWER_FRAME_QUALITY', 75, 1, 100),
         organizationRequestsPerSecond: int('VEYON_ORG_REQUESTS_PER_SECOND', 12, 1, 1_000),
@@ -467,6 +467,7 @@ class PollingWorker {
         private readonly onStop: (worker: PollingWorker) => void,
         private state: VeyonScreenshotState,
         private readonly budget: VeyonPollBudget,
+        private readonly bootstrapSemaphore: Semaphore,
         private readonly previous?: Promise<void>,
         private readonly canClose: (host: string) => boolean = () => true,
     ) {
@@ -666,9 +667,19 @@ class PollingWorker {
         let lease: BudgetLease | undefined;
         let receivedBytes: number | undefined;
         let acquired = false;
+        let bootstrapAcquired = false;
         let pending: Promise<unknown> | undefined;
         try {
             this.queued = true;
+            // Cold/offline hosts may spend the whole deadline authenticating.
+            // Admit only a few before the shared budget, leaving slots for live frames.
+            if (!this.clientHost || !this.state.image || this.state.consecutiveFailures > 0) {
+                if (this.bootstrapSemaphore.queued >= this.config.maxPendingRequests) {
+                    throw new VeyonApiError('Screenshot connection queue is full', 503, 'VEYON_BUSY');
+                }
+                await this.bootstrapSemaphore.acquire(waitingSignal);
+                bootstrapAcquired = true;
+            }
             lease = await this.budget.acquire(this.organizationId, this.estimatedBytes, () => this.profile().priority, waitingSignal);
             waitingSignal.throwIfAborted();
             const deadline = new AbortController();
@@ -739,6 +750,7 @@ class PollingWorker {
             this.inFlight = false;
             if (acquired) this.semaphore.release();
             lease?.finish(receivedBytes);
+            if (bootstrapAcquired) this.bootstrapSemaphore.release();
             if (this.clientHost && this.clientHost !== this.computer.host) await this.closeConnection();
         }
     }
@@ -897,6 +909,7 @@ export class VeyonScreenshotPoller {
     >();
     private readonly listeners = new Set<VeyonPollerListener>();
     readonly semaphore: Semaphore;
+    private readonly bootstrapSemaphore: Semaphore;
     private readonly getClient: (
         organizationId: string,
         signal?: AbortSignal,
@@ -907,6 +920,7 @@ export class VeyonScreenshotPoller {
         dependencies: VeyonPollerDependencies = {},
     ) {
         this.semaphore = new Semaphore(config.globalConcurrency);
+        this.bootstrapSemaphore = new Semaphore(Math.max(1, Math.min(2, config.globalConcurrency - 1, config.organizationConcurrency - 1)));
         this.budget = new VeyonPollBudget(config);
         this.getClient =
             dependencies.getClient ??
@@ -972,6 +986,7 @@ export class VeyonScreenshotPoller {
                 },
                 retained ? { ...retained.state, stale: true } : emptyState(),
                 this.budget,
+                this.bootstrapSemaphore,
                 this.stopping.get(key),
                 (host) => ![...this.workers.values()].some((other) =>
                     other.organizationId === organizationId &&
@@ -1128,7 +1143,7 @@ export class VeyonScreenshotPoller {
                     : workers.filter((worker) => worker.inFlight).length,
             queuedRequests:
                 organizationId === undefined
-                     ? this.semaphore.queued + this.budget.queued
+                     ? this.bootstrapSemaphore.queued + this.semaphore.queued + this.budget.queued
                      : workers.filter((worker) => worker.queued).length,
             cachedFrameBytes: workers.reduce((bytes, worker) => bytes + (worker.snapshot().image?.byteLength ?? 0), 0) +
                 [...this.retained.values()].filter((retained) => organizationId === undefined || retained.organizationId === organizationId).reduce((bytes, retained) => bytes + (retained.state.image?.byteLength ?? 0), 0),

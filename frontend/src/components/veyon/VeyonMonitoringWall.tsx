@@ -49,9 +49,10 @@ const ROW_CHROME = 136;
 const MAX_ACTIVE = 64;
 
 const REFRESH_OPTIONS = [
+    { value: '1000', label: '1s' },
+    { value: '2000', label: '2s' },
     { value: '5000', label: '5s' },
     { value: '10000', label: '10s' },
-    { value: '2000', label: '2s' },
     { value: 'paused', label: 'Paused' },
 ];
 
@@ -87,7 +88,7 @@ export default function VeyonMonitoringWall({
     const identities = useDeviceIdentities();
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [columns, setColumns] = useState('auto');
-    const [refresh, setRefresh] = useState('10000');
+    const [refresh, setRefresh] = useState('1000');
     const [search, setSearch] = useState('');
     const [selectionSearch, setSelectionSearch] = useState('');
     const [labFilter, setLabFilter] = useState<string | null>(null);
@@ -268,7 +269,7 @@ export default function VeyonMonitoringWall({
         opened && pinnedComputer ? [pinnedComputer.id] : [],
         {
             paused: refresh === 'paused',
-            minFrameIntervalMs: 10_000,
+            minFrameIntervalMs: refreshMs,
             width: 1280,
             quality: 75,
             priority: 'viewer',

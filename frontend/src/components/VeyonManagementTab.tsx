@@ -2515,7 +2515,7 @@ function RemoteViewer({
     const { frames, connected } = useVeyonScreenshots(
         computer ? [computer.id] : [],
         {
-            minFrameIntervalMs: 10_000,
+            minFrameIntervalMs: 1_000,
             width: 1280,
             quality: 75,
             priority: 'viewer',

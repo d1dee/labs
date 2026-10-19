@@ -119,7 +119,7 @@ function imageBlob(payload: Record<string, unknown>): Blob | null {
 
 export function useVeyonScreenshots(
     computerIds: string[],
-    { paused = false, minFrameIntervalMs = 10_000, width = 320, quality = 50, priority = 'grid' }: UseVeyonScreenshotsOptions = {},
+    { paused = false, minFrameIntervalMs = 1_000, width = 320, quality = 50, priority = 'grid' }: UseVeyonScreenshotsOptions = {},
 ): UseVeyonScreenshotsResult {
     const idsKey = [...new Set(computerIds)].slice(0, 64).sort().join(',');
     const [frames, setFrames] = useState<Record<string, VeyonScreenshotFrame>>({});
