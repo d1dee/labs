@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "bun run --watch backend/server.ts",
         "build": "cd frontend && bun install && bun run build",
-        "build:all": "bun run build && bun run typecheck",
+        "build:all": "bun install && bun run build && bun run typecheck",
         "typecheck": "tsc --noEmit && tsc --noEmit -p frontend/tsconfig.json && tsc --noEmit --composite false --incremental false -p frontend/tsconfig.node.json && tsc --noEmit -p landing/tsconfig.json",
         "serve": "bun run backend/server.ts",
         "start": "bun run build && bun run backend/server.ts",
