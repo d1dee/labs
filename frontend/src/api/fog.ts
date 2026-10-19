@@ -390,7 +390,7 @@ export async function deleteFogHost(id: number): Promise<{ success: boolean }> {
 export async function listFogImages(): Promise<ListFogImages> {
     return throwOnError(
         await $fetch<ListFogImages>('/api/fog/images', { method: 'GET' }),
-        'Failed to list FOG images',
+        'Failed to list images',
     );
 }
 
@@ -490,7 +490,9 @@ export async function createFogTask(
     );
     if (error) {
         throw new Error(
-            (error as any).error || (error as any).message || 'Failed to create FOG task',
+            (error as any).error ||
+                (error as any).message ||
+                'Failed to create FOG task',
         );
     }
     return data ?? { success: true };

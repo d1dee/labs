@@ -7,10 +7,17 @@ import {
     restartFogTask,
     type FogActiveTask,
 } from '@/api/fog';
-import { PageHero } from '@/components/ui/PageHero';
 import { useApiStream } from '@/api/useApiStream';
-import { deviceIdentitySearchText, useDeviceIdentities } from '@/api/useDeviceIdentities';
-import { MobileFilterPanel, MobileFilterToggle, useMobileTableFilters } from '@/components/ui/MobileTableFilters';
+import {
+    deviceIdentitySearchText,
+    useDeviceIdentities,
+} from '@/api/useDeviceIdentities';
+import {
+    MobileFilterPanel,
+    MobileFilterToggle,
+    useMobileTableFilters,
+} from '@/components/ui/MobileTableFilters';
+import { PageHero } from '@/components/ui/PageHero';
 import {
     Alert,
     Card,
@@ -25,11 +32,7 @@ import {
     Title,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import {
-    IconAlertCircle,
-    IconSearch,
-    IconTools,
-} from '@tabler/icons-react';
+import { IconAlertCircle, IconSearch, IconTools } from '@tabler/icons-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
 import ActiveTasksTable, { fogTaskIdentityQuery } from './FOG/ActiveTasksTable';
 
@@ -85,18 +88,25 @@ const ActiveTasksTab: FC = () => {
         setError(err.message);
         setLoading(false);
     };
-    useApiStream<Awaited<ReturnType<typeof getFogStatus>>>('/api/fog/status', (status) => {
-        setConfigured(status.configured);
-        setError(null);
-        if (!status.configured) setLoading(false);
-    }, streamError);
-    const refresh = useApiStream<Awaited<ReturnType<typeof listActiveFogTasks>>>(
+    useApiStream<Awaited<ReturnType<typeof getFogStatus>>>(
+        '/api/fog/status',
+        (status) => {
+            setConfigured(status.configured);
+            setError(null);
+            if (!status.configured) setLoading(false);
+        },
+        streamError,
+    );
+    const refresh = useApiStream<
+        Awaited<ReturnType<typeof listActiveFogTasks>>
+    >(
         configured ? '/api/fog/tasks/active' : null,
         (data) => {
             setTasks(data.tasks || []);
             setError(null);
             setLoading(false);
-        }, streamError,
+        },
+        streamError,
     );
 
     const stats = useMemo(() => computeStats(tasks), [tasks]);
@@ -139,7 +149,11 @@ const ActiveTasksTab: FC = () => {
                         .toLowerCase()
                         .includes(q) ||
                     (t.state?.name || 'Unknown').toLowerCase().includes(q) ||
-                    deviceIdentitySearchText(identities.lookup(fogTaskIdentityQuery(t))).toLowerCase().includes(q) ||
+                    deviceIdentitySearchText(
+                        identities.lookup(fogTaskIdentityQuery(t)),
+                    )
+                        .toLowerCase()
+                        .includes(q) ||
                     (t.host?.ip || '').toLowerCase().includes(q),
             );
         }
@@ -154,12 +168,24 @@ const ActiveTasksTab: FC = () => {
             );
         }
         if (labFilter) {
-            result = result.filter((task) => identities.labFor({
-                ...fogTaskIdentityQuery(task), address: task.host?.ip,
-            })?.id === labFilter);
+            result = result.filter(
+                (task) =>
+                    identities.labFor({
+                        ...fogTaskIdentityQuery(task),
+                        address: task.host?.ip,
+                    })?.id === labFilter,
+            );
         }
         return result;
-    }, [tasks, searchQuery, stateFilter, typeFilter, labFilter, identities.lookup, identities.labFor]);
+    }, [
+        tasks,
+        searchQuery,
+        stateFilter,
+        typeFilter,
+        labFilter,
+        identities.lookup,
+        identities.labFor,
+    ]);
 
     const [actioningTasks, setActioningTasks] = useState<Set<number>>(
         new Set(),
@@ -264,8 +290,16 @@ const ActiveTasksTab: FC = () => {
                 metrics={[
                     { label: 'Total', value: stats.total },
                     { label: 'Running', value: stats.running, accent: true },
-                    { label: 'Pending', value: stats.pending, color: 'yellow.4' },
-                    { label: 'Completed', value: stats.completed, color: 'green.4' },
+                    {
+                        label: 'Pending',
+                        value: stats.pending,
+                        color: 'yellow.4',
+                    },
+                    {
+                        label: 'Completed',
+                        value: stats.completed,
+                        color: 'green.4',
+                    },
                 ]}
             />
 
@@ -273,76 +307,107 @@ const ActiveTasksTab: FC = () => {
             {error && <Alert color='red'>{error}</Alert>}
             <Card withBorder radius='lg' p='md'>
                 <Stack gap='md'>
-                    {identities.warning ? <Text size='xs' c='dimmed' role='status'>{identities.warning}</Text> : null}
-                    <Flex direction={{ base: 'column', sm: 'row' }} align={{ base: 'stretch', sm: 'flex-end' }} gap='md'>
-                        <Stack gap={0} flex={1} miw={0} style={{ overflowWrap: 'anywhere' }}>
+                    {identities.warning ? (
+                        <Text size='xs' c='dimmed' role='status'>
+                            {identities.warning}
+                        </Text>
+                    ) : null}
+                    <Flex
+                        direction={{ base: 'column', sm: 'row' }}
+                        align={{ base: 'stretch', sm: 'flex-end' }}
+                        gap='md'
+                    >
+                        <Stack
+                            gap={0}
+                            flex={1}
+                            miw={0}
+                            style={{ overflowWrap: 'anywhere' }}
+                        >
                             <Title order={4}>Task Details</Title>
                             <Text size='sm' c='dimmed'>
                                 View and manage currently running FOG tasks.
                             </Text>
                         </Stack>
-                        <Group wrap='nowrap' w={{ base: '100%', sm: 300 }} style={{ flexShrink: 0 }}>
-                        <TextInput
-                            aria-label='Search'
-                            placeholder='Search tasks...'
-                            leftSection={<IconSearch size={16} />}
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.currentTarget.value)}
-                            style={{ flex: 1, minWidth: 0 }}
-                        />
-                        <MobileFilterToggle
-                            opened={opened}
-                            onToggle={toggle}
-                            controlsId={controlsId}
-                            label='Toggle task filters'
-                        />
+                        <Group
+                            wrap='nowrap'
+                            w={{ base: '100%', sm: 300 }}
+                            style={{ flexShrink: 0 }}
+                        >
+                            <TextInput
+                                aria-label='Search'
+                                placeholder='Search tasks...'
+                                leftSection={<IconSearch size={16} />}
+                                value={searchQuery}
+                                onChange={(e) =>
+                                    setSearchQuery(e.currentTarget.value)
+                                }
+                                style={{ flex: 1, minWidth: 0 }}
+                            />
+                            <MobileFilterToggle
+                                opened={opened}
+                                onToggle={toggle}
+                                controlsId={controlsId}
+                                label='Toggle task filters'
+                            />
                         </Group>
                     </Flex>
                     <MobileFilterPanel id={controlsId} opened={opened}>
-                    <Group grow preventGrowOverflow={false} align='flex-end'>
-                        <Select
-                            miw={{ base: '100%', sm: 180 }}
-                            placeholder='All labs'
-                            label='Lab'
-                            data={identities.labs.map((lab) => ({ value: lab.id, label: lab.name }))}
-                            value={labFilter}
-                            onChange={setLabFilter}
-                            clearable
-                            searchable
-                            nothingFoundMessage='No labs'
-                        />
-                        <Select
-                            miw={{ base: '100%', sm: 180 }}
-                            placeholder='Filter by state'
-                            label='State'
-                            data={stateOptions}
-                            value={stateFilter}
-                            onChange={setStateFilter}
-                            clearable
-                        />
-                        <Select
-                            miw={{ base: '100%', sm: 180 }}
-                            placeholder='Filter by type'
-                            label='Type'
-                            data={typeOptions}
-                            value={typeFilter}
-                            onChange={setTypeFilter}
-                            clearable
-                        />
-                    </Group>
+                        <Group
+                            grow
+                            preventGrowOverflow={false}
+                            align='flex-end'
+                        >
+                            <Select
+                                miw={{ base: '100%', sm: 180 }}
+                                placeholder='All labs'
+                                label='Lab'
+                                data={identities.labs.map((lab) => ({
+                                    value: lab.id,
+                                    label: lab.name,
+                                }))}
+                                value={labFilter}
+                                onChange={setLabFilter}
+                                clearable
+                                searchable
+                                nothingFoundMessage='No labs'
+                            />
+                            <Select
+                                miw={{ base: '100%', sm: 180 }}
+                                placeholder='Filter by state'
+                                label='State'
+                                data={stateOptions}
+                                value={stateFilter}
+                                onChange={setStateFilter}
+                                clearable
+                            />
+                            <Select
+                                miw={{ base: '100%', sm: 180 }}
+                                placeholder='Filter by type'
+                                label='Type'
+                                data={typeOptions}
+                                value={typeFilter}
+                                onChange={setTypeFilter}
+                                clearable
+                            />
+                        </Group>
                     </MobileFilterPanel>
 
-                    {tasks.length === 0 && !error && (
+                    {/*   {tasks.length === 0 && !error && (
                         <Text c='dimmed' ta='center'>No active tasks found.</Text>
-                    )}
-                        <ActiveTasksTable
-                            identities={identities}
-                            loading={loading}
-                            tasks={filteredTasks}
-                            filterKey={JSON.stringify([searchQuery, stateFilter, typeFilter, labFilter])}
-                            actioningTasks={actioningTasks}
-                            onTaskAction={handleTaskAction}
-                        />
+                    )} */}
+                    <ActiveTasksTable
+                        identities={identities}
+                        loading={loading}
+                        tasks={filteredTasks}
+                        filterKey={JSON.stringify([
+                            searchQuery,
+                            stateFilter,
+                            typeFilter,
+                            labFilter,
+                        ])}
+                        actioningTasks={actioningTasks}
+                        onTaskAction={handleTaskAction}
+                    />
                 </Stack>
             </Card>
         </Stack>

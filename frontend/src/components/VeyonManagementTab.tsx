@@ -1,6 +1,5 @@
-import type { DeviceIdentity, DeviceLab } from '@/api/devices';
 import { wakeDevice } from '@/api/device-actions';
-import { useSessionContext } from '@/context/SessionContext';
+import type { DeviceIdentity, DeviceLab } from '@/api/devices';
 import {
     getFogStatus,
     listFogImages,
@@ -52,6 +51,7 @@ import {
 } from '@/components/ui/tableUtils';
 import VeyonMonitoringWall from '@/components/veyon/VeyonMonitoringWall';
 import { useVeyonScreenshots } from '@/components/veyon/useVeyonScreenshots';
+import { useSessionContext } from '@/context/SessionContext';
 import {
     ActionIcon,
     Alert,
@@ -68,10 +68,8 @@ import {
     Menu,
     Modal,
     MultiSelect,
-    Paper,
     PasswordInput,
     ScrollArea,
-    Scroller,
     Select,
     Stack,
     Table,
@@ -96,6 +94,7 @@ import {
     IconCommand,
     IconDeviceDesktop,
     IconDotsVertical,
+    IconDots,
     IconEdit,
     IconEye,
     IconInfoCircle,
@@ -131,6 +130,15 @@ export type LiveState =
 
 type EditorState = { opened: boolean; computer: VeyonComputer | null };
 type ComputerSortKey = 'name' | 'location' | 'user' | 'status';
+
+function computerStatus(live: LiveState | undefined, fogHost?: FogHost) {
+    // A live check is authoritative; inventory probes are only a fallback.
+    if (live) return live.state;
+    if (fogHost?.pingstatuscode === 0 || fogHost?.pingstatuscode === 111) {
+        return 'online';
+    }
+    return 'offline';
+}
 
 function errorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
@@ -190,10 +198,13 @@ function identityQuery(computer: VeyonComputer) {
 }
 
 function wakeUnavailableReason(identity: DeviceIdentity | null) {
-    return !identity ? 'Device identity is unavailable'
-        : !identity.lab ? 'A detected lab is required for Wake on LAN'
-        : identity.macAddresses.length !== 1 ? 'One unambiguous MAC address is required'
-        : null;
+    return !identity
+        ? 'Device identity is unavailable'
+        : !identity.lab
+          ? 'A detected lab is required for Wake on LAN'
+          : identity.macAddresses.length !== 1
+            ? 'One unambiguous MAC address is required'
+            : null;
 }
 
 function fogHostIdFor(
@@ -213,7 +224,9 @@ export default function ComputersManagementTab() {
     wakeScopeRef.current = wakeScope;
     useEffect(() => {
         wakeScopeRef.current = wakeScope;
-        return () => { wakeScopeRef.current = null; };
+        return () => {
+            wakeScopeRef.current = null;
+        };
     }, [wakeScope]);
     const identities = useDeviceIdentities();
     const [configured, setConfigured] = useState<boolean | null>(null);
@@ -449,6 +462,18 @@ export default function ComputersManagementTab() {
     };
 
     const filteredComputers = useMemo(() => {
+        const statusFor = (computer: VeyonComputer) =>
+            computerStatus(
+                live[computer.id],
+                fogHostsById.get(
+                    String(
+                        fogHostIdFor(
+                            computer,
+                            identities.lookup(identityQuery(computer)),
+                        ),
+                    ),
+                ),
+            );
         const rows = computers.filter((computer) => {
             const state = live[computer.id];
             const lab = identities.labFor(identityQuery(computer));
@@ -460,8 +485,7 @@ export default function ComputersManagementTab() {
                     : 'no-user'
                 : 'unavailable';
             return (
-                (!statusFilter ||
-                    (state?.state ?? 'offline') === statusFilter) &&
+                (!statusFilter || statusFor(computer) === statusFilter) &&
                 (!locationFilter ||
                     JSON.stringify(locationFor(computer) || '') ===
                         locationFilter) &&
@@ -487,7 +511,7 @@ export default function ComputersManagementTab() {
         const value = (computer: VeyonComputer) => {
             const state = live[computer.id];
             if (sort.key === 'location') return locationFor(computer) || null;
-            if (sort.key === 'status') return state?.state ?? 'offline';
+            if (sort.key === 'status') return statusFor(computer);
             if (sort.key === 'user') {
                 return state?.state === 'online' && state.information.user.login
                     ? state.information.user.fullName ||
@@ -507,6 +531,7 @@ export default function ComputersManagementTab() {
         computers,
         deferredSearch,
         live,
+        fogHostsById,
         statusFilter,
         locationFilter,
         labFilter,
@@ -528,8 +553,19 @@ export default function ComputersManagementTab() {
             sort?.direction,
         ]),
     );
-    const onlineCount = Object.values(live).filter(
-        (value) => value.state === 'online',
+    const onlineCount = computers.filter(
+        (computer) =>
+            computerStatus(
+                live[computer.id],
+                fogHostsById.get(
+                    String(
+                        fogHostIdFor(
+                            computer,
+                            identities.lookup(identityQuery(computer)),
+                        ),
+                    ),
+                ),
+            ) === 'online',
     ).length;
     const loggedInCount = Object.values(live).filter(
         (value) =>
@@ -772,15 +808,33 @@ export default function ComputersManagementTab() {
         [],
     );
 
-    const wakeSelection = computers.filter((computer) => selected.includes(computer.id))
-        .map((computer) => ({ computer, identity: identities.lookup(identityQuery(computer)) }))
-        .filter((target): target is { computer: VeyonComputer; identity: DeviceIdentity } =>
-            target.identity !== null && wakeUnavailableReason(target.identity) === null);
+    const wakeSelection = computers
+        .filter((computer) => selected.includes(computer.id))
+        .map((computer) => ({
+            computer,
+            identity: identities.lookup(identityQuery(computer)),
+        }))
+        .filter(
+            (
+                target,
+            ): target is {
+                computer: VeyonComputer;
+                identity: DeviceIdentity;
+            } =>
+                target.identity !== null &&
+                wakeUnavailableReason(target.identity) === null,
+        );
 
     const wakeSelected = () => {
         if (bulkWaking || !wakeSelection.length) return;
-        const targets = [...new Map(wakeSelection.map(({ computer, identity }) =>
-            [identity.id, { id: identity.id, name: computer.name }])).values()];
+        const targets = [
+            ...new Map(
+                wakeSelection.map(({ computer, identity }) => [
+                    identity.id,
+                    { id: identity.id, name: computer.name },
+                ]),
+            ).values(),
+        ];
         const skipped = selected.length - wakeSelection.length;
         const send = async () => {
             setBulkWaking(true);
@@ -789,16 +843,27 @@ export default function ComputersManagementTab() {
                 // Keep router commands sequential rather than flooding its REST queue.
                 for (const target of targets) {
                     try {
-                        if (wakeScopeRef.current !== wakeScope) throw new Error('Session changed; wake cancelled');
+                        if (wakeScopeRef.current !== wakeScope)
+                            throw new Error('Session changed; wake cancelled');
                         await wakeDevice(target.id);
                         results.push({ ...target, success: true });
                     } catch (error) {
-                        results.push({ ...target, success: false, error: errorMessage(error) });
+                        results.push({
+                            ...target,
+                            success: false,
+                            error: errorMessage(error),
+                        });
                     }
                 }
-                reportCommandResults(results,
-                    ['Wake packets sent', 'Wake partially completed', 'Wake failed'],
-                    `${results.filter((result) => result.success).length}/${results.length} wake packets sent. ${skipped ? `${skipped} skipped. ` : ''}Startup not verified.`);
+                reportCommandResults(
+                    results,
+                    [
+                        'Wake packets sent',
+                        'Wake partially completed',
+                        'Wake failed',
+                    ],
+                    `${results.filter((result) => result.success).length}/${results.length} wake packets sent. ${skipped ? `${skipped} skipped. ` : ''}Startup not verified.`,
+                );
             } finally {
                 setBulkWaking(false);
             }
@@ -806,8 +871,18 @@ export default function ComputersManagementTab() {
         if (skipped) {
             modals.openConfirmModal({
                 title: 'Wake eligible computers only?',
-                children: <Text size='sm'>{wakeSelection.length} of {selected.length} selected computers have a known MAC and detected lab. The remaining {skipped} will be skipped. The server also verifies the lab interface before sending.</Text>,
-                labels: { confirm: `Wake ${targets.length} computers`, cancel: 'Cancel' },
+                children: (
+                    <Text size='sm'>
+                        {wakeSelection.length} of {selected.length} selected
+                        computers have a known MAC and detected lab. The
+                        remaining {skipped} will be skipped. The server also
+                        verifies the lab interface before sending.
+                    </Text>
+                ),
+                labels: {
+                    confirm: `Wake ${targets.length} computers`,
+                    cancel: 'Cancel',
+                },
                 onConfirm: () => void send(),
             });
         } else {
@@ -911,7 +986,7 @@ export default function ComputersManagementTab() {
                 metrics={[
                     { label: 'Directory', value: computers.length },
                     {
-                        label: 'Veyon connected',
+                        label: 'Online',
                         value: onlineCount,
                         accent: true,
                     },
@@ -920,21 +995,6 @@ export default function ComputersManagementTab() {
                 ]}
             />
 
-            <Group justify='space-between'>
-                <Text size='sm' role='status'>
-                    {selected.length} selected: {veyonSelection.length} Veyon
-                    eligible; {selectedFogHosts.length} FOG eligible. Service
-                    actions apply only to their eligible targets.
-                </Text>
-                <Button
-                    variant='subtle'
-                    size='xs'
-                    disabled={!selected.length}
-                    onClick={() => setSelected([])}
-                >
-                    Clear selection
-                </Button>
-            </Group>
             <Card withBorder radius='lg' p='sm'>
                 <Tabs defaultValue='veyon' keepMounted={false}>
                     <Tabs.List aria-label='Computer actions'>
@@ -949,6 +1009,8 @@ export default function ComputersManagementTab() {
                         <CommandDeck
                             embedded
                             selectedCount={veyonSelection.length}
+                            totalSelectedCount={selected.length}
+                            onClose={() => setSelected([])}
                             features={Object.values(live).flatMap((value) =>
                                 value.state === 'online'
                                     ? value.information.features
@@ -956,7 +1018,11 @@ export default function ComputersManagementTab() {
                             )}
                             onCommand={runCommand}
                             onConfirm={confirmCommand}
-                            wake={{ count: wakeSelection.length, busy: bulkWaking, onWake: wakeSelected }}
+                            wake={{
+                                count: wakeSelection.length,
+                                busy: bulkWaking,
+                                onWake: wakeSelected,
+                            }}
                         />
                     </Tabs.Panel>
                     <Tabs.Panel value='fog' pt='sm'>
@@ -1196,7 +1262,7 @@ export default function ComputersManagementTab() {
                                                 ['name', 'Computer'],
                                                 ['location', 'Location'],
                                                 ['user', 'User session'],
-                                                ['status', 'Veyon'],
+                                                ['status', 'Status'],
                                             ] as const
                                         ).map(([key, label]) => (
                                             <SortableTh
@@ -1216,15 +1282,14 @@ export default function ComputersManagementTab() {
                                                 }
                                             />
                                         ))}
-                                        <Table.Th>Reachability (FOG)</Table.Th>
-                                        <Table.Th>FOG image</Table.Th>
+                                        <Table.Th>Image</Table.Th>
                                         <Table.Th ta='right'>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
                                     {filteredComputers.length === 0 ? (
                                         <Table.Tr>
-                                            <Table.Td colSpan={8}>
+                                            <Table.Td colSpan={7}>
                                                 <Text ta='center' c='dimmed'>
                                                     No computers match the
                                                     current filters.
@@ -1530,6 +1595,7 @@ function ComputerRow({
 }) {
     const [waking, setWaking] = useState(false);
     const information = live?.state === 'online' ? live.information : null;
+    const status = computerStatus(live, fogHost);
     const fogHostId = fogHostIdFor(computer, identity);
     const wakeUnavailable = wakeUnavailableReason(identity);
     async function wake() {
@@ -1537,9 +1603,17 @@ function ComputerRow({
         setWaking(true);
         try {
             const result = await wakeDevice(identity.id);
-            notifications.show({ color: 'teal', title: `Wake requested for ${computer.name}`, message: result.message });
+            notifications.show({
+                color: 'teal',
+                title: `Wake requested for ${computer.name}`,
+                message: result.message,
+            });
         } catch (error) {
-            notifications.show({ color: 'red', title: 'Wake request failed', message: notificationError(error) });
+            notifications.show({
+                color: 'red',
+                title: 'Wake request failed',
+                message: notificationError(error),
+            });
         } finally {
             setWaking(false);
         }
@@ -1565,7 +1639,7 @@ function ComputerRow({
                 <Group gap='sm' wrap='nowrap'>
                     <ThemeIcon
                         variant='light'
-                        color={information ? 'teal' : 'gray'}
+                        color={status === 'online' ? 'teal' : 'gray'}
                     >
                         <IconDeviceDesktop size={17} />
                     </ThemeIcon>
@@ -1634,46 +1708,17 @@ function ComputerRow({
                 )}
             </Table.Td>
             <Table.Td>
-                {!veyonEligible ? (
-                    <Badge color='gray' variant='outline'>
-                        Not managed
-                    </Badge>
-                ) : live?.state === 'loading' ? (
-                    <Loader size='xs' />
-                ) : live?.state === 'online' ? (
+                {status === 'loading' ? (
+                    <Loader size='xs' aria-label='Checking status' />
+                ) : status === 'online' ? (
                     <Badge color='teal' variant='light'>
                         Online
                     </Badge>
                 ) : (
-                    <Tooltip
-                        label={
-                            live?.state === 'offline'
-                                ? live.error
-                                : 'Not checked'
-                        }
-                    >
-                        <Badge color='gray' variant='light'>
-                            Unavailable
-                        </Badge>
-                    </Tooltip>
+                    <Badge color='gray' variant='light'>
+                        Offline
+                    </Badge>
                 )}
-            </Table.Td>
-            <Table.Td>
-                <Tooltip
-                    label={
-                        fogHost?.pingstatustext ||
-                        'FOG port 445 probe; independent of Veyon authentication'
-                    }
-                >
-                    <Text size='sm' c='dimmed'>
-                        {fogHost?.pingstatuscode === 0 ||
-                        fogHost?.pingstatuscode === 111
-                            ? 'Reachable'
-                            : fogHost?.pingstatustext
-                              ? 'Not reachable'
-                              : 'Unknown'}
-                    </Text>
-                </Tooltip>
             </Table.Td>
             <Table.Td>
                 <Text size='sm'>
@@ -1688,6 +1733,7 @@ function ComputerRow({
                 <Group justify='flex-end' gap={4} wrap='nowrap'>
                     <Tooltip label='Open live view'>
                         <ActionIcon
+                            visibleFrom='md'
                             variant='subtle'
                             aria-label={`View ${computer.name}`}
                             onClick={onView}
@@ -1698,6 +1744,7 @@ function ComputerRow({
                     </Tooltip>
                     <Tooltip label='Computer details'>
                         <ActionIcon
+                            visibleFrom='md'
                             variant='subtle'
                             aria-label={`Inventory for ${computer.name}`}
                             onClick={onInventory}
@@ -1717,12 +1764,38 @@ function ComputerRow({
                         </Menu.Target>
                         <Menu.Dropdown>
                             <Menu.Item
-                                leftSection={waking ? <Loader size={16} /> : <IconPower size={16} />}
+                                hiddenFrom='md'
+                                leftSection={<IconEye size={16} />}
+                                onClick={onView}
+                                disabled={!veyonEligible || !information}
+                            >
+                                Open live view
+                            </Menu.Item>
+                            <Menu.Item
+                                hiddenFrom='md'
+                                leftSection={<IconInfoCircle size={16} />}
+                                onClick={onInventory}
+                            >
+                                Computer details
+                            </Menu.Item>
+                            <Menu.Item
+                                leftSection={
+                                    waking ? (
+                                        <Loader size={16} />
+                                    ) : (
+                                        <IconPower size={16} />
+                                    )
+                                }
                                 onClick={() => void wake()}
                                 disabled={waking || Boolean(wakeUnavailable)}
-                                title={wakeUnavailable ?? 'Send a wake packet through the lab MikroTik interface'}
+                                title={
+                                    wakeUnavailable ??
+                                    'Send a wake packet through the lab MikroTik interface'
+                                }
                             >
-                                {waking ? 'Sending wake packet...' : 'Wake on LAN'}
+                                {waking
+                                    ? 'Sending wake packet...'
+                                    : 'Wake on LAN'}
                             </Menu.Item>
                             <Menu.Item
                                 leftSection={<IconEdit size={16} />}
@@ -1753,6 +1826,8 @@ function ComputerRow({
 
 function CommandDeck({
     selectedCount,
+    totalSelectedCount = selectedCount,
+    onClose,
     features,
     onCommand,
     onConfirm,
@@ -1761,6 +1836,8 @@ function CommandDeck({
     embedded = false,
 }: {
     selectedCount: number;
+    totalSelectedCount?: number;
+    onClose?: () => void;
     features: VeyonFeature[];
     onCommand: (
         action: VeyonCommandAction,
@@ -1804,31 +1881,37 @@ function CommandDeck({
     );
 
     const controls = (
-        <Stack gap='xs' miw={0}>
+        <Stack gap='xs' miw={0} mx={targetName ? 0 : 'md'}>
             {!targetName ? (
-                <Group justify='space-between'>
-                    <Stack gap={0}>
-                        <Title order={4}>Veyon controls</Title>
-                        <Text size='sm' c='dimmed'>
+                <Group justify='space-between' wrap='nowrap'>
+                    <Stack gap={0} miw={0}>
+                        <Title order={4}>Controls</Title>
+                        <Text size='sm' c='dimmed' truncate>
                             {selectedCount
-                                ? `${selectedCount} target${selectedCount === 1 ? '' : 's'} armed`
-                                : 'Select computers to enable controls'}
+                                ? `${selectedCount} computer${selectedCount === 1 ? '' : 's'} selected`
+                                : 'Select computers to enable actions'}
+                        </Text>
+                        <Text size='xs' c='dimmed'>
+                            {selectedCount} of {totalSelectedCount} selected computers
+                            eligible for remote controls. Actions below affect only
+                            these computers.
                         </Text>
                     </Stack>
-                    <Badge
-                        variant='dot'
-                        color={selectedCount ? 'teal' : 'gray'}
-                    >
-                        {selectedCount} selected
-                    </Badge>
+                    {onClose && (
+                        <ActionIcon
+                            variant='subtle'
+                            color='gray'
+                            onClick={onClose}
+                            disabled={!totalSelectedCount}
+                            aria-label='Dismiss selection'
+                        >
+                            <IconX size={16} />
+                        </ActionIcon>
+                    )}
                 </Group>
             ) : null}
 
-            <Scroller
-                startControlProps={{ 'aria-label': 'Scroll actions left' }}
-                endControlProps={{ 'aria-label': 'Scroll actions right' }}
-            >
-                <Group gap='xs' wrap='nowrap'>
+                <Group gap='xs' wrap='wrap'>
                     <LockControl
                         label='Screen lock'
                         icon={IconLock}
@@ -1888,12 +1971,14 @@ function CommandDeck({
                             )
                         }
                     />
-                    <Menu position='bottom-start' shadow='md'>
+                    <Menu position='bottom-start' shadow='md' width={220} withinPortal>
                         <Menu.Target>
                             <Button
                                 size='sm'
                                 variant='default'
                                 disabled={disabled && !wake?.count}
+                                aria-label='More actions'
+                                leftSection={<IconDots size={16} />}
                                 rightSection={<IconChevronDown size={14} />}
                                 style={{ flexShrink: 0 }}
                             >
@@ -1901,14 +1986,23 @@ function CommandDeck({
                             </Button>
                         </Menu.Target>
                         <Menu.Dropdown>
+                            <Menu.Label>Actions</Menu.Label>
                             {wake ? (
                                 <Menu.Item
-                                    leftSection={wake.busy ? <Loader size={16} /> : <IconPower size={16} />}
+                                    leftSection={
+                                        wake.busy ? (
+                                            <Loader size={16} />
+                                        ) : (
+                                            <IconPower size={16} />
+                                        )
+                                    }
                                     disabled={wake.busy || !wake.count}
                                     onClick={wake.onWake}
                                     title='Wake selected computers through MikroTik, independently of Veyon'
                                 >
-                                    {wake.busy ? 'Sending wake packets...' : `Wake on LAN (${wake.count})`}
+                                    {wake.busy
+                                        ? 'Sending wake packets...'
+                                        : `Wake on LAN (${wake.count})`}
                                 </Menu.Item>
                             ) : null}
                             {(
@@ -1924,7 +2018,7 @@ function CommandDeck({
                                     key={value}
                                     leftSection={<Icon size={16} />}
                                     disabled={disabled}
-                                    onClick={() => setMode(value)}
+                                    onClick={() => setMode((current) => current === value ? null : value)}
                                 >
                                     {label}
                                 </Menu.Item>
@@ -1932,24 +2026,14 @@ function CommandDeck({
                         </Menu.Dropdown>
                     </Menu>
                 </Group>
-            </Scroller>
 
             {mode && !disabled ? (
                 <Stack gap='xs'>
-                    <Group justify='flex-end'>
-                        <ActionIcon
-                            variant='subtle'
-                            color='gray'
-                            aria-label='Close command panel'
-                            onClick={() => setMode(null)}
-                        >
-                            <IconX size={16} />
-                        </ActionIcon>
-                    </Group>
                     {mode === 'message' ? (
                         <CommandForm
                             title='Send a text message'
                             icon={IconMessage}
+                            onClose={() => setMode(null)}
                         >
                             <Textarea
                                 label='Message'
@@ -1973,7 +2057,7 @@ function CommandDeck({
                         </CommandForm>
                     ) : null}
                     {mode === 'login' ? (
-                        <CommandForm title='Log in a user' icon={IconUser}>
+                        <CommandForm title='Log in a user' icon={IconUser} onClose={() => setMode(null)}>
                             <TextInput
                                 label='Username'
                                 value={username}
@@ -2005,6 +2089,7 @@ function CommandDeck({
                         <CommandForm
                             title='Run program or system command'
                             icon={IconCommand}
+                            onClose={() => setMode(null)}
                         >
                             <TextInput
                                 label='Executable and arguments'
@@ -2028,7 +2113,7 @@ function CommandDeck({
                         </CommandForm>
                     ) : null}
                     {mode === 'website' ? (
-                        <CommandForm title='Open website' icon={IconBrowser}>
+                        <CommandForm title='Open website' icon={IconBrowser} onClose={() => setMode(null)}>
                             <TextInput
                                 type='url'
                                 label='Website URL'
@@ -2054,6 +2139,7 @@ function CommandDeck({
                         <CommandForm
                             title='Installed Veyon feature'
                             icon={IconBrandWindows}
+                            onClose={() => setMode(null)}
                         >
                             <Autocomplete
                                 label='Feature UID'
@@ -2154,10 +2240,15 @@ function CommandDeck({
             ) : null}
         </Stack>
     );
-    return targetName || embedded ? (
+    return targetName ? (
         controls
     ) : (
-        <Card withBorder radius='lg' p='sm' miw={0}>
+        <Card
+            withBorder={!embedded}
+            p={embedded ? 0 : 'sm'}
+            bg={embedded ? 'transparent' : undefined}
+            miw={0}
+        >
             {controls}
         </Card>
     );
@@ -2239,22 +2330,35 @@ function ControlButton({
 function CommandForm({
     title,
     icon: Icon,
+    onClose,
     children,
 }: {
     title: string;
     icon: typeof IconCommand;
+    onClose: () => void;
     children: ReactNode;
 }) {
     return (
-        <Paper bg='var(--mantine-color-default-hover)' p='md' radius='md'>
+        <Card p='sm' mt='xs' withBorder>
             <Stack gap='sm'>
-                <Group gap='xs'>
-                    <Icon size={18} />
-                    <Text fw={600}>{title}</Text>
+                <Group justify='space-between' wrap='nowrap'>
+                    <Group gap='xs' wrap='nowrap'>
+                        <Icon size={16} />
+                        <Text fw={600} size='sm'>{title}</Text>
+                    </Group>
+                    <ActionIcon
+                        size='xs'
+                        variant='subtle'
+                        color='gray'
+                        onClick={onClose}
+                        aria-label='Close command panel'
+                    >
+                        <IconX size={12} />
+                    </ActionIcon>
                 </Group>
                 {children}
             </Stack>
-        </Paper>
+        </Card>
     );
 }
 

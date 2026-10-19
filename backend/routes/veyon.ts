@@ -551,9 +551,13 @@ veyonRouter.get('/veyon/information/stream', (c) => {
             });
             return writes;
         };
-        const sanitizedError = (error: unknown) => error instanceof Error &&
-            (error.name === 'TimeoutError' || error.name === 'AbortError')
-            ? 'Veyon connection timed out' : 'Veyon request failed';
+        const sanitizedError = (error: unknown) =>
+            error instanceof VeyonApiError && error.status === 429
+                ? 'Live status checks are unavailable because the connection limit was reached. Retrying automatically; displayed statuses may be out of date.'
+                : error instanceof VeyonApiError && (error.code === 'VEYON_BUSY' || error.code === 'VEYON_CONNECTION_LIMIT')
+                  ? 'Live status checks are queued at capacity. Retrying automatically; displayed statuses may be out of date.'
+                : error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+                  ? 'Veyon connection timed out' : 'Veyon request failed';
         const heartbeat = (async () => {
             while (!signal.aborted) {
                 await sleep(15_000);
@@ -601,21 +605,29 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                         // Drain every IP check before starting any hostname check.
                         for (const phase of [ipTargets, hostnameTargets]) {
                             let next = 0;
+                            let phaseError: unknown;
                             await Promise.all(Array.from({ length: Math.min(6, phase.length) }, async () => {
-                                while (!signal.aborted) {
+                                while (!signal.aborted && !phaseError) {
                                     const computer = phase[next++];
                                     if (!computer) return;
                                     let data;
                                     try {
                                         const information = await pending(client.information(computer.host, signal));
                                         data = { computerId: computer.id, state: 'online', information };
-                                    } catch (error) {
-                                        if (signal.aborted) return;
-                                        data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
+                                     } catch (error) {
+                                         if (signal.aborted) return;
+                                         // Proxy saturation says nothing about this computer's status.
+                                         // Keep prior observations and report the service error instead.
+                                         if (error instanceof VeyonApiError && (error.status === 429 || error.code === 'VEYON_BUSY' || error.code === 'VEYON_CONNECTION_LIMIT')) {
+                                             phaseError = error;
+                                             return;
+                                         }
+                                         data = { computerId: computer.id, state: 'offline', error: sanitizedError(error) };
                                     }
                                     await write('information', data);
                                 }
                             }));
+                            if (phaseError) throw phaseError;
                         }
                     } finally {
                         await locations;

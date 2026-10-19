@@ -88,6 +88,7 @@ type Connection = {
     organizationId: string;
     userId: string;
     host: string;
+    inFlight: number;
     dispose: (signal?: AbortSignal) => Promise<void>;
 };
 
@@ -104,6 +105,84 @@ function generation(organizationId: string) {
     return generations.get(organizationId) ?? 0;
 }
 const IDLE_RECONNECT_MS = 50_000;
+const MAX_CONNECTIONS = 256;
+const MAX_REQUESTS = 8;
+const MAX_QUEUED_REQUESTS = 256;
+let activeRequests = 0;
+const requestQueue: Array<() => void> = [];
+let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+
+// One process-wide budget covers every endpoint, user and screenshot worker.
+function acquireRequest(signal: AbortSignal): Promise<() => void> {
+    signal.throwIfAborted();
+    if (activeRequests >= MAX_REQUESTS && requestQueue.length >= MAX_QUEUED_REQUESTS) {
+        return Promise.reject(new VeyonApiError('Veyon request queue is full', 503, 'VEYON_BUSY'));
+    }
+    return new Promise((resolve, reject) => {
+        const grant = () => {
+            signal.removeEventListener('abort', abort);
+            activeRequests += 1;
+            let released = false;
+            resolve(() => {
+                if (released) return;
+                released = true;
+                activeRequests -= 1;
+                requestQueue.shift()?.();
+            });
+        };
+        const abort = () => {
+            const index = requestQueue.indexOf(grant);
+            if (index !== -1) requestQueue.splice(index, 1);
+            signal.removeEventListener('abort', abort);
+            reject(signal.reason);
+        };
+        if (activeRequests < MAX_REQUESTS) grant();
+        else {
+            requestQueue.push(grant);
+            signal.addEventListener('abort', abort, { once: true });
+        }
+    });
+}
+
+function removeConnection(key: string, connection: Connection) {
+    connections.delete(key);
+    scheduleConnectionCleanup();
+    void connection.dispose().catch(() => undefined);
+}
+
+function sweepConnections() {
+    const now = Date.now();
+    for (const [key, connection] of connections) {
+        if (!connection.inFlight && (connection.validUntil <= now + 5_000 || now - connection.lastUsed >= IDLE_RECONNECT_MS)) {
+            removeConnection(key, connection);
+        }
+    }
+}
+
+function scheduleConnectionCleanup() {
+    if (!connections.size) {
+        clearTimeout(cleanupTimer);
+        cleanupTimer = undefined;
+        return;
+    }
+    if (cleanupTimer) return;
+    cleanupTimer = setTimeout(() => {
+        cleanupTimer = undefined;
+        sweepConnections();
+        scheduleConnectionCleanup();
+    }, 5_000);
+    cleanupTimer.unref();
+}
+
+function reserveConnection() {
+    sweepConnections();
+    if (connections.size + pendingConnections.size < MAX_CONNECTIONS) return;
+    const oldest = [...connections.entries()]
+        .filter(([, connection]) => !connection.inFlight)
+        .sort(([, a], [, b]) => a.lastUsed - b.lastUsed)[0];
+    if (!oldest) throw new VeyonApiError('Veyon connection cache is full', 503, 'VEYON_CONNECTION_LIMIT');
+    removeConnection(...oldest);
+}
 
 type VeyonConfigRow = typeof veyonConfig.$inferSelect;
 const configCache = new Map<
@@ -144,6 +223,7 @@ export function clearVeyonConnections(organizationId: string) {
             pending.controller.abort(new VeyonApiError('Veyon configuration changed', 409, 'VEYON_CONFIG_CHANGED'));
         }
     }
+    scheduleConnectionCleanup();
 }
 
 function connectionKey(organizationId: string, userId: string, host: string) {
@@ -233,9 +313,31 @@ export class VeyonClient {
 
     // Buffer the body within the deadline, including framebuffer bytes. Returning
     // a live fetch Response would let body reads escape the operation's timeout.
-    private async request(path: string, init: RequestInit, signal: AbortSignal, maxBytes?: number) {
+    private async request(path: string, init: RequestInit, signal: AbortSignal, maxBytes?: number, connection?: Connection) {
         signal.throwIfAborted();
+        if (connection) {
+            // Selection awaits authentication; an LRU eviction may have won that race.
+            if (connections.get(connectionKey(this.organizationId, this.userId, connection.host)) !== connection) {
+                throw new VeyonApiError('Veyon connection was released before use', 503, 'VEYON_BUSY');
+            }
+            connection.inFlight += 1;
+        }
+        const unpin = () => {
+            if (connection) {
+                connection.inFlight -= 1;
+                connection.lastUsed = Date.now();
+            }
+        };
+        let release: () => void;
+        try {
+            release = await acquireRequest(signal);
+        } catch (error) {
+            unpin();
+            throw error;
+        }
         const result = (async () => {
+            signal.throwIfAborted();
+            if (init.method !== 'DELETE') this.assertCurrent();
             const response = await fetch(this.url(path), requestOptions(this.config, { ...init, signal }));
             let body: ArrayBuffer;
             if (maxBytes !== undefined && response.body) {
@@ -287,7 +389,8 @@ export class VeyonClient {
             });
             if (maxBytes !== undefined) Object.assign(buffered, { receivedBytes: body.byteLength });
             return buffered;
-        })();
+        })().finally(() => { unpin(); release(); });
+        // Keep the slot until the actual transport settles, even if this caller aborts.
         return abortable(result, signal);
     }
 
@@ -356,9 +459,10 @@ export class VeyonClient {
         }
         const connection: Connection = {
             uid, validUntil, lastUsed: Date.now(), organizationId: this.organizationId,
-            userId: this.userId, host, dispose: (callerSignal) => this.dispose(host, uid, callerSignal),
+            userId: this.userId, host, inFlight: 0, dispose: (callerSignal) => this.dispose(host, uid, callerSignal),
         };
         connections.set(connectionKey(this.organizationId, this.userId, host), connection);
+        scheduleConnectionCleanup();
         veyonLogger.info('Veyon connection authenticated for {host}', { host, organizationId: this.organizationId });
         return connection;
     }
@@ -378,11 +482,13 @@ export class VeyonClient {
             return existing;
         }
         if (existing) {
+            if (existing.inFlight) throw new VeyonApiError('Veyon connection is still in use', 503, 'VEYON_BUSY');
             connections.delete(key);
             void existing.dispose().catch(() => undefined);
         }
         let pending = pendingConnections.get(key);
         if (!pending) {
+            reserveConnection();
             const controller = new AbortController();
             pending = { organizationId: this.organizationId, controller, waiters: 0, promise: undefined! };
             const entry = pending;
@@ -431,7 +537,7 @@ export class VeyonClient {
                 }
                 let response: Response;
                 try {
-                    response = await this.request(path, { ...init, headers }, signal, maxBytes === undefined ? undefined : maxBytes - receivedBytes);
+                    response = await this.request(path, { ...init, headers }, signal, maxBytes === undefined ? undefined : maxBytes - receivedBytes, connection);
                 } catch (error) {
                     if (maxBytes !== undefined && typeof error === 'object' && error !== null && Object.isExtensible(error)) {
                         const partial = 'receivedBytes' in error && typeof error.receivedBytes === 'number' ? error.receivedBytes : 0;
@@ -474,6 +580,7 @@ export class VeyonClient {
         }
         const connection = connections.get(key);
         connections.delete(key);
+        scheduleConnectionCleanup();
         await connection?.dispose(signal);
     }
 
@@ -551,7 +658,7 @@ export function listOpenConnections(organizationId: string, userId: string) {
                 connection.organizationId === organizationId &&
                 connection.userId === userId,
         )
-        .map(({ uid: _uid, organizationId: _org, userId: _user, dispose: _dispose, ...connection }) =>
+        .map(({ uid: _uid, organizationId: _org, userId: _user, dispose: _dispose, inFlight: _inFlight, ...connection }) =>
             connection,
         );
 }
