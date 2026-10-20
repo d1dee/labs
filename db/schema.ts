@@ -1,6 +1,4 @@
 import { relations } from 'drizzle-orm';
-import type { DeviceDirectory } from '../frontend/src/api/devices';
-import type { ComputerInventorySnapshot } from '../backend/computer-inventory';
 import {
     index,
     integer,
@@ -9,131 +7,37 @@ import {
     text,
     uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
-
-// Users table — stores auth users with username support
-export const user = sqliteTable(
-    'user',
-    {
-        id: text('id').primaryKey(),
-        name: text('name').notNull(),
-        email: text('email').notNull(),
-        emailVerified: integer('emailVerified', { mode: 'boolean' }).notNull(),
-        username: text('username'),
-        displayUsername: text('displayUsername'),
-        image: text('image'),
-        lastLoginAt: integer('lastLoginAt', { mode: 'timestamp' }),
-        organizationId: text('organizationId').references(
-            () => organization.id,
-            {
-                onDelete: 'set null',
-            },
-        ),
-        createdAt: integer('createdAt', { mode: 'timestamp' })
-            .notNull()
-            .$defaultFn(() => new Date()),
-        updatedAt: integer('updatedAt', { mode: 'timestamp' })
-            .notNull()
-            .$defaultFn(() => new Date()),
-    },
-    (t) => [
-        index('user_email_idx').on(t.email),
-        index('user_username_idx').on(t.username),
-        index('user_organizationId_idx').on(t.organizationId),
-    ],
-);
+import type { ComputerInventorySnapshot } from '../backend/computer-inventory';
+import type { DeviceDirectory } from '../frontend/src/api/devices';
+import { user } from './auth-schema';
 
 // Organizations table — stores organization details
-export const organization = sqliteTable('organization', {
-    id: text('id')
-        .primaryKey()
-        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '').slice(0, 12)),
-    name: text('name').notNull(),
-    phoneNumber: text('phoneNumber').notNull(),
-    email: text('email').notNull(),
-    // Immutable creator identity, independent of the creator's current membership.
-    createdByUserId: text('createdByUserId'),
-    joinKey: text('joinKey')
-        .notNull()
-        .$defaultFn(() => crypto.randomUUID().replace(/-/g, '')),
-    createdAt: integer('createdAt', { mode: 'timestamp' })
-        .notNull()
-        .$defaultFn(() => new Date())
-        .$defaultFn(() => new Date()),
-    updatedAt: integer('updatedAt', { mode: 'timestamp' })
-        .notNull()
-        .$defaultFn(() => new Date())
-        .$defaultFn(() => new Date()),
-}, (t) => [index('organization_createdByUserId_idx').on(t.createdByUserId)]);
-
-// Accounts table — stores OAuth/credential provider links
-export const account = sqliteTable(
-    'account',
+export const organization = sqliteTable(
+    'organization',
     {
-        id: text('id').primaryKey(),
-        accountId: text('accountId').notNull(),
-        providerId: text('providerId').notNull(),
-        userId: text('userId')
+        id: text('id')
+            .primaryKey()
+            .$defaultFn(() =>
+                crypto.randomUUID().replace(/-/g, '').slice(0, 12),
+            ),
+        name: text('name').notNull(),
+        phoneNumber: text('phoneNumber').notNull(),
+        email: text('email').notNull(),
+        // Immutable creator identity, independent of the creator's current membership.
+        createdByUserId: text('createdByUserId'),
+        joinKey: text('joinKey')
             .notNull()
-            .references(() => user.id, { onDelete: 'cascade' }),
-        password: text('password'),
-        access_token: text('access_token'),
-        refresh_token: text('refresh_token'),
-        expires_at: integer('expires_at'),
-        id_token: text('id_token'),
-        scope: text('scope'),
-        session_id: text('session_id').references(() => session.id, {
-            onDelete: 'cascade',
-        }),
+            .$defaultFn(() => crypto.randomUUID().replace(/-/g, '')),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .notNull()
+            .$defaultFn(() => new Date())
             .$defaultFn(() => new Date()),
         updatedAt: integer('updatedAt', { mode: 'timestamp' })
             .notNull()
+            .$defaultFn(() => new Date())
             .$defaultFn(() => new Date()),
     },
-    (t) => [
-        index('account_userId_idx').on(t.userId),
-        index('account_provider_idx').on(t.providerId, t.accountId),
-    ],
-);
-
-// Sessions table — stores auth sessions
-export const session = sqliteTable(
-    'session',
-    {
-        id: text('id').primaryKey(),
-        expiresAt: integer('expiresAt', { mode: 'timestamp' }).notNull(),
-        token: text('token').notNull(),
-        ipAddress: text('ipAddress'),
-        userAgent: text('userAgent'),
-        userId: text('userId')
-            .notNull()
-            .references(() => user.id, { onDelete: 'cascade' }),
-        createdAt: integer('createdAt', { mode: 'timestamp' })
-            .notNull()
-            .$defaultFn(() => new Date()),
-        updatedAt: integer('updatedAt', { mode: 'timestamp' })
-            .notNull()
-            .$defaultFn(() => new Date()),
-    },
-    (t) => [
-        index('session_token_idx').on(t.token),
-        index('session_userId_idx').on(t.userId),
-    ],
-);
-
-// Verifications table — stores email verification tokens
-export const verification = sqliteTable(
-    'verification',
-    {
-        id: text('id').primaryKey(),
-        identifier: text('identifier').notNull(),
-        value: text('value').notNull(),
-        expiresAt: integer('expiresAt', { mode: 'timestamp' }).notNull(),
-        createdAt: integer('createdAt', { mode: 'timestamp' }),
-        updatedAt: integer('updatedAt', { mode: 'timestamp' }),
-    },
-    (t) => [index('verification_identifier_idx').on(t.identifier)],
+    (t) => [index('organization_createdByUserId_idx').on(t.createdByUserId)],
 );
 
 // Activation history table — stores lab activation/deactivation events
@@ -143,9 +47,12 @@ export const activationHistory = sqliteTable(
         id: text('id').primaryKey(),
         labId: text('labId').notNull(),
         enabled: integer('enabled', { mode: 'boolean' }).notNull(),
-        triggeredBy: text('triggeredBy')
-            .references(() => user.id, { onDelete: 'set null' }),
-        source: text('source', { enum: ['app', 'external'] }).notNull().default('app'),
+        triggeredBy: text('triggeredBy').references(() => user.id, {
+            onDelete: 'set null',
+        }),
+        source: text('source', { enum: ['app', 'external'] })
+            .notNull()
+            .default('app'),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .notNull()
             .$defaultFn(() => new Date()),
@@ -235,7 +142,9 @@ export const piholeConfig = sqliteTable(
             .references(() => organization.id, { onDelete: 'cascade' }),
         url: text('url').notNull(),
         password: text('password').notNull(),
-        verifyTls: integer('verifyTls', { mode: 'boolean' }).notNull().default(true),
+        verifyTls: integer('verifyTls', { mode: 'boolean' })
+            .notNull()
+            .default(true),
 
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .$defaultFn(() => new Date())
@@ -303,9 +212,7 @@ export const veyonConfig = sqliteTable(
             .$defaultFn(() => new Date())
             .notNull(),
     },
-    (t) => [
-        uniqueIndex('veyonConfig_organizationId_idx').on(t.organizationId),
-    ],
+    (t) => [uniqueIndex('veyonConfig_organizationId_idx').on(t.organizationId)],
 );
 
 // Manual Veyon targets and legacy stable identity links. FOG-owned identity
@@ -335,10 +242,7 @@ export const veyonComputer = sqliteTable(
     },
     (t) => [
         index('veyonComputer_organizationId_idx').on(t.organizationId),
-        uniqueIndex('veyonComputer_org_host_idx').on(
-            t.organizationId,
-            t.host,
-        ),
+        uniqueIndex('veyonComputer_org_host_idx').on(t.organizationId, t.host),
     ],
 );
 
@@ -373,29 +277,43 @@ export const lab = sqliteTable(
 
 // Request-driven device observations; no router credentials are stored here.
 export const organizationDeviceCache = sqliteTable('organizationDeviceCache', {
-    organizationId: text('organizationId').primaryKey()
+    organizationId: text('organizationId')
+        .primaryKey()
         .references(() => organization.id, { onDelete: 'cascade' }),
     signature: text('signature').notNull(),
     expiresAt: integer('expiresAt').notNull(),
-    snapshot: text('snapshot', { mode: 'json' }).$type<DeviceDirectory>().notNull(),
+    snapshot: text('snapshot', { mode: 'json' })
+        .$type<DeviceDirectory>()
+        .notNull(),
 });
 
 // Complete FOG identity snapshots do not expire: an outage must not erase targets.
-export const organizationComputerInventory = sqliteTable('organizationComputerInventory', {
-    organizationId: text('organizationId').primaryKey()
-        .references(() => organization.id, { onDelete: 'cascade' }),
-    source: text('source').notNull(),
-    snapshot: text('snapshot', { mode: 'json' }).$type<ComputerInventorySnapshot>().notNull(),
-});
+export const organizationComputerInventory = sqliteTable(
+    'organizationComputerInventory',
+    {
+        organizationId: text('organizationId')
+            .primaryKey()
+            .references(() => organization.id, { onDelete: 'cascade' }),
+        source: text('source').notNull(),
+        snapshot: text('snapshot', { mode: 'json' })
+            .$type<ComputerInventorySnapshot>()
+            .notNull(),
+    },
+);
 
 // Durable lab identity only; never retain network addresses or hostname aliases.
-export const organizationDeviceLab = sqliteTable('organizationDeviceLab', {
-    organizationId: text('organizationId').notNull()
-        .references(() => organization.id, { onDelete: 'cascade' }),
-    fingerprint: text('fingerprint').notNull(),
-    labId: text('labId').references(() => lab.id, { onDelete: 'set null' }),
-    observedAt: integer('observedAt').notNull().default(0),
-}, (t) => [primaryKey({ columns: [t.organizationId, t.fingerprint] })]);
+export const organizationDeviceLab = sqliteTable(
+    'organizationDeviceLab',
+    {
+        organizationId: text('organizationId')
+            .notNull()
+            .references(() => organization.id, { onDelete: 'cascade' }),
+        fingerprint: text('fingerprint').notNull(),
+        labId: text('labId').references(() => lab.id, { onDelete: 'set null' }),
+        observedAt: integer('observedAt').notNull().default(0),
+    },
+    (t) => [primaryKey({ columns: [t.organizationId, t.fingerprint] })],
+);
 
 export const firewallConfigRelations = relations(
     firewallConfig,
