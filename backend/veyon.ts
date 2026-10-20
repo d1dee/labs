@@ -1,7 +1,7 @@
-import { createPrivateKey } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { createPrivateKey } from 'node:crypto';
 import { db } from '../db/database';
-import { veyonConfig } from '../db/schema';
+import { veyonConfig } from '../db/index';
 import { getLogger } from './logger';
 
 const veyonLogger = getLogger(['labs', 'veyon']);
@@ -48,7 +48,8 @@ export function isInvalidSessionError(error: unknown): boolean {
     return (
         error instanceof VeyonApiError &&
         (error.upstreamCode === 2 ||
-            (error.upstreamCode === undefined && error.status === 401 &&
+            (error.upstreamCode === undefined &&
+                error.status === 401 &&
                 error.code !== 'VEYON_AUTH_FAILED'))
     );
 }
@@ -66,7 +67,11 @@ export function assertValidPrivateKeyPem(pem: string) {
     try {
         createPrivateKey(pem);
     } catch {
-        throw new VeyonApiError('PEM private key could not be parsed', 400, 'INVALID_KEY');
+        throw new VeyonApiError(
+            'PEM private key could not be parsed',
+            400,
+            'INVALID_KEY',
+        );
     }
 }
 
@@ -118,7 +123,13 @@ let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
 function acquireInformation(signal: AbortSignal): Promise<() => void> {
     signal.throwIfAborted();
     if (informationActive && informationQueue.length >= MAX_QUEUED_REQUESTS) {
-        return Promise.reject(new VeyonApiError('Veyon information queue is full', 503, 'VEYON_BUSY'));
+        return Promise.reject(
+            new VeyonApiError(
+                'Veyon information queue is full',
+                503,
+                'VEYON_BUSY',
+            ),
+        );
     }
     return new Promise((resolve, reject) => {
         const grant = () => {
@@ -146,8 +157,13 @@ function acquireInformation(signal: AbortSignal): Promise<() => void> {
 // One process-wide budget covers every endpoint, user and screenshot worker.
 function acquireRequest(signal: AbortSignal): Promise<() => void> {
     signal.throwIfAborted();
-    if (activeRequests >= MAX_REQUESTS && requestQueue.length >= MAX_QUEUED_REQUESTS) {
-        return Promise.reject(new VeyonApiError('Veyon request queue is full', 503, 'VEYON_BUSY'));
+    if (
+        activeRequests >= MAX_REQUESTS &&
+        requestQueue.length >= MAX_QUEUED_REQUESTS
+    ) {
+        return Promise.reject(
+            new VeyonApiError('Veyon request queue is full', 503, 'VEYON_BUSY'),
+        );
     }
     return new Promise((resolve, reject) => {
         const grant = () => {
@@ -184,7 +200,11 @@ function removeConnection(key: string, connection: Connection) {
 function sweepConnections() {
     const now = Date.now();
     for (const [key, connection] of connections) {
-        if (!connection.inFlight && (connection.validUntil <= now + 5_000 || now - connection.lastUsed >= IDLE_RECONNECT_MS)) {
+        if (
+            !connection.inFlight &&
+            (connection.validUntil <= now + 5_000 ||
+                now - connection.lastUsed >= IDLE_RECONNECT_MS)
+        ) {
             removeConnection(key, connection);
         }
     }
@@ -211,7 +231,12 @@ function reserveConnection() {
     const oldest = [...connections.entries()]
         .filter(([, connection]) => !connection.inFlight)
         .sort(([, a], [, b]) => a.lastUsed - b.lastUsed)[0];
-    if (!oldest) throw new VeyonApiError('Veyon connection cache is full', 503, 'VEYON_CONNECTION_LIMIT');
+    if (!oldest)
+        throw new VeyonApiError(
+            'Veyon connection cache is full',
+            503,
+            'VEYON_CONNECTION_LIMIT',
+        );
     removeConnection(...oldest);
 }
 
@@ -222,7 +247,9 @@ const configCache = new Map<
 >();
 const CONFIG_CACHE_TTL_MS = 5_000;
 
-export async function getVeyonConfigForOrg(organizationId: string): Promise<VeyonConfigRow | undefined> {
+export async function getVeyonConfigForOrg(
+    organizationId: string,
+): Promise<VeyonConfigRow | undefined> {
     // The framebuffer route polls this on every frame (~16×/s per wall);
     // a short TTL keeps the hot path off the database. Settings saves call
     // clearVeyonConnections, which drops this entry immediately.
@@ -235,7 +262,10 @@ export async function getVeyonConfigForOrg(organizationId: string): Promise<Veyo
     if (generation(organizationId) !== startedGeneration) {
         return getVeyonConfigForOrg(organizationId);
     }
-    configCache.set(organizationId, { config, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+    configCache.set(organizationId, {
+        config,
+        expiresAt: Date.now() + CONFIG_CACHE_TTL_MS,
+    });
     return config;
 }
 
@@ -251,7 +281,13 @@ export function clearVeyonConnections(organizationId: string) {
     for (const [key, pending] of pendingConnections) {
         if (pending.organizationId === organizationId) {
             pendingConnections.delete(key);
-            pending.controller.abort(new VeyonApiError('Veyon configuration changed', 409, 'VEYON_CONFIG_CHANGED'));
+            pending.controller.abort(
+                new VeyonApiError(
+                    'Veyon configuration changed',
+                    409,
+                    'VEYON_CONFIG_CHANGED',
+                ),
+            );
         }
     }
     scheduleConnectionCleanup();
@@ -261,7 +297,10 @@ function connectionKey(organizationId: string, userId: string, host: string) {
     return JSON.stringify([organizationId, userId, host]);
 }
 
-function requestOptions(config: VeyonCredentials, init: RequestInit): RequestInit {
+function requestOptions(
+    config: VeyonCredentials,
+    init: RequestInit,
+): RequestInit {
     if (config.verifyTls) return init;
     return { ...init, tls: { rejectUnauthorized: false } } as RequestInit;
 }
@@ -273,10 +312,18 @@ async function readError(response: Response) {
             message?: string;
         };
         return {
-            message: typeof body.error === 'string' ? body.error :
-                body.error?.message || body.message || `HTTP ${response.status}`,
-            upstreamCode: typeof body.error === 'object' && body.error !== null &&
-                typeof body.error.code === 'number' ? body.error.code : undefined,
+            message:
+                typeof body.error === 'string'
+                    ? body.error
+                    : body.error?.message ||
+                      body.message ||
+                      `HTTP ${response.status}`,
+            upstreamCode:
+                typeof body.error === 'object' &&
+                body.error !== null &&
+                typeof body.error.code === 'number'
+                    ? body.error.code
+                    : undefined,
         };
     } catch {
         return { message: `HTTP ${response.status}`, upstreamCode: undefined };
@@ -292,17 +339,28 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     return new Promise((resolve, reject) => {
         const abort = () => reject(signal.reason);
         signal.addEventListener('abort', abort, { once: true });
-        promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+        promise
+            .then(resolve, reject)
+            .finally(() => signal.removeEventListener('abort', abort));
     });
 }
 
-async function withDeadline<T>(signal: AbortSignal | null | undefined, timeout: number,
-    operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withDeadline<T>(
+    signal: AbortSignal | null | undefined,
+    timeout: number,
+    operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
     if (signal?.aborted) abort();
     else signal?.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(() => controller.abort(new DOMException('Veyon request timed out', 'TimeoutError')), timeout);
+    const timer = setTimeout(
+        () =>
+            controller.abort(
+                new DOMException('Veyon request timed out', 'TimeoutError'),
+            ),
+        timeout,
+    );
     try {
         controller.signal.throwIfAborted();
         return await operation(controller.signal);
@@ -338,18 +396,40 @@ export class VeyonClient {
 
     private assertCurrent() {
         if (this.generation !== generation(this.organizationId)) {
-            throw new VeyonApiError('Veyon configuration changed', 409, 'VEYON_CONFIG_CHANGED');
+            throw new VeyonApiError(
+                'Veyon configuration changed',
+                409,
+                'VEYON_CONFIG_CHANGED',
+            );
         }
     }
 
     // Buffer the body within the deadline, including framebuffer bytes. Returning
     // a live fetch Response would let body reads escape the operation's timeout.
-    private async request(path: string, init: RequestInit, signal: AbortSignal, maxBytes?: number, connection?: Connection) {
+    private async request(
+        path: string,
+        init: RequestInit,
+        signal: AbortSignal,
+        maxBytes?: number,
+        connection?: Connection,
+    ) {
         signal.throwIfAborted();
         if (connection) {
             // Selection awaits authentication; an LRU eviction may have won that race.
-            if (connections.get(connectionKey(this.organizationId, this.userId, connection.host)) !== connection) {
-                throw new VeyonApiError('Veyon connection was released before use', 503, 'VEYON_BUSY');
+            if (
+                connections.get(
+                    connectionKey(
+                        this.organizationId,
+                        this.userId,
+                        connection.host,
+                    ),
+                ) !== connection
+            ) {
+                throw new VeyonApiError(
+                    'Veyon connection was released before use',
+                    503,
+                    'VEYON_BUSY',
+                );
             }
             connection.inFlight += 1;
         }
@@ -369,14 +449,21 @@ export class VeyonClient {
         const result = (async () => {
             signal.throwIfAborted();
             if (init.method !== 'DELETE') this.assertCurrent();
-            const response = await fetch(this.url(path), requestOptions(this.config, { ...init, signal }));
+            const response = await fetch(
+                this.url(path),
+                requestOptions(this.config, { ...init, signal }),
+            );
             let body: ArrayBuffer;
             if (maxBytes !== undefined && response.body) {
                 const reader = response.body.getReader();
                 const chunks: Uint8Array[] = [];
                 let receivedBytes = 0;
                 const abort = () => {
-                    if (typeof signal.reason === 'object' && signal.reason !== null && Object.isExtensible(signal.reason)) {
+                    if (
+                        typeof signal.reason === 'object' &&
+                        signal.reason !== null &&
+                        Object.isExtensible(signal.reason)
+                    ) {
                         Object.assign(signal.reason, { receivedBytes });
                     }
                     void reader.cancel(signal.reason).catch(() => undefined);
@@ -388,132 +475,276 @@ export class VeyonClient {
                         const chunk = await abortable(reader.read(), signal);
                         if (chunk.done) break;
                         receivedBytes += chunk.value.byteLength;
-                        if (receivedBytes > maxBytes) throw Object.assign(new VeyonApiError('Screenshot exceeds the frame byte limit', 502, 'VEYON_FRAME_TOO_LARGE'), { receivedBytes });
+                        if (receivedBytes > maxBytes)
+                            throw Object.assign(
+                                new VeyonApiError(
+                                    'Screenshot exceeds the frame byte limit',
+                                    502,
+                                    'VEYON_FRAME_TOO_LARGE',
+                                ),
+                                { receivedBytes },
+                            );
                         chunks.push(chunk.value);
                     }
                     const bytes = new Uint8Array(receivedBytes);
                     let offset = 0;
-                    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+                    for (const chunk of chunks) {
+                        bytes.set(chunk, offset);
+                        offset += chunk.byteLength;
+                    }
                     body = bytes.buffer;
                 } catch (error) {
-                    if (typeof error === 'object' && error !== null && Object.isExtensible(error)) Object.assign(error, { receivedBytes });
+                    if (
+                        typeof error === 'object' &&
+                        error !== null &&
+                        Object.isExtensible(error)
+                    )
+                        Object.assign(error, { receivedBytes });
                     throw error;
                 } finally {
                     signal.removeEventListener('abort', abort);
                     void reader.cancel().catch(() => undefined);
-                    try { reader.releaseLock(); } catch { /* An aborted transport may still own a pending read. */ }
+                    try {
+                        reader.releaseLock();
+                    } catch {
+                        /* An aborted transport may still own a pending read. */
+                    }
                 }
             } else body = await response.arrayBuffer();
-            if (signal.aborted && init.method === 'POST' && path.startsWith('/authentication/') && response.ok) {
+            if (
+                signal.aborted &&
+                init.method === 'POST' &&
+                path.startsWith('/authentication/') &&
+                response.ok
+            ) {
                 // A non-cooperative transport may finish after the last waiter left.
                 // Dispose its remote connection, but never publish it locally.
                 try {
-                    const uid = JSON.parse(new TextDecoder().decode(body))?.['connection-uid'];
-                    if (typeof uid === 'string' && uid.trim() && !/[\r\n]/.test(uid)) {
-                        void this.dispose(decodeURIComponent(path.slice('/authentication/'.length)), uid).catch(() => undefined);
+                    const uid = JSON.parse(new TextDecoder().decode(body))?.[
+                        'connection-uid'
+                    ];
+                    if (
+                        typeof uid === 'string' &&
+                        uid.trim() &&
+                        !/[\r\n]/.test(uid)
+                    ) {
+                        void this.dispose(
+                            decodeURIComponent(
+                                path.slice('/authentication/'.length),
+                            ),
+                            uid,
+                        ).catch(() => undefined);
                     }
-                } catch { /* Malformed responses cannot identify a remote connection. */ }
+                } catch {
+                    /* Malformed responses cannot identify a remote connection. */
+                }
             }
             signal.throwIfAborted();
-            const buffered = new Response(response.status === 204 || response.status === 205 || response.status === 304 ? null : body, {
-                status: response.status, statusText: response.statusText, headers: response.headers,
-            });
-            if (maxBytes !== undefined) Object.assign(buffered, { receivedBytes: body.byteLength });
+            const buffered = new Response(
+                response.status === 204 ||
+                    response.status === 205 ||
+                    response.status === 304
+                    ? null
+                    : body,
+                {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: response.headers,
+                },
+            );
+            if (maxBytes !== undefined)
+                Object.assign(buffered, { receivedBytes: body.byteLength });
             return buffered;
-        })().finally(() => { unpin(); release(); });
+        })().finally(() => {
+            unpin();
+            release();
+        });
         // Keep the slot until the actual transport settles, even if this caller aborts.
         return abortable(result, signal);
     }
 
     private async responseError(response: Response, authentication = false) {
         const { message, upstreamCode } = await readError(response);
-        const invalid = upstreamCode === 2 || (upstreamCode === undefined && response.status === 401 && !authentication);
-        return new VeyonApiError(message, response.status,
-            authentication ? (upstreamCode === 6 || response.status === 401 ? 'VEYON_AUTH_FAILED' : 'VEYON_CONNECT_FAILED') :
-                invalid ? 'VEYON_SESSION_EXPIRED' : upstreamCode === 6 ? 'VEYON_AUTH_FAILED' : 'VEYON_ERROR', upstreamCode);
+        const invalid =
+            upstreamCode === 2 ||
+            (upstreamCode === undefined &&
+                response.status === 401 &&
+                !authentication);
+        return new VeyonApiError(
+            message,
+            response.status,
+            authentication
+                ? upstreamCode === 6 || response.status === 401
+                    ? 'VEYON_AUTH_FAILED'
+                    : 'VEYON_CONNECT_FAILED'
+                : invalid
+                  ? 'VEYON_SESSION_EXPIRED'
+                  : upstreamCode === 6
+                    ? 'VEYON_AUTH_FAILED'
+                    : 'VEYON_ERROR',
+            upstreamCode,
+        );
     }
 
     async hostState(host: string, signal?: AbortSignal) {
         return withDeadline(signal, 8_000, async (deadline) => {
-            const response = await this.request(`/hoststate/${encodeURIComponent(host)}`, {}, deadline);
+            const response = await this.request(
+                `/hoststate/${encodeURIComponent(host)}`,
+                {},
+                deadline,
+            );
             if (!response.ok) throw await this.responseError(response);
             return response.json() as Promise<Record<string, unknown>>;
         });
     }
 
-    async authenticationMethods(host: string, signal?: AbortSignal): Promise<string[]> {
+    async authenticationMethods(
+        host: string,
+        signal?: AbortSignal,
+    ): Promise<string[]> {
         return withDeadline(signal, 8_000, async (deadline) => {
-            const response = await this.request(`/authentication/${encodeURIComponent(host)}`, {}, deadline);
+            const response = await this.request(
+                `/authentication/${encodeURIComponent(host)}`,
+                {},
+                deadline,
+            );
             if (!response.ok) throw await this.responseError(response);
-            const body = await response.json() as { methods?: string[] };
+            const body = (await response.json()) as { methods?: string[] };
             return body.methods ?? [];
         });
     }
 
-    private async dispose(host: string, uid: string, callerSignal?: AbortSignal) {
+    private async dispose(
+        host: string,
+        uid: string,
+        callerSignal?: AbortSignal,
+    ) {
         await withDeadline(callerSignal, 5_000, async (signal) => {
-            const response = await this.request(`/authentication/${encodeURIComponent(host)}`, {
-                method: 'DELETE', headers: { 'Connection-Uid': uid },
-            }, signal);
+            const response = await this.request(
+                `/authentication/${encodeURIComponent(host)}`,
+                {
+                    method: 'DELETE',
+                    headers: { 'Connection-Uid': uid },
+                },
+                signal,
+            );
             if (!response.ok) throw await this.responseError(response);
         });
     }
 
-    private async createConnection(host: string, signal: AbortSignal): Promise<Connection> {
+    private async createConnection(
+        host: string,
+        signal: AbortSignal,
+    ): Promise<Connection> {
         this.assertCurrent();
         assertKeyCredentials(this.config);
-        const response = await this.request(`/authentication/${encodeURIComponent(host)}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ method: VEYON_AUTH_KEYS_METHOD, credentials: credentialsBody(this.config) }),
-        }, signal);
+        const response = await this.request(
+            `/authentication/${encodeURIComponent(host)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    method: VEYON_AUTH_KEYS_METHOD,
+                    credentials: credentialsBody(this.config),
+                }),
+            },
+            signal,
+        );
         if (!response.ok) throw await this.responseError(response, true);
         let body: { 'connection-uid'?: unknown; validUntil?: unknown };
         try {
-            body = await response.json() as typeof body;
+            body = (await response.json()) as typeof body;
         } catch {
-            throw new VeyonApiError('Malformed Veyon authentication response', 502, 'VEYON_INVALID_RESPONSE');
+            throw new VeyonApiError(
+                'Malformed Veyon authentication response',
+                502,
+                'VEYON_INVALID_RESPONSE',
+            );
         }
         const uid = body?.['connection-uid'];
         const rawExpiry = body?.validUntil;
-        const validUntil = typeof rawExpiry === 'number' ? rawExpiry * (rawExpiry < 10_000_000_000 ? 1000 : 1) :
-            typeof rawExpiry === 'string' && rawExpiry.trim() ? Date.parse(rawExpiry) : NaN;
+        const validUntil =
+            typeof rawExpiry === 'number'
+                ? rawExpiry * (rawExpiry < 10_000_000_000 ? 1000 : 1)
+                : typeof rawExpiry === 'string' && rawExpiry.trim()
+                  ? Date.parse(rawExpiry)
+                  : NaN;
         try {
-            if (typeof uid !== 'string' || !uid.trim() || /[\r\n]/.test(uid) ||
-                !Number.isFinite(validUntil) || validUntil <= Date.now()) {
-                throw new VeyonApiError('Malformed Veyon authentication response', 502, 'VEYON_INVALID_RESPONSE');
+            if (
+                typeof uid !== 'string' ||
+                !uid.trim() ||
+                /[\r\n]/.test(uid) ||
+                !Number.isFinite(validUntil) ||
+                validUntil <= Date.now()
+            ) {
+                throw new VeyonApiError(
+                    'Malformed Veyon authentication response',
+                    502,
+                    'VEYON_INVALID_RESPONSE',
+                );
             }
             signal.throwIfAborted();
             this.assertCurrent();
         } catch (error) {
-            if (typeof uid === 'string' && uid.trim() && !/[\r\n]/.test(uid)) void this.dispose(host, uid).catch(() => undefined);
+            if (typeof uid === 'string' && uid.trim() && !/[\r\n]/.test(uid))
+                void this.dispose(host, uid).catch(() => undefined);
             throw error;
         }
         const connection: Connection = {
-            uid, validUntil, lastUsed: Date.now(), organizationId: this.organizationId,
-            userId: this.userId, host, inFlight: 0, dispose: (callerSignal) => this.dispose(host, uid, callerSignal),
+            uid,
+            validUntil,
+            lastUsed: Date.now(),
+            organizationId: this.organizationId,
+            userId: this.userId,
+            host,
+            inFlight: 0,
+            dispose: (callerSignal) => this.dispose(host, uid, callerSignal),
         };
-        connections.set(connectionKey(this.organizationId, this.userId, host), connection);
+        connections.set(
+            connectionKey(this.organizationId, this.userId, host),
+            connection,
+        );
         scheduleConnectionCleanup();
-        veyonLogger.info('Veyon connection authenticated for {host}', { host, organizationId: this.organizationId });
+        veyonLogger.info('Veyon connection authenticated for {host}', {
+            host,
+            organizationId: this.organizationId,
+        });
         return connection;
     }
 
-    async authenticate(host: string, signal?: AbortSignal): Promise<Connection> {
-        return withDeadline(signal, 12_000, (deadline) => this.getConnection(host, deadline));
+    async authenticate(
+        host: string,
+        signal?: AbortSignal,
+    ): Promise<Connection> {
+        return withDeadline(signal, 12_000, (deadline) =>
+            this.getConnection(host, deadline),
+        );
     }
 
-    private async getConnection(host: string, signal: AbortSignal): Promise<Connection> {
+    private async getConnection(
+        host: string,
+        signal: AbortSignal,
+    ): Promise<Connection> {
         signal.throwIfAborted();
         this.assertCurrent();
         const key = connectionKey(this.organizationId, this.userId, host);
         const existing = connections.get(key);
         const now = Date.now();
-        if (existing && existing.validUntil > now + 5_000 && now - existing.lastUsed < IDLE_RECONNECT_MS) {
+        if (
+            existing &&
+            existing.validUntil > now + 5_000 &&
+            now - existing.lastUsed < IDLE_RECONNECT_MS
+        ) {
             existing.lastUsed = now;
             return existing;
         }
         if (existing) {
-            if (existing.inFlight) throw new VeyonApiError('Veyon connection is still in use', 503, 'VEYON_BUSY');
+            if (existing.inFlight)
+                throw new VeyonApiError(
+                    'Veyon connection is still in use',
+                    503,
+                    'VEYON_BUSY',
+                );
             connections.delete(key);
             void existing.dispose().catch(() => undefined);
         }
@@ -521,12 +752,21 @@ export class VeyonClient {
         if (!pending) {
             reserveConnection();
             const controller = new AbortController();
-            pending = { organizationId: this.organizationId, controller, waiters: 0, promise: undefined! };
+            pending = {
+                organizationId: this.organizationId,
+                controller,
+                waiters: 0,
+                promise: undefined!,
+            };
             const entry = pending;
             // Each waiter keeps its own original deadline. Authentication remains
             // alive only while at least one caller still needs the shared result.
-            entry.promise = this.createConnection(host, controller.signal).finally(() => {
-                if (pendingConnections.get(key) === entry) pendingConnections.delete(key);
+            entry.promise = this.createConnection(
+                host,
+                controller.signal,
+            ).finally(() => {
+                if (pendingConnections.get(key) === entry)
+                    pendingConnections.delete(key);
             });
             pendingConnections.set(key, entry);
         }
@@ -539,7 +779,13 @@ export class VeyonClient {
             entry.waiters -= 1;
             if (entry.waiters === 0 && pendingConnections.get(key) === entry) {
                 pendingConnections.delete(key);
-                entry.controller.abort(signal.reason ?? new DOMException('Authentication cancelled', 'AbortError'));
+                entry.controller.abort(
+                    signal.reason ??
+                        new DOMException(
+                            'Authentication cancelled',
+                            'AbortError',
+                        ),
+                );
             }
         };
         signal.addEventListener('abort', release, { once: true });
@@ -554,7 +800,12 @@ export class VeyonClient {
         }
     }
 
-    private async authenticatedRequest(host: string, path: string, init: RequestInit = {}, maxBytes?: number): Promise<Response> {
+    private async authenticatedRequest(
+        host: string,
+        path: string,
+        init: RequestInit = {},
+        maxBytes?: number,
+    ): Promise<Response> {
         let receivedBytes = 0;
         return withDeadline(init.signal, 12_000, async (signal) => {
             for (let attempt = 0; ; attempt += 1) {
@@ -564,38 +815,88 @@ export class VeyonClient {
                 const headers = new Headers(init.headers);
                 headers.set('Connection-Uid', connection.uid);
                 if (maxBytes !== undefined && receivedBytes >= maxBytes) {
-                    throw Object.assign(new VeyonApiError('Screenshot exceeds the frame byte limit', 502, 'VEYON_FRAME_TOO_LARGE'), { receivedBytes });
+                    throw Object.assign(
+                        new VeyonApiError(
+                            'Screenshot exceeds the frame byte limit',
+                            502,
+                            'VEYON_FRAME_TOO_LARGE',
+                        ),
+                        { receivedBytes },
+                    );
                 }
                 let response: Response;
                 try {
-                    response = await this.request(path, { ...init, headers }, signal, maxBytes === undefined ? undefined : maxBytes - receivedBytes, connection);
+                    response = await this.request(
+                        path,
+                        { ...init, headers },
+                        signal,
+                        maxBytes === undefined
+                            ? undefined
+                            : maxBytes - receivedBytes,
+                        connection,
+                    );
                 } catch (error) {
-                    if (maxBytes !== undefined && typeof error === 'object' && error !== null && Object.isExtensible(error)) {
-                        const partial = 'receivedBytes' in error && typeof error.receivedBytes === 'number' ? error.receivedBytes : 0;
-                        Object.assign(error, { receivedBytes: receivedBytes + partial });
+                    if (
+                        maxBytes !== undefined &&
+                        typeof error === 'object' &&
+                        error !== null &&
+                        Object.isExtensible(error)
+                    ) {
+                        const partial =
+                            'receivedBytes' in error &&
+                            typeof error.receivedBytes === 'number'
+                                ? error.receivedBytes
+                                : 0;
+                        Object.assign(error, {
+                            receivedBytes: receivedBytes + partial,
+                        });
                     }
                     throw error;
                 }
-                if (maxBytes !== undefined) receivedBytes += (response as Response & { receivedBytes: number }).receivedBytes;
+                if (maxBytes !== undefined)
+                    receivedBytes += (
+                        response as Response & { receivedBytes: number }
+                    ).receivedBytes;
                 if (response.ok) {
-                    if (maxBytes !== undefined) Object.assign(response, { receivedBytes });
+                    if (maxBytes !== undefined)
+                        Object.assign(response, { receivedBytes });
                     return response;
                 }
                 const error = await this.responseError(response);
-                if (maxBytes !== undefined) Object.assign(error, { receivedBytes });
+                if (maxBytes !== undefined)
+                    Object.assign(error, { receivedBytes });
                 if (!isInvalidSessionError(error)) throw error;
-                const key = connectionKey(this.organizationId, this.userId, host);
+                const key = connectionKey(
+                    this.organizationId,
+                    this.userId,
+                    host,
+                );
                 if (connections.get(key) === connection) {
                     connections.delete(key);
                     void connection.dispose().catch(() => undefined);
                 }
                 if (attempt !== 0) throw error;
-                veyonLogger.info('Veyon connection invalid for {host}, reauthenticating', { host, organizationId: this.organizationId });
+                veyonLogger.info(
+                    'Veyon connection invalid for {host}, reauthenticating',
+                    { host, organizationId: this.organizationId },
+                );
             }
         }).catch((error) => {
-            if (maxBytes !== undefined && receivedBytes > 0 && typeof error === 'object' && error !== null && Object.isExtensible(error)) {
-                const reported = 'receivedBytes' in error && typeof error.receivedBytes === 'number' ? error.receivedBytes : 0;
-                Object.assign(error, { receivedBytes: Math.max(receivedBytes, reported) });
+            if (
+                maxBytes !== undefined &&
+                receivedBytes > 0 &&
+                typeof error === 'object' &&
+                error !== null &&
+                Object.isExtensible(error)
+            ) {
+                const reported =
+                    'receivedBytes' in error &&
+                    typeof error.receivedBytes === 'number'
+                        ? error.receivedBytes
+                        : 0;
+                Object.assign(error, {
+                    receivedBytes: Math.max(receivedBytes, reported),
+                });
             }
             throw error;
         });
@@ -607,7 +908,9 @@ export class VeyonClient {
         const pending = pendingConnections.get(key);
         if (pending) {
             pendingConnections.delete(key);
-            pending.controller.abort(new DOMException('Connection closed', 'AbortError'));
+            pending.controller.abort(
+                new DOMException('Connection closed', 'AbortError'),
+            );
         }
         const connection = connections.get(key);
         connections.delete(key);
@@ -620,11 +923,16 @@ export class VeyonClient {
             const release = await acquireInformation(deadline);
             const requests = [
                 this.authenticatedRequest(host, '/user', { signal: deadline }),
-                this.authenticatedRequest(host, '/session', { signal: deadline }),
-                this.authenticatedRequest(host, '/feature', { signal: deadline }),
+                this.authenticatedRequest(host, '/session', {
+                    signal: deadline,
+                }),
+                this.authenticatedRequest(host, '/feature', {
+                    signal: deadline,
+                }),
             ] as const;
             try {
-                const [userResponse, sessionResponse, featuresResponse] = await Promise.all(requests);
+                const [userResponse, sessionResponse, featuresResponse] =
+                    await Promise.all(requests);
                 return {
                     user: await userResponse.json(),
                     session: await sessionResponse.json(),
@@ -647,8 +955,21 @@ export class VeyonClient {
         return (await this.authenticatedRequest(host, '/session')).json();
     }
 
-    async framebuffer(host: string, query: URLSearchParams, signal?: AbortSignal, maxBytes?: number) {
-        if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) throw new VeyonApiError('Invalid framebuffer byte limit', 400, 'INVALID_DATA');
+    async framebuffer(
+        host: string,
+        query: URLSearchParams,
+        signal?: AbortSignal,
+        maxBytes?: number,
+    ) {
+        if (
+            maxBytes !== undefined &&
+            (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+        )
+            throw new VeyonApiError(
+                'Invalid framebuffer byte limit',
+                400,
+                'INVALID_DATA',
+            );
         return this.authenticatedRequest(
             host,
             `/framebuffer?${query.toString()}`,
@@ -662,7 +983,9 @@ export class VeyonClient {
     }
 
     async featureStatus(host: string, uid: string, signal?: AbortSignal) {
-        return (await this.authenticatedRequest(host, `/feature/${uid}`, { signal })).json();
+        return (
+            await this.authenticatedRequest(host, `/feature/${uid}`, { signal })
+        ).json();
     }
 
     async setFeature(
@@ -681,12 +1004,20 @@ export class VeyonClient {
     }
 }
 
-export async function getVeyonClient(organizationId: string, userId: string): Promise<VeyonClient> {
+export async function getVeyonClient(
+    organizationId: string,
+    userId: string,
+): Promise<VeyonClient> {
     const startedGeneration = generation(organizationId);
     const config = await getVeyonConfigForOrg(organizationId);
-    if (generation(organizationId) !== startedGeneration) return getVeyonClient(organizationId, userId);
+    if (generation(organizationId) !== startedGeneration)
+        return getVeyonClient(organizationId, userId);
     if (!config) {
-        throw new VeyonApiError('Veyon is not configured', 409, 'CONFIG_MISSING');
+        throw new VeyonApiError(
+            'Veyon is not configured',
+            409,
+            'CONFIG_MISSING',
+        );
     }
     return new VeyonClient(config, organizationId, userId);
 }
@@ -698,7 +1029,14 @@ export function listOpenConnections(organizationId: string, userId: string) {
                 connection.organizationId === organizationId &&
                 connection.userId === userId,
         )
-        .map(({ uid: _uid, organizationId: _org, userId: _user, dispose: _dispose, inFlight: _inFlight, ...connection }) =>
-            connection,
+        .map(
+            ({
+                uid: _uid,
+                organizationId: _org,
+                userId: _user,
+                dispose: _dispose,
+                inFlight: _inFlight,
+                ...connection
+            }) => connection,
         );
 }

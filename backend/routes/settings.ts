@@ -2,13 +2,14 @@ import { eq, inArray } from 'drizzle-orm';
 import z from 'zod';
 import { db } from '../../db/database';
 import {
-    firewallConfig,
     dataUsageHistory,
+    firewallConfig,
     fogConfig,
     lab,
     piholeConfig,
     veyonConfig,
-} from '../../db/schema';
+} from '../../db/index';
+import { isDemoUser } from '../demo';
 import {
     getFirewallConfigByIdWithLabs,
     getFirewallConfigWithLabs,
@@ -16,8 +17,8 @@ import {
 } from '../firewall-config';
 import { getFogConfigForOrg, isBearerToken, testFogConnection } from '../fog';
 import { errorProperty, getLogger } from '../logger';
-import { isDemoUser } from '../demo';
 import { testMikrotikConnection } from '../mikrotik';
+import { getPiholeConfigForOrg, testPiholeConnection } from '../pihole';
 import {
     assertValidPrivateKeyPem,
     clearVeyonConnections,
@@ -25,18 +26,23 @@ import {
     VeyonApiError,
     VeyonClient,
 } from '../veyon';
-import {
-    getPiholeConfigForOrg,
-    testPiholeConnection,
-} from '../pihole';
-import { createApp } from './context';
 import { veyonPoller } from '../veyon-poller';
+import { createApp } from './context';
 
 export const settingsRouter = createApp();
 
 settingsRouter.use('/settings/*', async (c, next) => {
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && isDemoUser(c.get('user'))) {
-        return c.json({ error: 'Demo users cannot change persistent settings', code: 'DEMO_READ_ONLY' }, 403);
+    if (
+        !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) &&
+        isDemoUser(c.get('user'))
+    ) {
+        return c.json(
+            {
+                error: 'Demo users cannot change persistent settings',
+                code: 'DEMO_READ_ONLY',
+            },
+            403,
+        );
     }
     await next();
 });
@@ -49,12 +55,26 @@ function maskKey(value: string): string {
     return `${value.length > 5 ? value.slice(0, 5) : ''}********`;
 }
 
-const dnsSuffixSchema = z.string()
+const dnsSuffixSchema = z
+    .string()
     .refine((value) => !/^\.+$/.test(value.trim()), 'Invalid DNS suffix')
-    .transform((value) => value.trim().replace(/^\.|\.$/g, '').toLowerCase())
-    .refine((value) => value.length <= 253 && (value === '' || value.split('.').every(
-        (label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
-    )), 'Invalid DNS suffix: use DNS labels of 1-63 letters, digits or hyphens, up to 253 characters');
+    .transform((value) =>
+        value
+            .trim()
+            .replace(/^\.|\.$/g, '')
+            .toLowerCase(),
+    )
+    .refine(
+        (value) =>
+            value.length <= 253 &&
+            (value === '' ||
+                value
+                    .split('.')
+                    .every((label) =>
+                        /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+                    )),
+        'Invalid DNS suffix: use DNS labels of 1-63 letters, digits or hyphens, up to 253 characters',
+    );
 
 settingsRouter.post('/settings/mikrotik', async (c) => {
     const user = c.get('user');
@@ -77,7 +97,9 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
         const body = schema.parse(await c.req.json());
 
         if (body.id) {
-            const existing = await db.query.firewallConfig.findFirst({ where: eq(firewallConfig.id, body.id) });
+            const existing = await db.query.firewallConfig.findFirst({
+                where: eq(firewallConfig.id, body.id),
+            });
             if (existing && existing.organizationId !== user.organizationId) {
                 return c.json({ error: 'Configuration not found' }, 404);
             }
@@ -112,7 +134,10 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
             })
             .onConflictDoUpdate({
                 target: firewallConfig.id,
-                setWhere: eq(firewallConfig.organizationId, user.organizationId),
+                setWhere: eq(
+                    firewallConfig.organizationId,
+                    user.organizationId,
+                ),
                 set: {
                     mikrotikBaseUrl: body.mikrotikBaseUrl,
                     mikrotikUsername: body.mikrotikUsername,
@@ -132,13 +157,16 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
             data: configWithLabs
                 ? {
                       ...configWithLabs,
-                      mikrotikPassword: '*'.repeat(configWithLabs.mikrotikPassword.length),
+                      mikrotikPassword: '*'.repeat(
+                          configWithLabs.mikrotikPassword.length,
+                      ),
                       labs: mapLabs(configWithLabs.labs),
                   }
                 : undefined,
         });
     } catch (error) {
-        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid firewall configuration' }, 400);
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+            return c.json({ error: 'Invalid firewall configuration' }, 400);
         settingsLogger.error('Failed to save firewall settings: {error}', {
             error: errorProperty(error),
         });
@@ -190,19 +218,30 @@ settingsRouter.post('/settings/labs', async (c) => {
         }
 
         const existingIds = new Set(existingConfig.labs.map((item) => item.id));
-        const submittedIds = body.labs.flatMap((item) => item.id ? [item.id] : []);
-        if (submittedIds.some((id) => !existingIds.has(id)) || new Set(submittedIds).size !== submittedIds.length) {
+        const submittedIds = body.labs.flatMap((item) =>
+            item.id ? [item.id] : [],
+        );
+        if (
+            submittedIds.some((id) => !existingIds.has(id)) ||
+            new Set(submittedIds).size !== submittedIds.length
+        ) {
             return c.json({ error: 'Invalid or duplicate lab ID' }, 400);
         }
         db.transaction((tx) => {
             if (body.defaultDnsSuffix !== undefined) {
-                tx.update(firewallConfig).set({
-                    defaultDnsSuffix: body.defaultDnsSuffix,
-                    updatedAt: new Date(),
-                }).where(eq(firewallConfig.id, existingConfig.id)).run();
+                tx.update(firewallConfig)
+                    .set({
+                        defaultDnsSuffix: body.defaultDnsSuffix,
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(firewallConfig.id, existingConfig.id))
+                    .run();
             }
-            const removedIds = [...existingIds].filter((id) => !submittedIds.includes(id));
-            if (removedIds.length) tx.delete(lab).where(inArray(lab.id, removedIds)).run();
+            const removedIds = [...existingIds].filter(
+                (id) => !submittedIds.includes(id),
+            );
+            if (removedIds.length)
+                tx.delete(lab).where(inArray(lab.id, removedIds)).run();
             for (const l of body.labs) {
                 const values = {
                     firewallConfigId: existingConfig.id,
@@ -212,13 +251,22 @@ settingsRouter.post('/settings/labs', async (c) => {
                     subnet: l.subnet ?? null,
                     dhcpServer: l.dhcpServer ?? null,
                     interface: l.interface || null,
-                    ...(l.dnsSuffix !== undefined ? { dnsSuffix: l.dnsSuffix || null } : {}),
+                    ...(l.dnsSuffix !== undefined
+                        ? { dnsSuffix: l.dnsSuffix || null }
+                        : {}),
                     updatedAt: new Date(),
                 };
                 if (l.id) {
-                    const old = existingConfig.labs.find((item) => item.id === l.id)!;
-                    if ((old.interface || '') !== (l.interface || '') || (!l.interface && old.ruleId !== l.firewallId)) {
-                        tx.delete(dataUsageHistory).where(eq(dataUsageHistory.labId, l.id)).run();
+                    const old = existingConfig.labs.find(
+                        (item) => item.id === l.id,
+                    )!;
+                    if (
+                        (old.interface || '') !== (l.interface || '') ||
+                        (!l.interface && old.ruleId !== l.firewallId)
+                    ) {
+                        tx.delete(dataUsageHistory)
+                            .where(eq(dataUsageHistory.labId, l.id))
+                            .run();
                     }
                     tx.update(lab).set(values).where(eq(lab.id, l.id)).run();
                 } else {
@@ -237,13 +285,16 @@ settingsRouter.post('/settings/labs', async (c) => {
             data: configWithLabs
                 ? {
                       ...configWithLabs,
-                      mikrotikPassword: '*'.repeat(configWithLabs.mikrotikPassword.length),
+                      mikrotikPassword: '*'.repeat(
+                          configWithLabs.mikrotikPassword.length,
+                      ),
                       labs: mapLabs(configWithLabs.labs),
                   }
                 : undefined,
         });
     } catch (error) {
-        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid lab configuration' }, 400);
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+            return c.json({ error: 'Invalid lab configuration' }, 400);
         settingsLogger.error('Failed to save firewall settings: {error}', {
             error: errorProperty(error),
         });
@@ -372,7 +423,9 @@ settingsRouter.post('/settings/pihole', async (c) => {
         const body = schema.parse(await c.req.json());
 
         if (body.id) {
-            const existing = await db.query.piholeConfig.findFirst({ where: eq(piholeConfig.id, body.id) });
+            const existing = await db.query.piholeConfig.findFirst({
+                where: eq(piholeConfig.id, body.id),
+            });
             if (existing && existing.organizationId !== user.organizationId) {
                 return c.json({ error: 'Configuration not found' }, 404);
             }
@@ -428,13 +481,12 @@ settingsRouter.post('/settings/pihole', async (c) => {
                 configured: true,
                 url: body.url,
                 verifyTls: body.verifyTls,
-                password: new Array(body.password.length)
-                    .fill('*')
-                    .join(''),
+                password: new Array(body.password.length).fill('*').join(''),
             },
         });
     } catch (error) {
-        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid Pi-hole configuration' }, 400);
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+            return c.json({ error: 'Invalid Pi-hole configuration' }, 400);
         settingsLogger.error('Failed to save Pi-hole settings: {error}', {
             error: errorProperty(error),
         });
@@ -515,7 +567,9 @@ settingsRouter.post('/settings/fog', async (c) => {
         const body = schema.parse(await c.req.json());
 
         if (body.id) {
-            const existing = await db.query.fogConfig.findFirst({ where: eq(fogConfig.id, body.id) });
+            const existing = await db.query.fogConfig.findFirst({
+                where: eq(fogConfig.id, body.id),
+            });
             if (existing && existing.organizationId !== user.organizationId) {
                 return c.json({ error: 'Configuration not found' }, 404);
             }
@@ -586,7 +640,8 @@ settingsRouter.post('/settings/fog', async (c) => {
             },
         });
     } catch (error) {
-        if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid FOG configuration' }, 400);
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+            return c.json({ error: 'Invalid FOG configuration' }, 400);
         settingsLogger.error('Failed to save FOG settings: {error}', {
             error: errorProperty(error),
         });
@@ -692,8 +747,12 @@ settingsRouter.post('/settings/veyon', async (c) => {
             error: errorProperty(error),
         });
         if (error instanceof VeyonApiError) {
-            const status = error.status >= 400 && error.status <= 599 ? error.status : 400;
-            return c.json({ error: error.message, code: error.code }, status as any);
+            const status =
+                error.status >= 400 && error.status <= 599 ? error.status : 400;
+            return c.json(
+                { error: error.message, code: error.code },
+                status as any,
+            );
         }
         const message =
             error instanceof z.ZodError

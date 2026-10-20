@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { fogConfig } from '../db/schema';
+import { fogConfig } from '../db/index';
 import type { FogHost, FogInventory, ListFogHosts } from '../frontend/src/api';
 import { errorProperty, getLogger } from './logger';
 
@@ -10,12 +10,24 @@ type RequestContext = { method: string; path: string };
 // Already logged at the transport/parser boundary; method catches only normalize.
 class LoggedFogError extends Error {}
 
-function loggedError(error: unknown, context: Record<string, unknown>): LoggedFogError {
-    fogLogger.error('FOG operation failed: {error}', { ...context, error: errorProperty(error) });
-    return new LoggedFogError(error instanceof Error ? error.message : String(error), { cause: error });
+function loggedError(
+    error: unknown,
+    context: Record<string, unknown>,
+): LoggedFogError {
+    fogLogger.error('FOG operation failed: {error}', {
+        ...context,
+        error: errorProperty(error),
+    });
+    return new LoggedFogError(
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+    );
 }
 
-async function responseText(res: Response, context?: RequestContext): Promise<string> {
+async function responseText(
+    res: Response,
+    context?: RequestContext,
+): Promise<string> {
     try {
         return await res.text();
     } catch (error) {
@@ -23,11 +35,19 @@ async function responseText(res: Response, context?: RequestContext): Promise<st
     }
 }
 
-function responseError(url: string, res: Response, text: string, context?: RequestContext): string {
+function responseError(
+    url: string,
+    res: Response,
+    text: string,
+    context?: RequestContext,
+): string {
     let error: unknown;
     let message: string | undefined;
     try {
-        const json = JSON.parse(text) as { error?: string; message?: string } | null;
+        const json = JSON.parse(text) as {
+            error?: string;
+            message?: string;
+        } | null;
         message = json?.error || json?.message;
     } catch (caught) {
         error = caught;
@@ -41,11 +61,20 @@ function responseError(url: string, res: Response, text: string, context?: Reque
     return message || statusMessage(url, res.status, text);
 }
 
-function responseJson(url: string, res: Response, text: string, context?: RequestContext): unknown {
+function responseJson(
+    url: string,
+    res: Response,
+    text: string,
+    context?: RequestContext,
+): unknown {
     try {
         return JSON.parse(text);
     } catch (error) {
-        const logged = loggedError(error, { ...context, status: res.status, response: text });
+        const logged = loggedError(error, {
+            ...context,
+            status: res.status,
+            response: text,
+        });
         logged.message = nonJsonMessage(url, res.status, text);
         throw logged;
     }
@@ -155,7 +184,10 @@ function authHeaders(creds: FogCredentials): Record<string, string> {
  * FOG 1.6 paged envelope (`data` + `recordsTotal`) and the <= 1.5 shape
  * (`count` + class-named array, e.g. `hosts`).
  */
-function normalizeList<T>(raw: unknown, legacyKey: string): { count: number; items: T[] } {
+function normalizeList<T>(
+    raw: unknown,
+    legacyKey: string,
+): { count: number; items: T[] } {
     const envelope = (raw ?? {}) as FogPageEnvelope & Record<string, unknown>;
     let items: T[];
     if (Array.isArray(envelope.data)) {
@@ -182,7 +214,11 @@ function normalizeList<T>(raw: unknown, legacyKey: string): { count: number; ite
 function withSynthesizedMacs<T>(hosts: T[]): T[] {
     return hosts.map((host) => {
         const h = host as Record<string, unknown>;
-        if (!Array.isArray(h.macs) && typeof h.primac === 'string' && h.primac) {
+        if (
+            !Array.isArray(h.macs) &&
+            typeof h.primac === 'string' &&
+            h.primac
+        ) {
             return { ...h, macs: [h.primac] } as T;
         }
         return host;
@@ -240,7 +276,12 @@ export class FogClient {
         };
 
         try {
-            const opts: RequestInit = { method, headers, redirect: 'error', signal: AbortSignal.timeout(15_000) };
+            const opts: RequestInit = {
+                method,
+                headers,
+                redirect: 'error',
+                signal: AbortSignal.timeout(15_000),
+            };
             if (body && (method === 'POST' || method === 'PUT')) {
                 opts.body = JSON.stringify(body);
             }
@@ -286,7 +327,8 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('GET', '/fog/system/info');
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const data = await this.readJson(res);
             return { success: true, data };
         } catch (err) {
@@ -303,45 +345,95 @@ export class FogClient {
         const visited = new Set<string>();
         const items: T[] = [];
         for (let page = 0; page < 1000; page++) {
-            if (visited.has(next.href)) throw new Error('FOG pagination repeated a page');
+            if (visited.has(next.href))
+                throw new Error('FOG pagination repeated a page');
             visited.add(next.href);
             const requestPath = `${path}${next.search}`;
             const res = await this.fogRequest('GET', requestPath);
             if (!res.ok) throw new LoggedFogError(await this.errorFrom(res));
-            const raw = await this.readJson(res) as FogPageEnvelope;
+            const raw = (await this.readJson(res)) as FogPageEnvelope;
             const result = normalizeList<T>(raw, key);
-            for (const field of ['count', 'recordsTotal', 'recordsFiltered', 'recordsReturned'] as const) {
-                if (raw[field] !== undefined && (!Number.isSafeInteger(raw[field]) || Number(raw[field]) < 0)) {
+            for (const field of [
+                'count',
+                'recordsTotal',
+                'recordsFiltered',
+                'recordsReturned',
+            ] as const) {
+                if (
+                    raw[field] !== undefined &&
+                    (!Number.isSafeInteger(raw[field]) ||
+                        Number(raw[field]) < 0)
+                ) {
                     throw new Error('FOG returned invalid pagination counts');
                 }
             }
             const total = raw.recordsFiltered ?? raw.recordsTotal ?? raw.count;
-            if (path === '/fog/host' && raw.recordsTotal !== undefined && raw.recordsFiltered !== undefined && raw.recordsFiltered !== raw.recordsTotal) {
-                throw new Error('FOG returned a filtered inventory for an authoritative host list');
+            if (
+                path === '/fog/host' &&
+                raw.recordsTotal !== undefined &&
+                raw.recordsFiltered !== undefined &&
+                raw.recordsFiltered !== raw.recordsTotal
+            ) {
+                throw new Error(
+                    'FOG returned a filtered inventory for an authoritative host list',
+                );
             }
             if (total !== undefined) {
-                if (expected !== undefined && expected !== total) throw new Error('FOG inventory changed during pagination; retry required');
+                if (expected !== undefined && expected !== total)
+                    throw new Error(
+                        'FOG inventory changed during pagination; retry required',
+                    );
                 expected = total;
             }
-            if (raw.recordsReturned !== undefined && raw.recordsReturned !== result.items.length) throw new Error('FOG returned an incomplete page');
+            if (
+                raw.recordsReturned !== undefined &&
+                raw.recordsReturned !== result.items.length
+            )
+                throw new Error('FOG returned an incomplete page');
             items.push(...result.items);
-            if (items.length > 100_000 || (expected !== undefined && items.length > expected)) throw new Error('FOG returned inconsistent pagination counts');
-            if (raw.nextUrl !== undefined && raw.nextUrl !== null && typeof raw.nextUrl !== 'string') throw new Error('FOG returned an invalid next page URL');
-            if (raw.truncated !== undefined && typeof raw.truncated !== 'boolean') throw new Error('FOG returned an invalid pagination flag');
+            if (
+                items.length > 100_000 ||
+                (expected !== undefined && items.length > expected)
+            )
+                throw new Error('FOG returned inconsistent pagination counts');
+            if (
+                raw.nextUrl !== undefined &&
+                raw.nextUrl !== null &&
+                typeof raw.nextUrl !== 'string'
+            )
+                throw new Error('FOG returned an invalid next page URL');
+            if (
+                raw.truncated !== undefined &&
+                typeof raw.truncated !== 'boolean'
+            )
+                throw new Error('FOG returned an invalid pagination flag');
             if (raw.nextUrl) {
                 const candidate = new URL(raw.nextUrl, next);
-                if (candidate.origin !== base.origin || candidate.pathname !== base.pathname || candidate.username || candidate.password || candidate.hash) {
+                if (
+                    candidate.origin !== base.origin ||
+                    candidate.pathname !== base.pathname ||
+                    candidate.username ||
+                    candidate.password ||
+                    candidate.hash
+                ) {
                     throw new Error('FOG returned an unsafe next page URL');
                 }
-                if (!result.items.length) throw new Error('FOG pagination made no progress');
+                if (!result.items.length)
+                    throw new Error('FOG pagination made no progress');
                 next = candidate;
             } else if (expected !== undefined && items.length < expected) {
-                if (!result.items.length) throw new Error('FOG returned an incomplete host inventory');
+                if (!result.items.length)
+                    throw new Error(
+                        'FOG returned an incomplete host inventory',
+                    );
                 next = new URL(base);
                 next.searchParams.set('start', String(items.length));
                 next.searchParams.set('length', String(result.items.length));
             } else {
-                if (raw.truncated === true) throw new Error('FOG returned a truncated inventory without a continuation');
+                if (raw.truncated === true)
+                    throw new Error(
+                        'FOG returned a truncated inventory without a continuation',
+                    );
                 return items;
             }
         }
@@ -360,28 +452,72 @@ export class FogClient {
             const rows = await this.completeList<FogHost>(path, 'hosts');
             const ids = new Set<number>();
             const items = rows.map((host) => {
-                if (!host || typeof host !== 'object' || !/^[1-9]\d*$/.test(String(host.id)) || !Number.isSafeInteger(Number(host.id)) || typeof host.name !== 'string' || !host.name.trim()) {
+                if (
+                    !host ||
+                    typeof host !== 'object' ||
+                    !/^[1-9]\d*$/.test(String(host.id)) ||
+                    !Number.isSafeInteger(Number(host.id)) ||
+                    typeof host.name !== 'string' ||
+                    !host.name.trim()
+                ) {
                     throw new Error('FOG returned an invalid host identity');
                 }
                 const id = Number(host.id);
-                if (ids.has(id)) throw new Error('FOG returned duplicate host identities across pages');
+                if (ids.has(id))
+                    throw new Error(
+                        'FOG returned duplicate host identities across pages',
+                    );
                 ids.add(id);
-                if (host.ip != null && typeof host.ip !== 'string') throw new Error('FOG returned an invalid host address');
-                if (host.primac != null && typeof host.primac !== 'string') throw new Error('FOG returned an invalid host MAC');
-                if (host.macs != null && (!Array.isArray(host.macs) || host.macs.some((mac) => typeof mac !== 'string'))) throw new Error('FOG returned invalid host MACs');
+                if (host.ip != null && typeof host.ip !== 'string')
+                    throw new Error('FOG returned an invalid host address');
+                if (host.primac != null && typeof host.primac !== 'string')
+                    throw new Error('FOG returned an invalid host MAC');
+                if (
+                    host.macs != null &&
+                    (!Array.isArray(host.macs) ||
+                        host.macs.some((mac) => typeof mac !== 'string'))
+                )
+                    throw new Error('FOG returned invalid host MACs');
                 return { ...host, id, name: host.name.trim() };
             });
-            const data: ListFogHosts = { count: items.length, hosts: withSynthesizedMacs(items) };
+            const data: ListFogHosts = {
+                count: items.length,
+                hosts: withSynthesizedMacs(items),
+            };
             // Paged host lists can omit related inventory. Load it once for the
             // management view, not once per host or for identity-only consumers.
-            if (includeInventory && items.some((host) => host.inventory == null)) {
+            if (
+                includeInventory &&
+                items.some((host) => host.inventory == null)
+            ) {
                 try {
-                    const inventory = await this.completeList<FogInventory>('/fog/inventory', 'inventorys');
-                    if (inventory.some((row) => !row || typeof row !== 'object' || !Number.isSafeInteger(Number(row.hostID)))) throw new Error('FOG returned invalid inventory rows');
-                    const byHostId = new Map(inventory.map((inventory) => [String(inventory.hostID), inventory]));
-                    data.hosts = data.hosts.map((host) => host.inventory != null ? host : {
-                        ...host, inventory: byHostId.get(String(host.id)),
-                    });
+                    const inventory = await this.completeList<FogInventory>(
+                        '/fog/inventory',
+                        'inventorys',
+                    );
+                    if (
+                        inventory.some(
+                            (row) =>
+                                !row ||
+                                typeof row !== 'object' ||
+                                !Number.isSafeInteger(Number(row.hostID)),
+                        )
+                    )
+                        throw new Error('FOG returned invalid inventory rows');
+                    const byHostId = new Map(
+                        inventory.map((inventory) => [
+                            String(inventory.hostID),
+                            inventory,
+                        ]),
+                    );
+                    data.hosts = data.hosts.map((host) =>
+                        host.inventory != null
+                            ? host
+                            : {
+                                  ...host,
+                                  inventory: byHostId.get(String(host.id)),
+                              },
+                    );
                 } catch (err) {
                     data.inventoryWarning = errorMessage(err);
                 }
@@ -396,7 +532,8 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('GET', `/fog/host/${id}`);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
         } catch (err) {
@@ -411,7 +548,8 @@ export class FogClient {
         try {
             // FOG 1.6 canonical create route (legacy alias: /fog/host/create)
             const res = await this.fogRequest('POST', '/fog/host', hostData);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
         } catch (err) {
@@ -426,8 +564,13 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             // FOG 1.6 canonical update route (legacy alias: /fog/host/{id}/edit)
-            const res = await this.fogRequest('PUT', `/fog/host/${id}`, updates);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const res = await this.fogRequest(
+                'PUT',
+                `/fog/host/${id}`,
+                updates,
+            );
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as FogHost;
             return { success: true, data };
         } catch (err) {
@@ -441,7 +584,8 @@ export class FogClient {
             // FOG 1.6 canonical delete route (legacy alias: /fog/host/{id}/delete).
             // A 409 means another record still references this host.
             const res = await this.fogRequest('DELETE', `/fog/host/${id}`);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
@@ -456,7 +600,8 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('GET', '/fog/image');
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const { count, items } = normalizeList<FogImage>(
                 await this.readJson(res),
                 'images',
@@ -473,7 +618,8 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('GET', '/fog/tasktype');
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const { count, items } = normalizeList<FogTaskType>(
                 await this.readJson(res),
                 'tasktypes',
@@ -490,7 +636,8 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('GET', '/fog/snapin');
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const { count, items } = normalizeList<FogSnapin>(
                 await this.readJson(res),
                 'snapins',
@@ -503,13 +650,12 @@ export class FogClient {
 
     // ---------- Tasks ----------
 
-    async getTask(
-        taskId: number,
-    ): Promise<FogResult<Record<string, unknown>>> {
+    async getTask(taskId: number): Promise<FogResult<Record<string, unknown>>> {
         if (!this.configured) return unconfigured();
         try {
             const res = await this.fogRequest('GET', `/fog/task/${taskId}`);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const data = (await this.readJson(res)) as Record<string, unknown>;
             return { success: true, data };
         } catch (err) {
@@ -527,13 +673,18 @@ export class FogClient {
             // Single Snapin task type is 13. FOG 1.6 TaskRequest selects the
             // snapin with deploySnapins; snapinID is kept for older servers.
             const { snapinID: _ignored, ...rest } = options ?? {};
-            const res = await this.fogRequest('POST', `/fog/host/${hostId}/task`, {
-                taskTypeID: 13, // Single Snapin task type
-                snapinID: snapinId,
-                deploySnapins: snapinId,
-                ...rest,
-            });
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const res = await this.fogRequest(
+                'POST',
+                `/fog/host/${hostId}/task`,
+                {
+                    taskTypeID: 13, // Single Snapin task type
+                    snapinID: snapinId,
+                    deploySnapins: snapinId,
+                    ...rest,
+                },
+            );
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             // FOG 1.6 answers queued task creation with an empty body (older
             // versions returned null); normalize both to {}.
             const data = (await this.readJson(res)) as FogTaskResult | null;
@@ -550,11 +701,16 @@ export class FogClient {
     ): Promise<FogResult<FogTaskResult>> {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('POST', `/fog/host/${hostId}/task`, {
-                ...options,
-                taskTypeID: taskTypeId,
-            });
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const res = await this.fogRequest(
+                'POST',
+                `/fog/host/${hostId}/task`,
+                {
+                    ...options,
+                    taskTypeID: taskTypeId,
+                },
+            );
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             // FOG 1.6 answers queued task creation with an empty body (older
             // versions returned null); normalize both to {}.
             const data = (await this.readJson(res)) as FogTaskResult | null;
@@ -571,7 +727,8 @@ export class FogClient {
         try {
             // FOG 1.6 canonical route (legacy alias: /fog/task/active)
             const res = await this.fogRequest('GET', '/fog/task/current');
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const { count, items } = normalizeList<unknown>(
                 await this.readJson(res),
                 'tasks',
@@ -586,8 +743,12 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             // A 409 means the task already finished (Complete/Canceled/Failed).
-            const res = await this.fogRequest('DELETE', `/fog/task/${taskId}/cancel`);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const res = await this.fogRequest(
+                'DELETE',
+                `/fog/task/${taskId}/cancel`,
+            );
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
@@ -601,7 +762,8 @@ export class FogClient {
             const res = await this.fogRequest('PUT', `/fog/task/${taskId}`, {
                 isForced: 1,
             });
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             return { success: true };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
@@ -615,9 +777,17 @@ export class FogClient {
         if (!this.configured) return unconfigured();
         try {
             // FOG 1.6 canonical update route (legacy alias: /fog/task/{id}/update)
-            const res = await this.fogRequest('PUT', `/fog/task/${taskId}`, updates);
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
-            const data = (await this.readJson(res)) as Record<string, unknown> | null;
+            const res = await this.fogRequest(
+                'PUT',
+                `/fog/task/${taskId}`,
+                updates,
+            );
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
+            const data = (await this.readJson(res)) as Record<
+                string,
+                unknown
+            > | null;
             return { success: true, data: data ?? {} };
         } catch (err) {
             return { success: false, error: errorMessage(err) };
@@ -636,29 +806,50 @@ export class FogClient {
             if (!actualHostId || !actualTaskTypeId) {
                 const taskResult = await this.getTask(taskId);
                 if (!taskResult.success || !taskResult.data) {
-                    return { success: false, error: taskResult.error || 'Failed to get task details' };
+                    return {
+                        success: false,
+                        error: taskResult.error || 'Failed to get task details',
+                    };
                 }
-                const task = taskResult.data as { hostID?: number; typeID?: number };
+                const task = taskResult.data as {
+                    hostID?: number;
+                    typeID?: number;
+                };
                 actualHostId = task.hostID;
                 actualTaskTypeId = task.typeID;
             }
             if (!actualHostId || !actualTaskTypeId) {
-                return { success: false, error: 'Missing host ID or task type ID' };
+                return {
+                    success: false,
+                    error: 'Missing host ID or task type ID',
+                };
             }
             // 1. Cancel existing task
             const cancelResult = await this.cancelTask(taskId);
             if (!cancelResult.success) {
-                return { success: false, error: cancelResult.error || 'Failed to cancel task' };
+                return {
+                    success: false,
+                    error: cancelResult.error || 'Failed to cancel task',
+                };
             }
             // 2. Create new task on same host with same type
-            const createResult = await this.createTask(actualHostId, actualTaskTypeId);
+            const createResult = await this.createTask(
+                actualHostId,
+                actualTaskTypeId,
+            );
             if (!createResult.success) {
-                return { success: false, error: createResult.error || 'Failed to create new task' };
+                return {
+                    success: false,
+                    error: createResult.error || 'Failed to create new task',
+                };
             }
             // 3. Find and force the newly created task
             const activeResult = await this.listActiveTasks();
             if (!activeResult.success || !activeResult.data) {
-                return { success: false, error: activeResult.error || 'Failed to list active tasks' };
+                return {
+                    success: false,
+                    error: activeResult.error || 'Failed to list active tasks',
+                };
             }
             const tasks = activeResult.data.tasks as Array<{
                 id: number;
@@ -677,7 +868,10 @@ export class FogClient {
             if (newTask) {
                 const forceResult = await this.forceTask(newTask.id);
                 if (!forceResult.success) {
-                    return { success: false, error: forceResult.error || 'Failed to force new task' };
+                    return {
+                        success: false,
+                        error: forceResult.error || 'Failed to force new task',
+                    };
                 }
             }
             return { success: true };
@@ -691,8 +885,12 @@ export class FogClient {
     > {
         if (!this.configured) return unconfigured();
         try {
-            const res = await this.fogRequest('GET', '/fog/multicastsession/current');
-            if (!res.ok) return { success: false, error: await this.errorFrom(res) };
+            const res = await this.fogRequest(
+                'GET',
+                '/fog/multicastsession/current',
+            );
+            if (!res.ok)
+                return { success: false, error: await this.errorFrom(res) };
             const { count, items } = normalizeList<unknown>(
                 await this.readJson(res),
                 'multicastsessions',
@@ -740,13 +938,20 @@ function statusMessage(url: string, status: number, body: string): string {
 /** Convert an unknown thrown value into a user-presentable message. */
 function errorMessage(err: unknown): string {
     if (!(err instanceof LoggedFogError)) {
-        fogLogger.error('FOG operation failed: {error}', { error: errorProperty(err) });
+        fogLogger.error('FOG operation failed: {error}', {
+            error: errorProperty(err),
+        });
     }
     if (err instanceof Error) {
-        const original = err instanceof LoggedFogError && err.cause instanceof Error ? err.cause : err;
+        const original =
+            err instanceof LoggedFogError && err.cause instanceof Error
+                ? err.cause
+                : err;
         if (
             err instanceof SyntaxError ||
-            /JSON Parse error|not valid JSON|Unexpected token/i.test(err.message)
+            /JSON Parse error|not valid JSON|Unexpected token/i.test(
+                err.message,
+            )
         ) {
             return 'The FOG server returned an unexpected (non-JSON) response. Please verify the FOG server URL and tokens in the FOG settings.';
         }
@@ -788,10 +993,7 @@ export async function getFogCredentials(
 
 // Cache clients by URL so connections are reused across requests. The cached
 // tokens are compared to detect credential rotation.
-const clientCache = new Map<
-    string,
-    { tokens: string; client: FogClient }
->();
+const clientCache = new Map<string, { tokens: string; client: FogClient }>();
 
 /**
  * Get a (cached) FOG client bound to the resolved credentials for the
@@ -852,8 +1054,7 @@ export async function testFogConnection(
     if (!isBearerToken(creds.apiToken) && !creds.userToken) {
         return {
             success: false,
-            error:
-                'A user token is required for legacy (non-bearer) API tokens. FOG 1.6 bearer tokens start with "fog_" and need no user token.',
+            error: 'A user token is required for legacy (non-bearer) API tokens. FOG 1.6 bearer tokens start with "fog_" and need no user token.',
         };
     }
     try {
@@ -867,7 +1068,10 @@ export async function testFogConnection(
         const context = { method: 'GET', path: '/fog/host?start=0&length=1' };
         const text = await responseText(res, context);
         if (!res.ok) {
-            return { success: false, error: responseError(url, res, text, context) };
+            return {
+                success: false,
+                error: responseError(url, res, text, context),
+            };
         }
         // A 200 with an HTML body means we reached a web server that is not
         // the FOG API (or an auth redirect); treat it as a failed test.
@@ -875,7 +1079,10 @@ export async function testFogConnection(
         return { success: true };
     } catch (err) {
         if (!(err instanceof LoggedFogError)) {
-            err = loggedError(err, { method: 'GET', path: '/fog/host?start=0&length=1' });
+            err = loggedError(err, {
+                method: 'GET',
+                path: '/fog/host?start=0&length=1',
+            });
         }
         return { success: false, error: errorMessage(err) };
     }

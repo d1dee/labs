@@ -4,13 +4,15 @@ import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { emailOTP, username } from 'better-auth/plugins';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import * as schema from '../db/schema';
+import * as schema from '../db/index';
 import { requireAuthEmailConfig, sendAuthEmail } from './auth-email';
 
 export const trustedOrigins = () => [
     'http://localhost:5173',
     'http://localhost:3000',
-    ...(process.env.TRUSTED_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || []),
+    ...(process.env.TRUSTED_ORIGINS?.split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean) || []),
 ];
 
 export const createAuth = (database = db) =>
@@ -63,16 +65,26 @@ export const createAuth = (database = db) =>
 
         hooks: {
             before: createAuthMiddleware(async (ctx) => {
-                if (ctx.path === '/email-otp/send-verification-otp' &&
-                    ctx.body?.type !== 'email-verification') {
-                    throw new APIError('BAD_REQUEST', { message: 'Only email verification codes are supported.' });
+                if (
+                    ctx.path === '/email-otp/send-verification-otp' &&
+                    ctx.body?.type !== 'email-verification'
+                ) {
+                    throw new APIError('BAD_REQUEST', {
+                        message: 'Only email verification codes are supported.',
+                    });
                 }
-                if (['/sign-up/email', '/sign-in/username'].includes(ctx.path) &&
-                    typeof ctx.body?.username === 'string') {
+                if (
+                    ['/sign-up/email', '/sign-in/username'].includes(
+                        ctx.path,
+                    ) &&
+                    typeof ctx.body?.username === 'string'
+                ) {
                     ctx.body.username = ctx.body.username.trim().toLowerCase();
                 }
-                if (['/sign-up/email', '/sign-in/email'].includes(ctx.path) &&
-                    typeof ctx.body?.email === 'string') {
+                if (
+                    ['/sign-up/email', '/sign-in/email'].includes(ctx.path) &&
+                    typeof ctx.body?.email === 'string'
+                ) {
                     ctx.body.email = ctx.body.email.trim().toLowerCase();
                 }
                 if (
@@ -98,11 +110,14 @@ export const createAuth = (database = db) =>
                         message: 'New account registration is disabled.',
                     });
                 }
-                if (typeof ctx.body?.username !== 'string' ||
-                    !/^[a-z0-9_.]{2,30}$/.test(ctx.body.username)) {
+                if (
+                    typeof ctx.body?.username !== 'string' ||
+                    !/^[a-z0-9_.]{2,30}$/.test(ctx.body.username)
+                ) {
                     throw new APIError('BAD_REQUEST', {
                         code: 'INVALID_USERNAME',
-                        message: 'Username must contain 2 to 30 letters, numbers, dots, or underscores.',
+                        message:
+                            'Username must contain 2 to 30 letters, numbers, dots, or underscores.',
                     });
                 }
                 ctx.body.name ??= ctx.body.username;
@@ -138,27 +153,55 @@ export const createAuth = (database = db) =>
             }),
             after: createAuthMiddleware(async (ctx) => {
                 const returned = ctx.context.returned;
-                if (['/sign-in/email', '/sign-in/username'].includes(ctx.path) &&
-                    !(returned instanceof APIError) && ctx.context.newSession?.user.emailVerified) {
-                    await database.update(schema.user)
+                if (
+                    ['/sign-in/email', '/sign-in/username'].includes(
+                        ctx.path,
+                    ) &&
+                    !(returned instanceof APIError) &&
+                    ctx.context.newSession?.user.emailVerified
+                ) {
+                    await database
+                        .update(schema.user)
                         .set({ lastLoginAt: new Date() })
-                        .where(eq(schema.user.id, ctx.context.newSession.user.id));
+                        .where(
+                            eq(schema.user.id, ctx.context.newSession.user.id),
+                        );
                 }
-                if (!['/sign-in/email', '/sign-in/username'].includes(ctx.path) ||
-                    !(returned instanceof APIError) || returned.body?.code !== 'EMAIL_NOT_VERIFIED') return;
+                if (
+                    !['/sign-in/email', '/sign-in/username'].includes(
+                        ctx.path,
+                    ) ||
+                    !(returned instanceof APIError) ||
+                    returned.body?.code !== 'EMAIL_NOT_VERIFIED'
+                )
+                    return;
                 // Both credential endpoints verify the password before returning this error.
-                const identifier = ctx.path === '/sign-in/username' ? ctx.body?.username : ctx.body?.email;
+                const identifier =
+                    ctx.path === '/sign-in/username'
+                        ? ctx.body?.username
+                        : ctx.body?.email;
                 if (typeof identifier !== 'string') return;
-                const user = await database.select({ email: schema.user.email })
+                const user = await database
+                    .select({ email: schema.user.email })
                     .from(schema.user)
-                    .where(eq(ctx.path === '/sign-in/username' ? schema.user.username : schema.user.email,
-                        identifier.trim().toLowerCase()))
+                    .where(
+                        eq(
+                            ctx.path === '/sign-in/username'
+                                ? schema.user.username
+                                : schema.user.email,
+                            identifier.trim().toLowerCase(),
+                        ),
+                    )
                     .get();
-                if (user) return ctx.json({
-                    code: 'EMAIL_NOT_VERIFIED',
-                    message: returned.body.message,
-                    email: user.email,
-                }, { status: 403 });
+                if (user)
+                    return ctx.json(
+                        {
+                            code: 'EMAIL_NOT_VERIFIED',
+                            message: returned.body.message,
+                            email: user.email,
+                        },
+                        { status: 403 },
+                    );
             }),
         },
 
@@ -166,11 +209,22 @@ export const createAuth = (database = db) =>
             verification: {
                 create: {
                     before: async (verification) => {
-                        if (!verification.identifier.startsWith('email-verification-otp-')) return;
+                        if (
+                            !verification.identifier.startsWith(
+                                'email-verification-otp-',
+                            )
+                        )
+                            return;
                         // SQLite timestamps have second precision; tied codes otherwise
                         // make Better Auth select an older code after a quick resend.
-                        await database.delete(schema.verification)
-                            .where(eq(schema.verification.identifier, verification.identifier));
+                        await database
+                            .delete(schema.verification)
+                            .where(
+                                eq(
+                                    schema.verification.identifier,
+                                    verification.identifier,
+                                ),
+                            );
                     },
                 },
             },
@@ -215,7 +269,8 @@ export const createAuth = (database = db) =>
             username({
                 minUsernameLength: 2,
                 maxUsernameLength: 30,
-                usernameNormalization: (username) => username.trim().toLowerCase(),
+                usernameNormalization: (username) =>
+                    username.trim().toLowerCase(),
             }),
             emailOTP({
                 overrideDefaultEmailVerification: true,
@@ -226,8 +281,11 @@ export const createAuth = (database = db) =>
                 disableSignUp: true,
                 sendVerificationOTP: async ({ email, otp, type }) => {
                     if (type !== 'email-verification') return;
-                    await sendAuthEmail(email, 'Verify your Labs FCD email',
-                        `Your verification code is ${otp} (valid for 10 minutes).\n\nThen sign in to access your labs.`);
+                    await sendAuthEmail(
+                        email,
+                        'Verify your Labs FCD email',
+                        `Your verification code is ${otp} (valid for 10 minutes).\n\nThen sign in to access your labs.`,
+                    );
                 },
             }),
         ],

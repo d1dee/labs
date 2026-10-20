@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { user as userTable } from '../db/schema';
+import { user as userTable } from '../db/index';
 
 /**
  * Get a user by email using Drizzle.

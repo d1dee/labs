@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { firewallConfig } from '../db/schema';
+import { firewallConfig } from '../db/index';
 import { addressInRange, ipv4Range } from '../frontend/src/api/network';
 
 interface MikrotikResponse {
@@ -69,7 +69,10 @@ export async function callMikrotik(
             method,
             headers,
             signal: AbortSignal.timeout(15_000),
-            tls: { rejectUnauthorized: process.env.MIKROTIK_INSECURE_FETCH !== 'true' },
+            tls: {
+                rejectUnauthorized:
+                    process.env.MIKROTIK_INSECURE_FETCH !== 'true',
+            },
         };
 
         if (body) {
@@ -120,7 +123,10 @@ export async function testMikrotikConnection(config: {
         const response = await fetch(`${config.baseUrl}/rest/system/identity`, {
             method: 'GET',
             signal: AbortSignal.timeout(15_000),
-            tls: { rejectUnauthorized: process.env.MIKROTIK_INSECURE_FETCH !== 'true' },
+            tls: {
+                rejectUnauthorized:
+                    process.env.MIKROTIK_INSECURE_FETCH !== 'true',
+            },
             headers: {
                 Authorization: getBasicAuth(mikrotikConfig),
                 'Content-Type': 'application/json',
@@ -202,8 +208,11 @@ export async function toggleRuleDisabled(
         if (connections.success && Array.isArray(connections.data)) {
             const toDelete = connections.data.filter((conn: any) => {
                 const source = conn?.['src-address'];
-                return typeof source === 'string' && /^\*[0-9a-f]+$/i.test(conn['.id'] ?? '') &&
-                    addressInSubnet(source.replace(/:\d+$/, ''), cidr);
+                return (
+                    typeof source === 'string' &&
+                    /^\*[0-9a-f]+$/i.test(conn['.id'] ?? '') &&
+                    addressInSubnet(source.replace(/:\d+$/, ''), cidr)
+                );
             });
             for (const conn of toDelete) {
                 await callMikrotik(
@@ -236,15 +245,29 @@ export function parseByteCounter(value: unknown): number | null {
     return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
 }
 
-export async function getInterfaceUsage(organizationId: string, name: string): Promise<number | null> {
-    const response = await callMikrotik(organizationId, '/interface/print', 'POST', {
-        stats: '', '.query': [`name=${name}`], '.proplist': 'name,rx-byte,tx-byte',
-    });
-    const row = response.success && Array.isArray(response.data)
-        ? response.data.find((item: any) => item.name === name) : null;
+export async function getInterfaceUsage(
+    organizationId: string,
+    name: string,
+): Promise<number | null> {
+    const response = await callMikrotik(
+        organizationId,
+        '/interface/print',
+        'POST',
+        {
+            stats: '',
+            '.query': [`name=${name}`],
+            '.proplist': 'name,rx-byte,tx-byte',
+        },
+    );
+    const row =
+        response.success && Array.isArray(response.data)
+            ? response.data.find((item: any) => item.name === name)
+            : null;
     const rx = parseByteCounter(row?.['rx-byte']);
     const tx = parseByteCounter(row?.['tx-byte']);
-    return rx !== null && tx !== null && Number.isSafeInteger(rx + tx) ? rx + tx : null;
+    return rx !== null && tx !== null && Number.isSafeInteger(rx + tx)
+        ? rx + tx
+        : null;
 }
 
 export function addressInSubnet(address: string, subnet: string): boolean {
@@ -259,24 +282,58 @@ export function countOnlineDevices(
     if (details.subnet && !ipv4Range(details.subnet)) {
         return { connected: null, source: 'unavailable' };
     }
-    const scopedLeases = leases?.filter((lease) =>
-        lease && lease.disabled !== true && lease.disabled !== 'true' &&
-        lease.invalid !== true && lease.invalid !== 'true' &&
-        lease.status === 'bound' &&
-        (!details.dhcpServer || (lease['active-server'] || lease.server) === details.dhcpServer) &&
-        (!details.subnet || addressInSubnet(lease['active-address'] || lease.address || '', details.subnet)),
-    ) ?? null;
-    const leaseAddresses = new Set(scopedLeases?.map((lease) => lease['active-address'] || lease.address));
+    const scopedLeases =
+        leases?.filter(
+            (lease) =>
+                lease &&
+                lease.disabled !== true &&
+                lease.disabled !== 'true' &&
+                lease.invalid !== true &&
+                lease.invalid !== 'true' &&
+                lease.status === 'bound' &&
+                (!details.dhcpServer ||
+                    (lease['active-server'] || lease.server) ===
+                        details.dhcpServer) &&
+                (!details.subnet ||
+                    addressInSubnet(
+                        lease['active-address'] || lease.address || '',
+                        details.subnet,
+                    )),
+        ) ?? null;
+    const leaseAddresses = new Set(
+        scopedLeases?.map((lease) => lease['active-address'] || lease.address),
+    );
     // Never count the entire router when no lab-specific scope is known.
-    if (arp && (details.interface || details.subnet || (details.dhcpServer && scopedLeases))) {
+    if (
+        arp &&
+        (details.interface ||
+            details.subnet ||
+            (details.dhcpServer && scopedLeases))
+    ) {
         const devices = new Set<string>();
         for (const row of arp) {
             if (!['reachable', 'delay', 'probe'].includes(row.status)) continue;
             if (row.disabled === 'true' || row.disabled === true) continue;
-            if (row.invalid === 'true' || row.invalid === true || row.published === 'true' || row.published === true) continue;
-            if (details.interface && row.interface !== details.interface) continue;
-            if (details.subnet && !addressInSubnet(row.address || '', details.subnet)) continue;
-            if (!details.interface && !details.subnet && !leaseAddresses.has(row.address)) continue;
+            if (
+                row.invalid === 'true' ||
+                row.invalid === true ||
+                row.published === 'true' ||
+                row.published === true
+            )
+                continue;
+            if (details.interface && row.interface !== details.interface)
+                continue;
+            if (
+                details.subnet &&
+                !addressInSubnet(row.address || '', details.subnet)
+            )
+                continue;
+            if (
+                !details.interface &&
+                !details.subnet &&
+                !leaseAddresses.has(row.address)
+            )
+                continue;
             const identity = row['mac-address'] || row.address;
             if (identity) devices.add(String(identity).toLowerCase());
         }
@@ -286,17 +343,33 @@ export function countOnlineDevices(
         }
     }
     if (scopedLeases && (details.dhcpServer || details.subnet)) {
-        const devices = new Set(scopedLeases.map((lease) => lease['active-mac-address'] || lease['mac-address'] || lease.address).filter(Boolean).map((id) => String(id).toLowerCase()));
+        const devices = new Set(
+            scopedLeases
+                .map(
+                    (lease) =>
+                        lease['active-mac-address'] ||
+                        lease['mac-address'] ||
+                        lease.address,
+                )
+                .filter(Boolean)
+                .map((id) => String(id).toLowerCase()),
+        );
         return { connected: devices.size, source: 'dhcp' };
     }
     return { connected: null, source: 'unavailable' };
 }
 
-export async function getOnlineDevices(organizationId: string, details: { interface?: string; subnet?: string; dhcpServer?: string }) {
+export async function getOnlineDevices(
+    organizationId: string,
+    details: { interface?: string; subnet?: string; dhcpServer?: string },
+) {
     const [arp, leases] = await Promise.all([
         details.interface || details.subnet || details.dhcpServer
-            ? callMikrotik(organizationId, '/ip/arp') : Promise.resolve({ success: false, data: null }),
-        details.dhcpServer ? getDHCPLeases(organizationId, details.dhcpServer) : Promise.resolve({ success: false, data: null }),
+            ? callMikrotik(organizationId, '/ip/arp')
+            : Promise.resolve({ success: false, data: null }),
+        details.dhcpServer
+            ? getDHCPLeases(organizationId, details.dhcpServer)
+            : Promise.resolve({ success: false, data: null }),
     ]);
     return countOnlineDevices(
         arp.success && Array.isArray(arp.data) ? arp.data : null,

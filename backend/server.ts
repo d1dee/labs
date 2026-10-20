@@ -5,20 +5,27 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import * as path from 'path';
 import { db } from '../db/database';
-import { organization } from '../db/schema';
+import { organization } from '../db/index';
 import { auth } from './auth';
+import { logHttpError, logHttpRequest } from './http-logging';
+import { configureLogger, getLogger } from './logger';
 import { configRouter } from './routes/config';
-import { devicesRouter, invalidateDeviceDirectoryAfterMutation } from './routes/devices';
 import type { AppEnv } from './routes/context';
+import {
+    devicesRouter,
+    invalidateDeviceDirectoryAfterMutation,
+} from './routes/devices';
 import { fogRouter } from './routes/fog';
 import { labsRouter, startDataUsageSnapshots } from './routes/labs';
 import { organizationsRouter } from './routes/organizations';
 import { piholeRouter } from './routes/pihole';
 import { settingsRouter } from './routes/settings';
+import {
+    createStreamRouter,
+    streamIdentityMatches,
+    type StreamIdentity,
+} from './routes/stream';
 import { veyonRouter } from './routes/veyon';
-import { createStreamRouter, streamIdentityMatches, type StreamIdentity } from './routes/stream';
-import { configureLogger, getLogger } from './logger';
-import { logHttpError, logHttpRequest } from './http-logging';
 
 // Configure LogTape before handling any request so every logger in the
 // backend routes to the console and the rotating log file from the start.
@@ -56,13 +63,21 @@ app.use('*', async (c, next) => {
     // This binding is injected only by the in-process stream dispatcher, never
     // parsed from an HTTP header. A session or membership change ends the stream.
     if (c.env && 'streamIdentity' in c.env) {
-        const actual: StreamIdentity = session ? {
-            userId: session.user.id,
-            sessionId: session.session.id,
-            organizationId: session.user.organizationId ?? null,
-        } : null;
+        const actual: StreamIdentity = session
+            ? {
+                  userId: session.user.id,
+                  sessionId: session.session.id,
+                  organizationId: session.user.organizationId ?? null,
+              }
+            : null;
         if (!streamIdentityMatches(c.env.streamIdentity ?? null, actual)) {
-            return c.json({ error: 'Session or organization changed', code: 'STREAM_IDENTITY_CHANGED' }, session ? 403 : 401);
+            return c.json(
+                {
+                    error: 'Session or organization changed',
+                    code: 'STREAM_IDENTITY_CHANGED',
+                },
+                session ? 403 : 401,
+            );
         }
     }
 
@@ -105,10 +120,14 @@ app.route('/api', piholeRouter);
 app.route('/api', fogRouter);
 app.route('/api', settingsRouter);
 app.route('/api', veyonRouter);
-app.route('/api', createStreamRouter((request, streamIdentity) =>
-    app.request(request, undefined, { streamIdentity }),
-    ['http://10.10.1.10:5173', 'http://localhost:5173'],
-));
+app.route(
+    '/api',
+    createStreamRouter(
+        (request, streamIdentity) =>
+            app.request(request, undefined, { streamIdentity }),
+        ['http://10.10.1.10:5173', 'http://localhost:5173'],
+    ),
+);
 
 // Start background data usage snapshots
 startDataUsageSnapshots();
@@ -133,7 +152,9 @@ serve({ fetch: app.fetch, port }, (info) => {
         port: info.port,
     });
     serverLogger.info('Better Auth endpoints available at /api/auth/*');
-    serverLogger.debug('Sign in with username: POST /api/auth/sign-in/username');
+    serverLogger.debug(
+        'Sign in with username: POST /api/auth/sign-in/username',
+    );
     serverLogger.debug('Session check: GET /api/auth/session');
     serverLogger.debug('Sign out: POST /api/auth/sign-out');
 });

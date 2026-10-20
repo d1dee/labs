@@ -1,10 +1,12 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/database';
-import { demoState } from '../db/schema';
+import { demoState } from '../db/index';
 
 // ===================== User Check =====================
 
-export function isDemoUser(userObj: { username?: string | null } | null): boolean {
+export function isDemoUser(
+    userObj: { username?: string | null } | null,
+): boolean {
     return userObj?.username === 'demo';
 }
 
@@ -22,12 +24,14 @@ export async function getDemoState(
     if (resourceId) {
         conditions.push(eq(demoState.resourceId, resourceId));
     }
-    return db
-        .select()
-        .from(demoState)
-        .where(and(...conditions))
-        // Timestamp columns store whole seconds; rowid preserves insertion order for ties.
-        .orderBy(desc(demoState.createdAt), desc(sql`${demoState}.rowid`));
+    return (
+        db
+            .select()
+            .from(demoState)
+            .where(and(...conditions))
+            // Timestamp columns store whole seconds; rowid preserves insertion order for ties.
+            .orderBy(desc(demoState.createdAt), desc(sql`${demoState}.rowid`))
+    );
 }
 
 export async function getLatestDemoState(
@@ -130,17 +134,37 @@ export interface DemoPiholeDomainOverride {
     date_modified: number;
 }
 
-export async function getDemoPiholeDomainOverrides(
-    userId: string,
-): Promise<{
+export async function getDemoPiholeDomainOverrides(userId: string): Promise<{
     additions: DemoPiholeDomainOverride[];
-    deletions: Array<{ domain: string; type: 'allow' | 'deny'; kind: 'exact' | 'regex' }>;
-    updates: Array<{ domain: string; enabled?: boolean; comment?: string; groups?: number[]; newType?: 'allow' | 'deny'; newKind?: 'exact' | 'regex' }>;
+    deletions: Array<{
+        domain: string;
+        type: 'allow' | 'deny';
+        kind: 'exact' | 'regex';
+    }>;
+    updates: Array<{
+        domain: string;
+        enabled?: boolean;
+        comment?: string;
+        groups?: number[];
+        newType?: 'allow' | 'deny';
+        newKind?: 'exact' | 'regex';
+    }>;
 }> {
     const states = await getDemoState(userId, 'pihole_domain');
     const additions: DemoPiholeDomainOverride[] = [];
-    const deletions: Array<{ domain: string; type: 'allow' | 'deny'; kind: 'exact' | 'regex' }> = [];
-    const updates: Array<{ domain: string; enabled?: boolean; comment?: string; groups?: number[]; newType?: 'allow' | 'deny'; newKind?: 'exact' | 'regex' }> = [];
+    const deletions: Array<{
+        domain: string;
+        type: 'allow' | 'deny';
+        kind: 'exact' | 'regex';
+    }> = [];
+    const updates: Array<{
+        domain: string;
+        enabled?: boolean;
+        comment?: string;
+        groups?: number[];
+        newType?: 'allow' | 'deny';
+        newKind?: 'exact' | 'regex';
+    }> = [];
 
     // Track the effective state by processing from newest to oldest
     const processedDomains = new Set<string>();
@@ -246,9 +270,7 @@ export function applyDemoPiholeDomains(
     // Apply type/kind changes first (move domain to new type/kind)
     for (const update of demoOverrides.updates) {
         if (update.newType || update.newKind) {
-            const idx = domains.findIndex(
-                (d) => d.domain === update.domain,
-            );
+            const idx = domains.findIndex((d) => d.domain === update.domain);
             if (idx !== -1) {
                 if (update.newType) domains[idx].type = update.newType;
                 if (update.newKind) domains[idx].kind = update.newKind;
@@ -259,13 +281,14 @@ export function applyDemoPiholeDomains(
 
     // Apply other updates
     for (const update of demoOverrides.updates) {
-        const idx = domains.findIndex(
-            (d) => d.domain === update.domain,
-        );
+        const idx = domains.findIndex((d) => d.domain === update.domain);
         if (idx !== -1) {
-            if (update.enabled !== undefined) domains[idx].enabled = update.enabled;
-            if (update.comment !== undefined) domains[idx].comment = update.comment;
-            if (update.groups !== undefined) domains[idx].groups = update.groups;
+            if (update.enabled !== undefined)
+                domains[idx].enabled = update.enabled;
+            if (update.comment !== undefined)
+                domains[idx].comment = update.comment;
+            if (update.groups !== undefined)
+                domains[idx].groups = update.groups;
             domains[idx].date_modified = Date.now();
         }
     }
@@ -274,7 +297,10 @@ export function applyDemoPiholeDomains(
     for (const add of demoOverrides.additions) {
         // Check if domain already exists (from real data or previous add)
         const exists = domains.some(
-            (d) => d.domain === add.domain && d.type === add.type && d.kind === add.kind,
+            (d) =>
+                d.domain === add.domain &&
+                d.type === add.type &&
+                d.kind === add.kind,
         );
         if (!exists) {
             domains.push({
@@ -304,7 +330,10 @@ export async function getDemoFogHostOverrides(userId: string): Promise<{
     const updates: Array<Record<string, unknown> & { id: number }> = [];
     const deletions: number[] = [];
 
-    const effective = new Map<number, { action: string; data: Record<string, unknown> }>();
+    const effective = new Map<
+        number,
+        { action: string; data: Record<string, unknown> }
+    >();
     // Replay the event history; a newer patch must not discard an earlier creation.
     for (const state of states.slice().reverse()) {
         const id = Number(state.resourceId);
@@ -312,7 +341,10 @@ export async function getDemoFogHostOverrides(userId: string): Promise<{
         const previous = effective.get(id);
         if (state.action === 'update') {
             if (previous?.action === 'delete') continue;
-            effective.set(id, { action: previous?.action === 'create' ? 'create' : 'update', data: { ...previous?.data, ...data } });
+            effective.set(id, {
+                action: previous?.action === 'create' ? 'create' : 'update',
+                data: { ...previous?.data, ...data },
+            });
         } else if (state.action === 'create' || state.action === 'delete') {
             effective.set(id, { action: state.action, data });
         }
@@ -401,7 +433,11 @@ export function applyDemoFogHost(
  */
 export async function buildDemoPiholeDomainsResponse(
     userId: string,
-    getRealDomains: () => Promise<{ success: boolean; data?: { domains: any[]; took: number; processed?: any }; error?: string }>,
+    getRealDomains: () => Promise<{
+        success: boolean;
+        data?: { domains: any[]; took: number; processed?: any };
+        error?: string;
+    }>,
 ): Promise<{ domains: any[]; took: number; processed?: any }> {
     const overrides = await getDemoPiholeDomainOverrides(userId);
     const realResult = await getRealDomains();
@@ -421,7 +457,11 @@ export async function buildDemoPiholeDomainsResponse(
  */
 export async function buildDemoFogHostsResponse(
     userId: string,
-    getRealHosts: () => Promise<{ success: boolean; data?: { count: number; hosts: any[] }; error?: string }>,
+    getRealHosts: () => Promise<{
+        success: boolean;
+        data?: { count: number; hosts: any[] };
+        error?: string;
+    }>,
 ): Promise<{ count: number; hosts: any[] }> {
     const overrides = await getDemoFogHostOverrides(userId);
     const realResult = await getRealHosts();
@@ -441,7 +481,11 @@ export async function buildDemoFogHostsResponse(
 export async function buildDemoFogHostResponse(
     userId: string,
     hostId: number,
-    getRealHost: () => Promise<{ success: boolean; data?: any; error?: string }>,
+    getRealHost: () => Promise<{
+        success: boolean;
+        data?: any;
+        error?: string;
+    }>,
 ): Promise<any> {
     const overrides = await getDemoFogHostOverrides(userId);
     const realResult = await getRealHost();

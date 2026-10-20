@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { firewallConfig, lab } from '../db/schema';
+import { firewallConfig, lab } from '../db/index';
 
 export interface ConfigLab {
     id: string;
@@ -12,7 +12,7 @@ export interface ConfigLab {
     dnsSuffix?: string | null;
 }
 
-export function mapLabs(labs: typeof lab.$inferSelect[]): ConfigLab[] {
+export function mapLabs(labs: (typeof lab.$inferSelect)[]): ConfigLab[] {
     return labs.map((l) => ({
         id: l.id,
         name: l.name,

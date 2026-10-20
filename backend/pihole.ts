@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
-import { piholeConfig } from '../db/schema';
+import { piholeConfig } from '../db/index';
 
 // ===================== Types =====================
 
@@ -183,7 +183,8 @@ export class PiholeClient {
                 error?: { message?: string };
             };
             if (
-                res.ok && json.session?.valid &&
+                res.ok &&
+                json.session?.valid &&
                 (json.session.sid ||
                     (json.session.sid === null && json.session.validity === -1))
             ) {
@@ -301,13 +302,18 @@ export class PiholeClient {
     ): Promise<PiholeResult<PiholeTopDomains>> {
         if (!this.configured) return unconfigured();
         try {
-            const query = new URLSearchParams({ blocked: String(blocked), count: String(count) });
+            const query = new URLSearchParams({
+                blocked: String(blocked),
+                count: String(count),
+            });
             if (range) {
                 query.set('from', String(range.from));
                 query.set('until', String(range.until));
             }
             // Date ranges are only supported by Pi-hole's long-term database endpoint.
-            const path = range ? '/stats/database/top_domains' : '/stats/top_domains';
+            const path = range
+                ? '/stats/database/top_domains'
+                : '/stats/top_domains';
             const res = await this.piholeFetch(
                 `${path}?${query}`,
                 range ? { signal: AbortSignal.timeout(45_000) } : {},
@@ -568,7 +574,11 @@ export async function getPiholeCredentials(
         where: eq(piholeConfig.organizationId, organizationId),
     });
     if (row && row.url && row.password) {
-        return { url: row.url, password: row.password, verifyTls: row.verifyTls };
+        return {
+            url: row.url,
+            password: row.password,
+            verifyTls: row.verifyTls,
+        };
     }
 }
 
@@ -592,7 +602,11 @@ export async function getPiholeClient(
 
     const cached = clientCache.get(creds.url);
     const verifyTls = creds.verifyTls !== false;
-    if (cached && cached.password === creds.password && cached.verifyTls === verifyTls) {
+    if (
+        cached &&
+        cached.password === creds.password &&
+        cached.verifyTls === verifyTls
+    ) {
         return cached.client;
     }
 

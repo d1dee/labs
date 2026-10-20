@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
+import { organization } from '../../db/index';
 import { auth } from '../auth';
-import { organization } from '../../db/schema';
 import type { StreamIdentity } from './stream';
 
 export type Organization = typeof organization.$inferSelect;

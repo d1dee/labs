@@ -2,26 +2,26 @@ import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import process from 'process';
 import { setInterval } from 'timers';
 import { db } from '../../db/database';
-import { activationHistory, dataUsageHistory } from '../../db/schema';
+import { activationHistory, dataUsageHistory } from '../../db/index';
 import {
     getDemoLabEnabled,
     getDemoLabHistory,
     isDemoUser,
     setDemoLabState,
 } from '../demo';
-import { errorProperty, getLogger } from '../logger';
-import { reconcileLabActivation, withLabActivation } from '../lab-activation';
 import {
     type ConfigLab,
     getFirewallConfigWithLabs,
     mapLabs,
 } from '../firewall-config';
+import { reconcileLabActivation, withLabActivation } from '../lab-activation';
+import { errorProperty, getLogger } from '../logger';
 import {
     getInterfaceUsage,
-    getOnlineDevices,
-    parseByteCounter,
     getLabDetailsByRuleId,
+    getOnlineDevices,
     getRuleStatus,
+    parseByteCounter,
     resolveSubnetAndDhcpServer,
     toggleRuleDisabled,
 } from '../mikrotik';
@@ -44,9 +44,14 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
     const ruleResponse = await withLabActivation(lab.id, async () => {
         const response = await getRuleStatus(organizationId, lab.ruleId);
         if (!isDemoUser(user)) {
-            if (!response.success || !['accept', 'drop'].includes(response.data?.action) ||
-                ![false, 'false'].includes(response.data?.disabled)) {
-                throw new Error(`Cannot determine access state for lab ${lab.name}: firewall rule unavailable, disabled, or unsupported.`);
+            if (
+                !response.success ||
+                !['accept', 'drop'].includes(response.data?.action) ||
+                ![false, 'false'].includes(response.data?.disabled)
+            ) {
+                throw new Error(
+                    `Cannot determine access state for lab ${lab.name}: firewall rule unavailable, disabled, or unsupported.`,
+                );
             }
             reconcileLabActivation(lab.id, response.data.action === 'accept');
         }
@@ -74,9 +79,18 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
 
     // Prefer recent ARP reachability, with scoped bound leases as an estimate.
     const [devices, totalBytes] = await Promise.all([
-        getOnlineDevices(organizationId, { interface: lab.interface, subnet, dhcpServer }),
-        lab.interface ? getInterfaceUsage(organizationId, lab.interface)
-            : Promise.resolve(ruleResponse.success ? parseByteCounter(ruleResponse.data?.bytes) : null),
+        getOnlineDevices(organizationId, {
+            interface: lab.interface,
+            subnet,
+            dhcpServer,
+        }),
+        lab.interface
+            ? getInterfaceUsage(organizationId, lab.interface)
+            : Promise.resolve(
+                  ruleResponse.success
+                      ? parseByteCounter(ruleResponse.data?.bytes)
+                      : null,
+              ),
     ]);
 
     const stats = {
@@ -91,7 +105,10 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
             disabled: ruleDisabled,
             comment: ruleResponse.data?.comment,
             status: ruleDisabled ? 'blocked' : 'active',
-            usageMB: totalBytes === null ? null : Number((totalBytes / (1024 * 1024)).toFixed(2)),
+            usageMB:
+                totalBytes === null
+                    ? null
+                    : Number((totalBytes / (1024 * 1024)).toFixed(2)),
             usageSource: lab.interface ? 'interface' : 'firewall',
         },
         devices: {
@@ -212,16 +229,22 @@ labsRouter.get('/labs/overview', async (c) => {
         const labs = mapLabs(storedConfig.labs);
 
         // Reconcile each lab before reading its history for this response.
-        const entries = await Promise.all(labs.map(async (lab) => {
-            const stats = await buildLabStats(lab, user);
-            const history = await fetchLabHistory(user, lab.id);
-            return { labId: lab.id, stats, history };
-        }));
+        const entries = await Promise.all(
+            labs.map(async (lab) => {
+                const stats = await buildLabStats(lab, user);
+                const history = await fetchLabHistory(user, lab.id);
+                return { labId: lab.id, stats, history };
+            }),
+        );
 
         return c.json({
             labs,
-            stats: Object.fromEntries(entries.map(({ labId, stats }) => [labId, stats])),
-            history: Object.fromEntries(entries.map(({ labId, history }) => [labId, history])),
+            stats: Object.fromEntries(
+                entries.map(({ labId, stats }) => [labId, stats]),
+            ),
+            history: Object.fromEntries(
+                entries.map(({ labId, history }) => [labId, history]),
+            ),
         });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -308,8 +331,12 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
     } catch {
         return c.json({ error: 'Request body must be valid JSON' }, 400);
     }
-    if (!body || typeof body !== 'object' || !('enable' in body) ||
-        typeof body.enable !== 'boolean') {
+    if (
+        !body ||
+        typeof body !== 'object' ||
+        !('enable' in body) ||
+        typeof body.enable !== 'boolean'
+    ) {
         return c.json({ error: 'enable must be a boolean' }, 400);
     }
     const { enable } = body;
@@ -341,11 +368,14 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
             try {
                 await setDemoLabState(user.id, labId, enable);
             } catch {
-                return c.json({
-                    success: false,
-                    code: 'HISTORY_SAVE_FAILED',
-                    error: 'Demo lab access change could not be saved.',
-                }, 500);
+                return c.json(
+                    {
+                        success: false,
+                        code: 'HISTORY_SAVE_FAILED',
+                        error: 'Demo lab access change could not be saved.',
+                    },
+                    500,
+                );
             }
             return c.json({
                 success: true,
@@ -365,17 +395,31 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
             );
 
             if (!result.success) {
-                return c.json({ success: false, error: result.error || 'The router could not apply the lab access change.' }, 500);
+                return c.json(
+                    {
+                        success: false,
+                        error:
+                            result.error ||
+                            'The router could not apply the lab access change.',
+                    },
+                    500,
+                );
             }
 
             const verified = await getRuleStatus(organizationId, lab.ruleId);
-            if (!verified.success || verified.data?.action !== (enable ? 'accept' : 'drop') ||
-                ![false, 'false'].includes(verified.data?.disabled)) {
-                return c.json({
-                    success: false,
-                    code: 'ROUTER_STATE_UNVERIFIED',
-                    error: 'The router change could not be verified. Lab access may have changed; refresh its status before retrying.',
-                }, 502);
+            if (
+                !verified.success ||
+                verified.data?.action !== (enable ? 'accept' : 'drop') ||
+                ![false, 'false'].includes(verified.data?.disabled)
+            ) {
+                return c.json(
+                    {
+                        success: false,
+                        code: 'ROUTER_STATE_UNVERIFIED',
+                        error: 'The router change could not be verified. Lab access may have changed; refresh its status before retrying.',
+                    },
+                    502,
+                );
             }
 
             try {
@@ -387,13 +431,16 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
                     createdAt: new Date(),
                 });
             } catch {
-                return c.json({
-                    success: false,
-                    code: 'HISTORY_SAVE_FAILED',
-                    routerApplied: true,
-                    enabled: enable,
-                    error: 'Lab access changed on the router, but its activation history could not be saved. Refresh its status before retrying.',
-                }, 500);
+                return c.json(
+                    {
+                        success: false,
+                        code: 'HISTORY_SAVE_FAILED',
+                        routerApplied: true,
+                        enabled: enable,
+                        error: 'Lab access changed on the router, but its activation history could not be saved. Refresh its status before retrying.',
+                    },
+                    500,
+                );
             }
 
             return c.json({
@@ -417,9 +464,14 @@ labsRouter.get('/labs/:labId/history', async (c) => {
     const labId = c.req.param('labId');
 
     try {
-        if (!user.organizationId) return c.json({ error: 'You must join an organization first' }, 403);
+        if (!user.organizationId)
+            return c.json(
+                { error: 'You must join an organization first' },
+                403,
+            );
         const config = await getFirewallConfigWithLabs(user.organizationId);
-        if (!config?.labs.some((lab) => lab.id === labId)) return c.json({ error: 'Lab not found' }, 404);
+        if (!config?.labs.some((lab) => lab.id === labId))
+            return c.json({ error: 'Lab not found' }, 404);
         return c.json({ history: await fetchLabHistory(user, labId) });
     } catch (error) {
         return c.json({ error: String(error) }, 500);
@@ -440,17 +492,36 @@ async function saveDataUsageSnapshot() {
             const labs = mapLabs(storedConfig.labs);
 
             for (const lab of labs) {
-                const ruleResponse = await withLabActivation(lab.id, async () => {
-                    const response = await getRuleStatus(storedConfig.organizationId, lab.ruleId);
-                    if (response.success && ['accept', 'drop'].includes(response.data?.action) &&
-                        [false, 'false'].includes(response.data?.disabled)) {
-                        reconcileLabActivation(lab.id, response.data.action === 'accept');
-                    }
-                    return response;
-                });
+                const ruleResponse = await withLabActivation(
+                    lab.id,
+                    async () => {
+                        const response = await getRuleStatus(
+                            storedConfig.organizationId,
+                            lab.ruleId,
+                        );
+                        if (
+                            response.success &&
+                            ['accept', 'drop'].includes(
+                                response.data?.action,
+                            ) &&
+                            [false, 'false'].includes(response.data?.disabled)
+                        ) {
+                            reconcileLabActivation(
+                                lab.id,
+                                response.data.action === 'accept',
+                            );
+                        }
+                        return response;
+                    },
+                );
                 const totalBytes = lab.interface
-                    ? await getInterfaceUsage(storedConfig.organizationId, lab.interface)
-                    : ruleResponse?.success ? parseByteCounter(ruleResponse.data?.bytes) : null;
+                    ? await getInterfaceUsage(
+                          storedConfig.organizationId,
+                          lab.interface,
+                      )
+                    : ruleResponse?.success
+                      ? parseByteCounter(ruleResponse.data?.bytes)
+                      : null;
                 if (totalBytes !== null) {
                     const usageMB = Math.round(
                         Number(totalBytes) / (1024 * 1024),
@@ -478,9 +549,15 @@ async function saveDataUsageSnapshot() {
 
 export function startDataUsageSnapshots() {
     if (snapshotTimer) return;
-    const configured = Number(process.env.DATA_USAGE_SNAPSHOT_INTERVAL ?? 300_000);
-    const interval = Number.isSafeInteger(configured) && configured >= 1_000 && configured <= 2_147_483_647
-        ? configured : 300_000;
+    const configured = Number(
+        process.env.DATA_USAGE_SNAPSHOT_INTERVAL ?? 300_000,
+    );
+    const interval =
+        Number.isSafeInteger(configured) &&
+        configured >= 1_000 &&
+        configured <= 2_147_483_647
+            ? configured
+            : 300_000;
     snapshotTimer = setInterval(saveDataUsageSnapshot, interval);
     void saveDataUsageSnapshot();
 }
@@ -496,9 +573,14 @@ labsRouter.get('/labs/:labId/usage-history', async (c) => {
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
     try {
-        if (!user.organizationId) return c.json({ error: 'You must join an organization first' }, 403);
+        if (!user.organizationId)
+            return c.json(
+                { error: 'You must join an organization first' },
+                403,
+            );
         const config = await getFirewallConfigWithLabs(user.organizationId);
-        if (!config?.labs.some((lab) => lab.id === labId)) return c.json({ error: 'Lab not found' }, 404);
+        if (!config?.labs.some((lab) => lab.id === labId))
+            return c.json({ error: 'Lab not found' }, 404);
         const usageHistory = await db
             .select()
             .from(dataUsageHistory)
