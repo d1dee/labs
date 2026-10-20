@@ -47,8 +47,64 @@ export function migrateOrganizationAccounts(client: Database) {
         .immediate();
 }
 
+// The auth tables were briefly declared with snake_case columns. Restore the
+// project wide camelCase columns so the Drizzle model, the raw SQL migrations
+// and the existing installations all address the same columns.
+const authColumnRenames: ReadonlyArray<
+    readonly [table: string, from: string, to: string, timestamp: boolean]
+> = [
+    ['user', 'email_verified', 'emailVerified', false],
+    ['user', 'display_username', 'displayUsername', false],
+    ['user', 'organization_id', 'organizationId', false],
+    ['user', 'created_at', 'createdAt', true],
+    ['user', 'updated_at', 'updatedAt', true],
+    ['session', 'expires_at', 'expiresAt', true],
+    ['session', 'ip_address', 'ipAddress', false],
+    ['session', 'user_agent', 'userAgent', false],
+    ['session', 'user_id', 'userId', false],
+    ['session', 'created_at', 'createdAt', true],
+    ['session', 'updated_at', 'updatedAt', true],
+    ['account', 'account_id', 'accountId', false],
+    ['account', 'provider_id', 'providerId', false],
+    ['account', 'user_id', 'userId', false],
+    ['account', 'created_at', 'createdAt', true],
+    ['account', 'updated_at', 'updatedAt', true],
+    ['verification', 'expires_at', 'expiresAt', true],
+    ['verification', 'created_at', 'createdAt', true],
+    ['verification', 'updated_at', 'updatedAt', true],
+];
+
+export function migrateAuthColumns(client: Database) {
+    client
+        .transaction(() => {
+            for (const [table, from, to, timestamp] of authColumnRenames) {
+                const columns = client
+                    .query(`PRAGMA table_info("${table}")`)
+                    .all() as Array<{ name: string }>;
+                if (
+                    !columns.some((entry) => entry.name === from) ||
+                    columns.some((entry) => entry.name === to)
+                ) {
+                    continue;
+                }
+                client.run(
+                    `ALTER TABLE "${table}" RENAME COLUMN "${from}" TO "${to}"`,
+                );
+                // Values written while the column held milliseconds must keep
+                // their meaning once the column is read back as seconds.
+                if (timestamp) {
+                    client.run(
+                        `UPDATE "${table}" SET "${to}" = "${to}" / 1000 WHERE "${to}" > 100000000000`,
+                    );
+                }
+            }
+        })
+        .immediate();
+}
+
 // Never infer historical ownership or login timestamps from membership/sessions.
 migrateOrganizationAccounts(sqliteDb);
+migrateAuthColumns(sqliteDb);
 
 // SQLite cannot drop NOT NULL in place. Preserve explicit rowids because they
 // break ties between history events with the same timestamp. Disable FK checks
