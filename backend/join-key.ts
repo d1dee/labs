@@ -11,7 +11,7 @@ import {
  * Separators and casing are ignored so `abcd-efgh` finds `ABCDEFGH`.
  */
 export function findOrganizationByJoinKey(
-    database: typeof db,
+    database: Pick<typeof db, 'select'>,
     input: string,
 ) {
     const key = normalizeJoinKey(input).toLowerCase();

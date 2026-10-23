@@ -11,6 +11,8 @@ import {
     Card,
     Divider,
     Group,
+    Modal,
+    Select,
     SimpleGrid,
     Stack,
     Text,
@@ -46,16 +48,34 @@ export function OrganizationSettings({
     enabled?: boolean;
 }) {
     const {
+        user,
         organization: userOrganization,
         setOrganization: onOrganizationChange,
     } = useSessionContext();
     const [loading, setLoading] = useState(false);
     const [joining, setJoining] = useState(false);
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [leaveOrganizationId, setLeaveOrganizationId] = useState<string | null>(null);
+    const [leaving, setLeaving] = useState(false);
+    const [leaveError, setLeaveError] = useState<string | null>(null);
+    const [awaitingLeaveRefresh, setAwaitingLeaveRefresh] = useState(false);
+    const [confirmOrganizationName, setConfirmOrganizationName] = useState('');
+    const [newCreatorUserId, setNewCreatorUserId] = useState<string | null>(null);
     const refresh = useApiStream<{ organizations: Organization[] }>(
         enabled ? '/api/organizations' : null,
-        (data) => onOrganizationChange(data.organizations[0] ?? null),
+        (data) => {
+            onOrganizationChange(data.organizations[0] ?? null);
+            setAwaitingLeaveRefresh(false);
+        },
     );
+    const members = userOrganization?.members;
+    const membersReady = !!user && !!members?.some((member) => member.id === user.id);
+    const soleMember = membersReady && members?.length === 1;
+    const transferRequired = !soleMember && userOrganization?.createdByUserId === user?.id;
+    const successors = members?.filter((member) => member.id !== user?.id && member.deletionProtectionReason !== 'demo' && member.canReceiveOwnership !== false) ?? [];
+    const canLeave = enabled && membersReady && !awaitingLeaveRefresh &&
+        (soleMember ? confirmOrganizationName === userOrganization?.name :
+            !transferRequired || successors.some((member) => member.id === newCreatorUserId));
     const displayJoinKey = userOrganization
         ? formatJoinKey(userOrganization.joinKey)
         : '';
@@ -214,24 +234,30 @@ export function OrganizationSettings({
     };
 
     const leaveOrganization = async () => {
-        if (!userOrganization) return;
+        if (!userOrganization || leaveOrganizationId !== userOrganization.id || !canLeave || leaving) return;
 
-        setJoining(true);
+        setLeaving(true);
+        setLeaveError(null);
         try {
             const { error } = await betterFetch(
                 `/api/organizations/${userOrganization.id}/leave`,
                 {
                     method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(soleMember ? { confirmOrganizationName } :
+                        transferRequired ? { newCreatorUserId } : {}),
                 },
             );
 
             if (error) {
-                notifications.show({
-                    title: 'Error',
-                    message: 'Failed to leave organization',
-                    color: 'red',
-                    icon: <IconX size={16} />,
-                });
+                setLeaveError(error.message || 'Failed to leave organization. Please try again.');
+                if (error.status === 409) {
+                    setLeaveError(`${error.message || 'Institution membership or ownership changed.'} Review the refreshed details and confirm again.`);
+                    setConfirmOrganizationName('');
+                    setNewCreatorUserId(null);
+                    setAwaitingLeaveRefresh(true);
+                    refresh();
+                }
                 return;
             }
 
@@ -243,16 +269,12 @@ export function OrganizationSettings({
             });
 
             onOrganizationChange(null);
+            setLeaveOrganizationId(null);
             refresh();
-        } catch (err) {
-            notifications.show({
-                title: 'Error',
-                message: 'Failed to leave organization',
-                color: 'red',
-                icon: <IconX size={16} />,
-            });
+        } catch {
+            setLeaveError('Unable to leave institution. Check your connection and try again.');
         } finally {
-            setJoining(false);
+            setLeaving(false);
         }
     };
 
@@ -421,8 +443,13 @@ export function OrganizationSettings({
                             color='gray'
                             size='xs'
                             leftSection={<IconLogout size={14} />}
-                            onClick={leaveOrganization}
-                            loading={joining}
+                            onClick={() => {
+                                setConfirmOrganizationName('');
+                                setNewCreatorUserId(null);
+                                setLeaveError(null);
+                                setLeaveOrganizationId(userOrganization.id);
+                            }}
+                            disabled={!enabled || !membersReady || awaitingLeaveRefresh || leaving}
                         >
                             Leave institution
                         </Button>
@@ -525,6 +552,59 @@ export function OrganizationSettings({
                     </Text>
                 </Stack>
             </Card>
+            <Modal
+                opened={enabled && leaveOrganizationId === userOrganization.id}
+                onClose={() => { if (!leaving) setLeaveOrganizationId(null); }}
+                title={soleMember ? 'Permanently delete institution?' : transferRequired ? 'Transfer admin and leave institution?' : 'Leave institution?'}
+                closeOnClickOutside={!leaving}
+                closeOnEscape={!leaving}
+                withCloseButton={!leaving}
+                closeButtonProps={{ 'aria-label': 'Cancel leaving institution' }}
+                centered
+            >
+                <Stack gap='md'>
+                    {!membersReady || awaitingLeaveRefresh ? (
+                        <Text role='status'>Refreshing institution membership. Please wait before confirming.</Text>
+                    ) : soleMember ? (
+                        <>
+                            <Alert color='red' title='Permanent deletion cannot be undone' role='alert'>
+                                You are the last member. Leaving permanently deletes {userOrganization.name} and all its configuration, labs, history, and inventory. Your account is retained.
+                            </Alert>
+                            <TextInput
+                                label='Confirm institution name'
+                                description={`Type ${userOrganization.name} exactly to confirm permanent deletion.`}
+                                value={confirmOrganizationName}
+                                onChange={(event) => setConfirmOrganizationName(event.currentTarget.value)}
+                                disabled={leaving}
+                                autoComplete='off'
+                            />
+                        </>
+                    ) : transferRequired ? (
+                        <>
+                            <Text size='sm'>As the creator, you must choose another member to become the new admin (creator). Ownership will transfer and you will leave in one operation. Institution data and your account are retained.</Text>
+                            <Select
+                                label='New admin (creator)'
+                                placeholder='Choose a member'
+                                data={successors.map((member) => ({ value: member.id, label: `${member.name} (${member.email})` }))}
+                                value={newCreatorUserId}
+                                onChange={setNewCreatorUserId}
+                                disabled={leaving}
+                                allowDeselect={false}
+                            />
+                            {!successors.length && <Alert color='yellow'>No eligible member is available. A non-demo member must join before you can transfer ownership and leave.</Alert>}
+                        </>
+                    ) : (
+                        <Text size='sm'>Leave {userOrganization.name}? You will lose access to this institution. Its shared data and your account are retained.</Text>
+                    )}
+                    {leaveError && <Alert color='red' role='alert'>{leaveError}</Alert>}
+                    <Group justify='flex-end'>
+                        <Button variant='default' disabled={leaving} onClick={() => setLeaveOrganizationId(null)}>Cancel</Button>
+                        <Button color='red' loading={leaving} disabled={!canLeave} onClick={leaveOrganization}>
+                            {soleMember ? 'Delete institution permanently' : transferRequired ? 'Transfer and leave' : 'Confirm leave'}
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
             <OrganizationMembersCard
                 key={userOrganization.id}
                 organization={userOrganization}

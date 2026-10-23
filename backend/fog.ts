@@ -995,6 +995,10 @@ export async function getFogCredentials(
 // tokens are compared to detect credential rotation.
 const clientCache = new Map<string, { tokens: string; client: FogClient }>();
 
+export function clearFogClient(url: string) {
+    clientCache.delete(url);
+}
+
 /**
  * Get a (cached) FOG client bound to the resolved credentials for the
  * given organization. Returns an unconfigured client when no credentials

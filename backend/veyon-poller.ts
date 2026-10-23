@@ -1105,6 +1105,19 @@ export class VeyonScreenshotPoller {
         return retained ? { ...retained.state } : undefined;
     }
 
+    // Include retained FOG-backed targets as well as active manual computers.
+    forgetOrganization(organizationId: string) {
+        const computerIds = new Set<string>();
+        for (const worker of this.workers.values()) {
+            if (worker.organizationId === organizationId) computerIds.add(worker.computer.id);
+        }
+        for (const [key, retained] of this.retained) {
+            if (retained.organizationId === organizationId) computerIds.add(JSON.parse(key)[1]);
+        }
+        for (const computerId of computerIds) this.forget(organizationId, computerId);
+        this.pruneFrames();
+    }
+
     // Drops all state for a computer that no longer exists.
     forget(organizationId: string, computerId: string) {
         const key = workerKey(organizationId, computerId);

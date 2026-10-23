@@ -20,6 +20,7 @@ export interface OrganizationMember {
     lastLoginAt: string | null;
     hasActiveSession: boolean;
     canDeleteAccount: boolean;
+    canReceiveOwnership?: boolean;
     deletionProtectionReason: 'institution_creator' | 'self' | 'demo' | null;
 }
 

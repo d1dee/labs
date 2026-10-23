@@ -1,17 +1,33 @@
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { HTTPException } from 'hono/http-exception';
 import z from 'zod';
 import { db } from '../../db/database';
 import {
     account,
     activationHistory,
+    dataUsageHistory,
     demoState,
+    firewallConfig,
+    fogConfig,
+    lab,
     organization,
+    organizationComputerInventory,
+    organizationDeviceCache,
+    organizationDeviceLab,
+    piholeConfig,
     session,
     user as userTable,
     verification,
+    veyonComputer,
+    veyonConfig,
 } from '../../db/index';
 import { auth, trustedOrigins } from '../auth';
 import { isDemoUser } from '../demo';
+import { invalidateOrganizationDevices } from '../devices';
+import { clearVeyonConnections } from '../veyon';
+import { veyonPoller } from '../veyon-poller';
+import { clearFogClient } from '../fog';
+import { clearPiholeClient } from '../pihole';
 import {
     findOrganizationByJoinKey,
     withUniqueJoinKey,
@@ -118,6 +134,7 @@ export function createOrganizationsRouter(
                     displayUsername: userTable.displayUsername,
                     username: userTable.username,
                     lastLoginAt: userTable.lastLoginAt,
+                    emailVerified: userTable.emailVerified,
                     hasActiveSession: sql<number>`count(${session.id})`,
                     ownsOrganization: sql<number>`count(${organization.id})`,
                 })
@@ -162,6 +179,7 @@ export function createOrganizationsRouter(
                                 lastLoginAt:
                                     m.lastLoginAt?.toISOString() ?? null,
                                 hasActiveSession: Boolean(m.hasActiveSession),
+                                canReceiveOwnership: m.id !== user.id && m.emailVerified && !isDemoUser(m),
                                 canDeleteAccount:
                                     canDeleteMembers && protection === null,
                                 deletionProtectionReason: protection,
@@ -196,6 +214,13 @@ export function createOrganizationsRouter(
             const validatedBody = orgSchema.parse(body);
             // Create organization
             const result = withUniqueJoinKey(database, (tx, joinKey) => {
+                const actor = tx.select().from(userTable)
+                    .where(eq(userTable.id, user.id)).get();
+                if (actor?.organizationId) {
+                    throw new HTTPException(409, {
+                        message: 'Leave your current organization before creating another',
+                    });
+                }
                 const result = tx
                     .insert(organization)
                     .values({
@@ -244,6 +269,7 @@ export function createOrganizationsRouter(
                 },
             });
         } catch (error) {
+            if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
             if (error instanceof z.ZodError || error instanceof SyntaxError)
                 return c.json({ error: 'Invalid organization details' }, 400);
             return c.json({ error: String(error) }, 500);
@@ -259,21 +285,21 @@ export function createOrganizationsRouter(
         const joinKey = c.req.param('joinKey');
 
         try {
-            // Check if organization exists
-            const orgData = await findOrganizationByJoinKey(
-                database,
-                joinKey,
-            );
-
-            if (!orgData) {
-                return c.json({ error: 'Organization not found' }, 404);
-            }
-
-            // Add user to organization
-            await database
-                .update(userTable)
-                .set({ organizationId: orgData.id, updatedAt: new Date() })
-                .where(eq(userTable.id, user.id));
+            // Serialize joins against sole-member deletion so membership cannot dangle.
+            const orgData = database.transaction((tx) => {
+                const destination = findOrganizationByJoinKey(tx, joinKey);
+                if (!destination) throw new HTTPException(404, { message: 'Organization not found' });
+                const joined = tx
+                    .update(userTable)
+                    .set({ organizationId: destination.id, updatedAt: new Date() })
+                    .where(and(
+                        eq(userTable.id, user.id),
+                        or(isNull(userTable.organizationId), eq(userTable.organizationId, destination.id)),
+                    ))
+                    .returning({ id: userTable.id }).all();
+                if (!joined[0]) throw new HTTPException(409, { message: 'Leave your current organization before joining another' });
+                return destination;
+            }, { behavior: 'immediate' });
 
             return c.json({
                 success: true,
@@ -291,6 +317,7 @@ export function createOrganizationsRouter(
                 },
             });
         } catch (error) {
+            if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
             return c.json({ error: String(error) }, 500);
         }
     });
@@ -304,27 +331,97 @@ export function createOrganizationsRouter(
         const orgId = c.req.param('orgId');
 
         try {
-            // Remove user from organization
-            const removed = await database
-                .update(userTable)
-                .set({ organizationId: null, updatedAt: new Date() })
-                .where(
-                    and(
-                        eq(userTable.id, user.id),
-                        eq(userTable.organizationId, orgId),
-                    ),
-                )
-                .returning({ id: userTable.id });
+            const origin = c.req.header('Origin');
+            if (!origin || ![new URL(c.req.url).origin, ...trustedOrigins()].includes(origin)) {
+                return c.json({ error: 'Untrusted request origin' }, 403);
+            }
+            const body = z.object({
+                confirmOrganizationName: z.string().optional(),
+                newCreatorUserId: z.string().min(1).optional(),
+            }).parse(await c.req.json());
+            const result = database.transaction((tx) => {
+                const actor = tx.select().from(userTable)
+                    .where(eq(userTable.id, user.id)).get();
+                const org = tx.select().from(organization)
+                    .where(eq(organization.id, orgId)).get();
+                if (!actor || actor.organizationId !== orgId || !actor.emailVerified || isDemoUser(actor) || !org) {
+                    throw new HTTPException(403, { message: 'You are not a verified member of this organization' });
+                }
+                const members = tx.select().from(userTable)
+                    .where(eq(userTable.organizationId, orgId)).all();
+                const soleMember = members.length === 1;
+                if (soleMember) {
+                    if (body.newCreatorUserId) {
+                        throw new HTTPException(409, {
+                            message: 'Membership changed. Confirm organization deletion before leaving',
+                        });
+                    }
+                    if (body.confirmOrganizationName !== org.name) {
+                        throw new HTTPException(400, {
+                            message: 'Type the exact organization name to permanently delete it and all its data',
+                        });
+                    }
+                } else {
+                    if (body.confirmOrganizationName !== undefined) {
+                        throw new HTTPException(409, {
+                            message: 'Other members remain. Refresh and review the leave options',
+                        });
+                    }
+                    if (org.createdByUserId === user.id) {
+                        const successor = members.find((member) =>
+                            member.id === body.newCreatorUserId && member.id !== user.id);
+                        if (!successor || isDemoUser(successor) || !successor.emailVerified) {
+                            throw new HTTPException(400, {
+                                message: 'Select another verified member as the new admin (creator) before leaving',
+                            });
+                        }
+                        tx.update(organization)
+                            .set({ createdByUserId: successor.id, updatedAt: new Date() })
+                            .where(eq(organization.id, orgId)).run();
+                    } else if (body.newCreatorUserId) {
+                        throw new HTTPException(409, { message: 'Only the current creator can transfer admin ownership' });
+                    }
+                }
+                tx.update(userTable).set({ organizationId: null, updatedAt: new Date() })
+                    .where(eq(userTable.id, user.id)).run();
+                if (!soleMember) return { deleted: false, fogUrls: [], piholeUrls: [] };
 
-            if (!removed[0])
-                return c.json(
-                    { error: 'You are not a member of this organization' },
-                    403,
-                );
-
-            return c.json({ success: true });
+                // Explicit cleanup also covers installations with legacy non-cascading foreign keys.
+                const fogUrls = tx.select({ url: fogConfig.url }).from(fogConfig)
+                    .where(eq(fogConfig.organizationId, orgId)).all().map((config) => config.url);
+                const piholeUrls = tx.select({ url: piholeConfig.url }).from(piholeConfig)
+                    .where(eq(piholeConfig.organizationId, orgId)).all().map((config) => config.url);
+                const firewalls = tx.select({ id: firewallConfig.id }).from(firewallConfig)
+                    .where(eq(firewallConfig.organizationId, orgId));
+                const labs = tx.select({ id: lab.id }).from(lab)
+                    .where(inArray(lab.firewallConfigId, firewalls));
+                tx.delete(activationHistory).where(inArray(activationHistory.labId, labs)).run();
+                tx.delete(dataUsageHistory).where(inArray(dataUsageHistory.labId, labs)).run();
+                tx.delete(organizationDeviceLab).where(eq(organizationDeviceLab.organizationId, orgId)).run();
+                tx.delete(lab).where(inArray(lab.firewallConfigId, firewalls)).run();
+                for (const table of [
+                    firewallConfig, piholeConfig, fogConfig, veyonConfig,
+                    veyonComputer, organizationDeviceCache, organizationComputerInventory,
+                ]) {
+                    tx.delete(table).where(eq(table.organizationId, orgId)).run();
+                }
+                tx.delete(organization).where(eq(organization.id, orgId)).run();
+                return { deleted: true, fogUrls, piholeUrls };
+            }, { behavior: 'immediate' });
+            if (result.deleted) {
+                veyonPoller.forgetOrganization(orgId);
+                result.fogUrls.forEach(clearFogClient);
+                result.piholeUrls.forEach(clearPiholeClient);
+                clearVeyonConnections(orgId);
+                // The service uses the application database; injected test databases have no runtime cache.
+                if (database === db) invalidateOrganizationDevices(orgId);
+            }
+            return c.json({ success: true, deleted: result.deleted });
         } catch (error) {
-            return c.json({ error: String(error) }, 500);
+            if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
+            if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ error: 'Invalid leave confirmation' }, 400);
+            logger.error('Organization leave failed: {error}', { error });
+            return c.json({ error: 'Failed to leave organization' }, 500);
         }
     });
 

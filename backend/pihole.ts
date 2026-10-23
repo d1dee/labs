@@ -589,6 +589,10 @@ const clientCache = new Map<
     { password: string; verifyTls: boolean; client: PiholeClient }
 >();
 
+export function clearPiholeClient(url: string) {
+    clientCache.delete(url);
+}
+
 /**
  * Get a (cached) Pi-hole client bound to the resolved credentials for the
  * given organization. Returns an unconfigured client when no credentials

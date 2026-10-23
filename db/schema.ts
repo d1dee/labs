@@ -24,7 +24,7 @@ export const organization = sqliteTable(
         name: text('name').notNull(),
         phoneNumber: text('phoneNumber').notNull(),
         email: text('email').notNull(),
-        // Immutable creator identity, independent of the creator's current membership.
+        // Current creator/admin authority; transferred when the creator leaves.
         createdByUserId: text('createdByUserId'),
         // Eight letter code shared with colleagues; shown as `ABCD-EFGH`.
         joinKey: text('joinKey')
