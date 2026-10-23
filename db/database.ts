@@ -106,6 +106,28 @@ export function migrateAuthColumns(client: Database) {
 migrateOrganizationAccounts(sqliteDb);
 migrateAuthColumns(sqliteDb);
 
+// A join key must resolve to exactly one institution, so the lookup is
+// case-insensitive and the column carries a matching unique index. Legacy
+// duplicates are left untouched rather than invalidating a shared key; lookups
+// reject ambiguous matches and new allocations use an immediate transaction.
+const organizationColumns = sqliteDb.query('PRAGMA table_info(organization)').all() as Array<{
+    name: string;
+}>;
+if (organizationColumns.some((column) => column.name === 'joinKey')) {
+    const duplicateJoinKeys = sqliteDb
+        .query(
+            `SELECT COUNT(*) AS total FROM (
+                SELECT lower(joinKey) FROM organization
+                GROUP BY lower(joinKey) HAVING COUNT(*) > 1
+            )`,
+        )
+        .get() as { total: number } | null;
+    if (!duplicateJoinKeys?.total)
+        sqliteDb.run(
+            'CREATE UNIQUE INDEX IF NOT EXISTS organization_joinKey_unique ON organization(joinKey COLLATE NOCASE)',
+        );
+}
+
 // SQLite cannot drop NOT NULL in place. Preserve explicit rowids because they
 // break ties between history events with the same timestamp. Disable FK checks
 // outside the transaction so legacy orphaned actors are preserved as well.

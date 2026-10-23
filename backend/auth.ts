@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/database';
 import * as schema from '../db/index';
 import { requireAuthEmailConfig, sendAuthEmail } from './auth-email';
+import { findOrganizationByJoinKey } from './join-key';
 
 export const trustedOrigins = () => [
     'http://localhost:5173',
@@ -140,11 +141,10 @@ export const createAuth = (database = db) =>
                     });
                 }
                 if (typeof joinKey === 'string' && joinKey.trim()) {
-                    const organization = await database
-                        .select({ id: schema.organization.id })
-                        .from(schema.organization)
-                        .where(eq(schema.organization.joinKey, joinKey.trim()))
-                        .get();
+                    const organization = await findOrganizationByJoinKey(
+                        database,
+                        joinKey,
+                    );
                     if (!organization)
                         throw new APIError('BAD_REQUEST', {
                             message: 'Organization join key was not found.',
@@ -235,13 +235,10 @@ export const createAuth = (database = db) =>
                         const joinKey = ctx.body?.joinKey;
                         if (typeof joinKey !== 'string' || !joinKey.trim())
                             return;
-                        const organization = await database
-                            .select({ id: schema.organization.id })
-                            .from(schema.organization)
-                            .where(
-                                eq(schema.organization.joinKey, joinKey.trim()),
-                            )
-                            .get();
+                        const organization = await findOrganizationByJoinKey(
+                            database,
+                            joinKey,
+                        );
                         if (!organization)
                             throw new APIError('BAD_REQUEST', {
                                 message: 'Organization join key was not found.',

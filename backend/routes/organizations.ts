@@ -12,6 +12,10 @@ import {
 } from '../../db/index';
 import { auth, trustedOrigins } from '../auth';
 import { isDemoUser } from '../demo';
+import {
+    findOrganizationByJoinKey,
+    withUniqueJoinKey,
+} from '../join-key';
 import { getLogger } from '../logger';
 import { createApp } from './context';
 
@@ -32,13 +36,12 @@ export async function regenerateOrganizationJoinKey(
     orgId: string,
     database = db,
 ) {
-    const newJoinKey = crypto.randomUUID().replace(/-/g, '');
-    const updatedOrg = await database
+    return withUniqueJoinKey(database, (tx, joinKey) => tx
         .update(organization)
-        .set({ joinKey: newJoinKey, updatedAt: new Date() })
+        .set({ joinKey, updatedAt: new Date() })
         .where(eq(organization.id, orgId))
-        .returning();
-    return updatedOrg[0];
+        .returning()
+        .get());
 }
 
 export function createOrganizationsRouter(
@@ -192,13 +195,14 @@ export function createOrganizationsRouter(
             });
             const validatedBody = orgSchema.parse(body);
             // Create organization
-            const result = database.transaction((tx) => {
+            const result = withUniqueJoinKey(database, (tx, joinKey) => {
                 const result = tx
                     .insert(organization)
                     .values({
                         name: validatedBody.name,
                         email: validatedBody.email,
                         phoneNumber: validatedBody.phoneNumber,
+                        joinKey,
                         createdByUserId: user.id,
                         createdAt: new Date(),
                         updatedAt: new Date(),
@@ -256,11 +260,10 @@ export function createOrganizationsRouter(
 
         try {
             // Check if organization exists
-            const orgData = await database
-                .select()
-                .from(organization)
-                .where(eq(organization.joinKey, joinKey))
-                .get();
+            const orgData = await findOrganizationByJoinKey(
+                database,
+                joinKey,
+            );
 
             if (!orgData) {
                 return c.json({ error: 'Organization not found' }, 404);

@@ -1,6 +1,7 @@
+import { useApiStream } from '@/api/useApiStream';
 import type { Organization } from '@/context/SessionContext';
 import { useSessionContext } from '@/context/SessionContext';
-import { useApiStream } from '@/api/useApiStream';
+import { formatJoinKey, normalizeJoinKey } from '@/lib/join-key';
 import { betterFetch } from '@better-fetch/fetch';
 import {
     ActionIcon,
@@ -25,8 +26,8 @@ import {
     IconCopy,
     IconInfoCircle,
     IconKey,
-    IconMail,
     IconLogout,
+    IconMail,
     IconPhone,
     IconPlus,
     IconUserPlus,
@@ -39,7 +40,11 @@ import { OrganizationMembersCard } from './OrganizationMembersCard';
 
 export type { Organization };
 
-export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) {
+export function OrganizationSettings({
+    enabled = true,
+}: {
+    enabled?: boolean;
+}) {
     const {
         organization: userOrganization,
         setOrganization: onOrganizationChange,
@@ -47,8 +52,13 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
     const [loading, setLoading] = useState(false);
     const [joining, setJoining] = useState(false);
     const [showCreateForm, setShowCreateForm] = useState(false);
-    const refresh = useApiStream<{ organizations: Organization[] }>(enabled ? '/api/organizations' : null,
-        (data) => onOrganizationChange(data.organizations[0] ?? null));
+    const refresh = useApiStream<{ organizations: Organization[] }>(
+        enabled ? '/api/organizations' : null,
+        (data) => onOrganizationChange(data.organizations[0] ?? null),
+    );
+    const displayJoinKey = userOrganization
+        ? formatJoinKey(userOrganization.joinKey)
+        : '';
 
     const orgSchema = z.object({
         name: z
@@ -71,7 +81,7 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
     });
 
     const joinForm = useForm({
-        mode: 'uncontrolled',
+        mode: 'controlled',
         initialValues: {
             joinKey: '',
         },
@@ -80,7 +90,10 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
                 joinKey: z
                     .string()
                     .trim()
-                    .min(1, 'Organization join key is required')
+                    .refine(
+                        (value) => normalizeJoinKey(value).length > 0,
+                        'Organization join key is required',
+                    )
                     .max(128, 'Organization join key is too long'),
             }),
         ),
@@ -134,13 +147,14 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
     };
 
     const joinOrganization = async (values: { joinKey: string }) => {
-        if (!values.joinKey.trim()) return;
+        const key = normalizeJoinKey(values.joinKey);
+        if (!key) return;
 
         setJoining(true);
         try {
             const { data, error } = await betterFetch<{
                 organization: Organization;
-            }>(`/api/organizations/${encodeURIComponent(values.joinKey.trim())}/join`, {
+            }>(`/api/organizations/${encodeURIComponent(key)}/join`, {
                 method: 'POST',
             });
 
@@ -180,7 +194,9 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
     const copyJoinKey = async () => {
         if (!userOrganization) return;
         try {
-            await navigator.clipboard.writeText(userOrganization.joinKey);
+            await navigator.clipboard.writeText(
+                formatJoinKey(userOrganization.joinKey),
+            );
             notifications.show({
                 title: 'Copied',
                 message: 'Join key copied to clipboard',
@@ -275,14 +291,22 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
                                     Join existing
                                 </Title>
                                 <Text size='sm' color='dimmed'>
-                                    Enter your organization join key to join
-                                    an existing organization.
+                                    Enter your organization join key to join an
+                                    existing organization.
                                 </Text>
                                 <Group gap='xs'>
                                     <TextInput
-                                        placeholder='Organization ID'
+                                        placeholder='ABCD-EFGH'
                                         key={joinForm.key('joinKey')}
                                         {...joinForm.getInputProps('joinKey')}
+                                        onChange={(event) =>
+                                            joinForm.setFieldValue(
+                                                'joinKey',
+                                                formatJoinKey(
+                                                    event.currentTarget.value,
+                                                ),
+                                            )
+                                        }
                                         style={{ flex: 1 }}
                                     />
                                     <Button
@@ -305,6 +329,7 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
                         <Stack gap='xs'>
                             <TextInput
                                 label='Organization Name'
+                                required
                                 placeholder='My School'
                                 key={createForm.key('name')}
                                 {...createForm.getInputProps('name')}
@@ -316,6 +341,7 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
                             />
                             <TextInput
                                 label='Email Address'
+                                required
                                 placeholder='admin@school.ac.ke'
                                 key={createForm.key('email')}
                                 {...createForm.getInputProps('email')}
@@ -350,89 +376,161 @@ export function OrganizationSettings({ enabled = true }: { enabled?: boolean }) 
 
     return (
         <Stack gap='md'>
-        <Card component='section' aria-labelledby='institution-title' withBorder p={{ base: 'md', sm: 'lg' }} radius='md'>
-            <Stack gap='md'>
-                <Group
-                    justify='space-between'
-                    align='flex-start'
-                    wrap='wrap'
-                    gap='md'
-                >
-                    <Group gap='sm' wrap='nowrap' style={{ minWidth: 0, flex: 1 }}>
-                        <ThemeIcon
-                            size='xl'
-                            variant='light'
-                            color='teal'
-                            radius='md'
-                        >
-                            <IconBuilding size={22} />
-                        </ThemeIcon>
-                        <Stack gap={2} style={{ minWidth: 0 }}>
-                            <Title order={3} id='institution-title' style={{ overflowWrap: 'anywhere' }}>
-                                {userOrganization.name}
-                            </Title>
-                            <Text size='xs' color='dimmed'>
-                                Institution details
-                            </Text>
-                        </Stack>
-                    </Group>
-                    <Button
-                        variant='subtle'
-                        color='gray'
-                        size='xs'
-                        leftSection={<IconLogout size={14} />}
-                        onClick={leaveOrganization}
-                        loading={joining}
+            <Card
+                component='section'
+                aria-labelledby='institution-title'
+                withBorder
+                p={{ base: 'md', sm: 'lg' }}
+                radius='md'
+            >
+                <Stack gap='md'>
+                    <Group
+                        justify='space-between'
+                        align='flex-start'
+                        wrap='wrap'
+                        gap='md'
                     >
-                        Leave institution
-                    </Button>
-                </Group>
+                        <Group
+                            gap='sm'
+                            wrap='nowrap'
+                            style={{ minWidth: 0, flex: 1 }}
+                        >
+                            <ThemeIcon
+                                size='xl'
+                                variant='light'
+                                color='teal'
+                                radius='md'
+                            >
+                                <IconBuilding size={22} />
+                            </ThemeIcon>
+                            <Stack gap={2} style={{ minWidth: 0 }}>
+                                <Title
+                                    order={3}
+                                    id='institution-title'
+                                    style={{ overflowWrap: 'anywhere' }}
+                                >
+                                    {userOrganization.name}
+                                </Title>
+                                <Text size='xs' color='dimmed'>
+                                    Institution details
+                                </Text>
+                            </Stack>
+                        </Group>
+                        <Button
+                            variant='subtle'
+                            color='gray'
+                            size='xs'
+                            leftSection={<IconLogout size={14} />}
+                            onClick={leaveOrganization}
+                            loading={joining}
+                        >
+                            Leave institution
+                        </Button>
+                    </Group>
 
-                <Divider />
+                    <Divider />
 
-                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
+                    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing='sm'>
                         <Group gap='sm' align='flex-start' wrap='nowrap'>
-                            <IconMail size={18} aria-hidden style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0, marginTop: 3 }} />
+                            <IconMail
+                                size={18}
+                                aria-hidden
+                                style={{
+                                    color: 'var(--mantine-color-dimmed)',
+                                    flexShrink: 0,
+                                    marginTop: 3,
+                                }}
+                            />
                             <Stack gap={2} style={{ minWidth: 0 }}>
                                 <Text size='xs' color='dimmed'>
                                     Contact email
                                 </Text>
-                                <Text size='sm' fw={500} style={{ overflowWrap: 'anywhere' }}>
+                                <Text
+                                    size='sm'
+                                    fw={500}
+                                    style={{ overflowWrap: 'anywhere' }}
+                                >
                                     {userOrganization.email}
                                 </Text>
                             </Stack>
                         </Group>
                         <Group gap='sm' align='flex-start' wrap='nowrap'>
-                            <IconPhone size={18} aria-hidden style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0, marginTop: 3 }} />
+                            <IconPhone
+                                size={18}
+                                aria-hidden
+                                style={{
+                                    color: 'var(--mantine-color-dimmed)',
+                                    flexShrink: 0,
+                                    marginTop: 3,
+                                }}
+                            />
                             <Stack gap={2} style={{ minWidth: 0 }}>
                                 <Text size='xs' color='dimmed'>
                                     Contact phone
                                 </Text>
                                 <Text size='sm' fw={500} lineClamp={1}>
-                                    {userOrganization.phoneNumber || 'Not provided'}
+                                    {userOrganization.phoneNumber ||
+                                        'Not provided'}
                                 </Text>
                             </Stack>
                         </Group>
-                </SimpleGrid>
-                <Group justify='space-between' gap='sm' p='sm' bg='var(--mantine-color-default-hover)' style={{ borderRadius: 'var(--mantine-radius-sm)' }}>
-                    <Group gap='sm' wrap='nowrap'>
-                        <IconKey size={18} aria-hidden style={{ flexShrink: 0 }} />
-                        <Stack gap={2}>
-                            <Text size='sm' fw={500}>Invite your colleagues</Text>
-                            <Text size='xs' c='dimmed'>Share the join key to give access to this institution.</Text>
-                        </Stack>
+                    </SimpleGrid>
+                    <Group
+                        justify='space-between'
+                        gap='sm'
+                        p='sm'
+                        bg='var(--mantine-color-default-hover)'
+                        style={{ borderRadius: 'var(--mantine-radius-sm)' }}
+                    >
+                        <Group gap='sm' wrap='nowrap'>
+                            <IconKey
+                                size={18}
+                                aria-hidden
+                                style={{ flexShrink: 0 }}
+                            />
+                            <Stack gap={2}>
+                                <Text size='sm' fw={500}>
+                                    Invite your colleagues
+                                </Text>
+                                <Text size='xs' c='dimmed'>
+                                    Share the join key to give access to this
+                                    institution.
+                                </Text>
+                            </Stack>
+                        </Group>
+                        <Group gap='xs' wrap='nowrap'>
+                            <Badge
+                                size='lg'
+                                variant='light'
+                                color='teal'
+                                tt='none'
+                                style={{ maxWidth: 220 }}
+                                title={displayJoinKey}
+                            >
+                                {displayJoinKey || 'Unavailable'}
+                            </Badge>
+                            <ActionIcon
+                                variant='subtle'
+                                color='gray'
+                                onClick={copyJoinKey}
+                                disabled={!userOrganization.joinKey}
+                                aria-label='Copy join key'
+                            >
+                                <IconCopy size={16} />
+                            </ActionIcon>
+                        </Group>
                     </Group>
-                    <Group gap='xs' wrap='nowrap'>
-                        <Badge size='lg' variant='light' color='teal' tt='none' style={{ maxWidth: 220 }} title={userOrganization.joinKey}>
-                            {userOrganization.joinKey || 'Unavailable'}
-                        </Badge>
-                        <ActionIcon variant='subtle' color='gray' onClick={copyJoinKey} disabled={!userOrganization.joinKey} aria-label='Copy join key'><IconCopy size={16} /></ActionIcon>
-                    </Group>
-                </Group>
-                <Text size='xs' c='dimmed'>Institution ID: {userOrganization.id}</Text>
-            </Stack>
-        </Card>
-        <OrganizationMembersCard key={userOrganization.id} organization={userOrganization} enabled={enabled} onDeleted={refresh} />
+                    <Text size='xs' c='dimmed'>
+                        Institution ID: {userOrganization.id}
+                    </Text>
+                </Stack>
+            </Card>
+            <OrganizationMembersCard
+                key={userOrganization.id}
+                organization={userOrganization}
+                enabled={enabled}
+                onDeleted={refresh}
+            />
         </Stack>
     );
 }

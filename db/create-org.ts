@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import { z } from 'zod';
+import { withUniqueJoinKey } from '../backend/join-key';
+import { formatJoinKey } from '../frontend/src/lib/join-key';
 import { db } from './database';
 import { organization } from './schema';
 
@@ -15,18 +17,19 @@ export async function createOrganization(params: CreateOrganizationInput) {
     const data = createOrganizationSchema.parse(params);
     const now = new Date();
     const id = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
-
-    const result = await db
+    const result = withUniqueJoinKey(db, (tx, joinKey) => tx
         .insert(organization)
         .values({
             id,
             name: data.name,
             phoneNumber: data.phoneNumber,
             email: data.email,
+            joinKey,
             createdAt: now,
             updatedAt: now,
         })
-        .returning();
+        .returning()
+        .all());
 
     return result[0];
 }
@@ -57,6 +60,7 @@ if (import.meta.main) {
         console.log(`  Name: ${org.name}`);
         console.log(`  Email: ${org.email}`);
         console.log(`  Phone: ${org.phoneNumber}`);
+        console.log(`  Join key: ${formatJoinKey(org.joinKey)}`);
     } catch (error) {
         if (error instanceof z.ZodError) {
             console.error('Validation failed:');

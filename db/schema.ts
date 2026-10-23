@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
     index,
     integer,
@@ -9,6 +9,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import type { ComputerInventorySnapshot } from '../backend/computer-inventory';
 import type { DeviceDirectory } from '../frontend/src/api/devices';
+import { generateJoinKey } from '../frontend/src/lib/join-key';
 import { user } from './auth-schema';
 
 // Organizations table — stores organization details
@@ -25,19 +26,21 @@ export const organization = sqliteTable(
         email: text('email').notNull(),
         // Immutable creator identity, independent of the creator's current membership.
         createdByUserId: text('createdByUserId'),
+        // Eight letter code shared with colleagues; shown as `ABCD-EFGH`.
         joinKey: text('joinKey')
             .notNull()
-            .$defaultFn(() => crypto.randomUUID().replace(/-/g, '')),
+            .$defaultFn(() => generateJoinKey()),
         createdAt: integer('createdAt', { mode: 'timestamp' })
             .notNull()
-            .$defaultFn(() => new Date())
             .$defaultFn(() => new Date()),
         updatedAt: integer('updatedAt', { mode: 'timestamp' })
             .notNull()
-            .$defaultFn(() => new Date())
             .$defaultFn(() => new Date()),
     },
-    (t) => [index('organization_createdByUserId_idx').on(t.createdByUserId)],
+    (t) => [
+        index('organization_createdByUserId_idx').on(t.createdByUserId),
+        uniqueIndex('organization_joinKey_unique').on(sql`${t.joinKey} COLLATE NOCASE`),
+    ],
 );
 
 // Activation history table — stores lab activation/deactivation events
