@@ -325,7 +325,7 @@ const DomainBlockTab: FC = () => {
                     </Text>
                 ) : (
                     <Table.ScrollContainer minWidth={600}>
-                        <ScrollArea mah={500}>
+                        <ScrollArea>
                             <Table
                                 verticalSpacing='sm'
                                 highlightOnHover
