@@ -344,10 +344,10 @@ export function LabsSettings({
             });
             const savedValues = {
                 defaultDnsSuffix: data.data.defaultDnsSuffix ?? '',
-                labs: data.data.labs.map((lab, index) => ({
+                labs: data.data.labs.map((lab) => ({
                     ...toFormLab(lab),
                     key: values.labs.find((item) => item.id && item.id === lab.id)?.key
-                        ?? values.labs[index]?.key ?? randomId(),
+                        ?? randomId(),
                 })),
             };
             form.setValues(savedValues);
