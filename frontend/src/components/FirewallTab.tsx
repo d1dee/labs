@@ -8,12 +8,15 @@ import LabCard from '@/components/LabCard';
 import { useApiStream } from '@/api/useApiStream';
 import { PageHero } from '@/components/ui/PageHero';
 import { orderLabs, useLabOrder } from '@/lib/lab-order';
-import { Alert, Center, Grid, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Box, Center, Grid, Loader, Stack, Text, useMantineTheme } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconInfoCircle, IconShieldCheck } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
 
 const FirewallTab: FC = () => {
+    const theme = useMantineTheme();
+    const aboveMd = useMediaQuery(`(min-width: ${theme.breakpoints.md})`);
     const { order, saveOrder } = useLabOrder();
     const [orderError, setOrderError] = useState<string | null>(null);
     const [labs, setLabs] = useState<Lab[]>([]);
@@ -99,19 +102,26 @@ const FirewallTab: FC = () => {
                         ]}
                     />
 
-                    <Grid maw={1260}>
-                        {sortedLabs
-                            .map((lab) => (
+                    <Box
+                        w='100%'
+                        maw={labs.length < 3 ? 1160 : 1260}
+                        mx={labs.length < 3 ? 'auto' : undefined}
+                        px={labs.length === 2 ? { base: 0, md: 'xl' } : 0}
+                    >
+                        <Grid>
+                            {sortedLabs.map((lab) => (
                                 <LabCard
                                     key={lab.id}
                                     lab={lab}
                                     stats={labStats[lab.id]}
                                     history={labHistory[lab.id]}
                                     onToggle={refresh}
-                                    onMove={(targetId) => moveLab(lab.id, targetId)}
+                                    layout={labs.length === 1 && aboveMd ? 'wide' : labs.length === 2 ? 'pair' : 'standard'}
+                                    onMove={labs.length > 1 ? (targetId) => moveLab(lab.id, targetId) : undefined}
                                 />
                             ))}
-                    </Grid>
+                        </Grid>
+                    </Box>
                 </>
             )}
         </Stack>

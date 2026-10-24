@@ -87,9 +87,11 @@ export function buildNetworkPeriods(
 export default function NetworkAccessTimeline({
     history = [],
     currentStatus,
+    height = 48,
 }: {
     history?: ActivationHistoryEntry[];
     currentStatus?: CurrentNetworkStatus;
+    height?: number;
 }) {
     const [now, setNow] = useState(Date.now);
     useEffect(() => {
@@ -131,7 +133,7 @@ export default function NetworkAccessTimeline({
             <Box
                 style={{
                     display: 'flex',
-                    height: 48,
+                    height,
                     overflow: 'hidden',
                     borderRadius: 4,
                 }}
