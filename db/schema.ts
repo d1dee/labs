@@ -263,6 +263,7 @@ export const lab = sqliteTable(
             .references(() => firewallConfig.id, { onDelete: 'cascade' }),
         name: text('name').notNull(),
         ruleId: text('ruleId'),
+        ruleMarker: text('ruleMarker'),
         dhcpServer: text('dhcpServer'),
         interface: text('interface'),
         subnet: text('subnet'),

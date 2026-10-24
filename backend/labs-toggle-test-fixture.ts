@@ -66,6 +66,7 @@ globalThis.fetch = (async (input, options) => {
         if (scenario === 'verification-failure' || unavailable)
             return Response.json({ message: 'Unavailable' }, { status: 503 });
         return Response.json({
+            '.id': '*1',
             action,
             disabled:
                 scenario === 'disabled-rule' || ruleDisabled ? 'true' : 'false',

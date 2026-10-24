@@ -3,7 +3,7 @@ import { db } from '../db/database';
 import { firewallConfig } from '../db/index';
 import { addressInRange, ipv4Range } from '../frontend/src/api/network';
 
-interface MikrotikResponse {
+export interface MikrotikResponse {
     success: boolean;
     data?: any;
     error?: string;
@@ -44,6 +44,41 @@ function getBasicAuth(mikrotikConfig: MikrotikConfig): string {
     return 'Basic ' + Buffer.from(credentials).toString('base64');
 }
 
+function restBaseUrl(baseUrl: string): string {
+    return `${baseUrl.trim().replace(/\/+$/, '').replace(/\/rest$/i, '')}/rest`;
+}
+
+async function readMikrotikResponse(response: Response): Promise<MikrotikResponse> {
+    const text = await response.text();
+    let data: any = null;
+    if (text.trim()) {
+        try {
+            data = JSON.parse(text);
+        } catch {
+            // RouterOS and proxies can return HTML, including for authentication errors.
+            if (response.status !== 401 && response.status !== 403) {
+                return {
+                    success: false,
+                    error: `MikroTik returned a non-JSON response (HTTP ${response.status}). Check the router address and HTTP/HTTPS port, and ensure RouterOS v7 REST API is available through www-ssl or www, not a WebFig login page or proxy.`,
+                };
+            }
+        }
+    }
+    if (response.status === 401) {
+        return { success: false, error: 'Authentication failed (HTTP 401). Check the MikroTik username and password.' };
+    }
+    if (response.status === 403) {
+        return { success: false, error: 'Access denied (HTTP 403). Check the MikroTik user permissions and REST API access restrictions.' };
+    }
+    if (!response.ok) {
+        return { success: false, error: typeof data?.message === 'string' ? data.message : `MikroTik REST request failed (HTTP ${response.status})` };
+    }
+    if (!text.trim() && response.status !== 204) {
+        return { success: false, error: 'MikroTik returned an empty response. Check the router address and REST API service.' };
+    }
+    return { success: true, data };
+}
+
 export async function callMikrotik(
     organizationId: string,
     path: string,
@@ -59,10 +94,11 @@ export async function callMikrotik(
             };
         }
 
-        const url = `${mikrotikConfig.baseUrl}/rest${path}`;
+        const url = `${restBaseUrl(mikrotikConfig.baseUrl)}${path}`;
         const headers: Record<string, string> = {
             Authorization: getBasicAuth(mikrotikConfig),
             'Content-Type': 'application/json',
+            Accept: 'application/json',
         };
 
         const opts: any = {
@@ -81,20 +117,7 @@ export async function callMikrotik(
 
         const response = await fetch(url, opts);
 
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : null;
-
-        if (!response.ok) {
-            return {
-                success: false,
-                error: data?.message || `HTTP ${response.status}`,
-            };
-        }
-
-        return {
-            success: true,
-            data,
-        };
+        return await readMikrotikResponse(response);
     } catch (error) {
         if (error instanceof Error) {
             return {
@@ -120,7 +143,7 @@ export async function testMikrotikConnection(config: {
             username: config.username,
             password: config.password,
         };
-        const response = await fetch(`${config.baseUrl}/rest/system/identity`, {
+        const response = await fetch(`${restBaseUrl(config.baseUrl)}/system/identity`, {
             method: 'GET',
             signal: AbortSignal.timeout(15_000),
             tls: {
@@ -130,25 +153,11 @@ export async function testMikrotikConnection(config: {
             headers: {
                 Authorization: getBasicAuth(mikrotikConfig),
                 'Content-Type': 'application/json',
+                Accept: 'application/json',
             },
         });
 
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : null;
-
-        if (!response.ok) {
-            return {
-                success: false,
-                error:
-                    data?.message ||
-                    `Authentication failed: HTTP ${response.status}`,
-            };
-        }
-
-        return {
-            success: true,
-            data,
-        };
+        return await readMikrotikResponse(response);
     } catch (error) {
         if (error instanceof Error) {
             return {
@@ -175,7 +184,7 @@ export async function getRuleStatus(
 ): Promise<MikrotikResponse> {
     const response = await callMikrotik(
         organizationId,
-        `/ip/firewall/filter/${ruleId}`,
+        `/ip/firewall/filter/${encodeURIComponent(ruleId)}`,
     );
     return response;
 }
@@ -188,7 +197,7 @@ export async function toggleRuleDisabled(
 ): Promise<MikrotikResponse> {
     const result = await callMikrotik(
         organizationId,
-        `/ip/firewall/filter/${ruleId}`,
+        `/ip/firewall/filter/${encodeURIComponent(ruleId)}`,
         'PATCH',
         {
             disabled: 'false',
@@ -217,7 +226,7 @@ export async function toggleRuleDisabled(
             for (const conn of toDelete) {
                 await callMikrotik(
                     organizationId,
-                    `/ip/firewall/connection/${conn['.id']}`,
+                    `/ip/firewall/connection/${encodeURIComponent(conn['.id'])}`,
                     'DELETE',
                 );
             }
@@ -398,6 +407,141 @@ export async function getConnections(
     return callMikrotik(organizationId, '/ip/firewall/connection/print');
 }
 
+export function labRuleMarker(interfaceName: string): string {
+    if (!interfaceName.trim() || /[\r\n]/.test(interfaceName)) {
+        throw new Error('A non-empty, single-line interface name is required.');
+    }
+    return `fcd-${interfaceName}`;
+}
+
+export function ruleCommentWithMarker(
+    comment: string,
+    interfaceName: string,
+    previousInterface?: string,
+): string {
+    const marker = labRuleMarker(interfaceName);
+    const previous = previousInterface ? labRuleMarker(previousInterface) : marker;
+    const newline = comment.includes('\r\n') ? '\r\n' : '\n';
+    const description = comment.split(/\r?\n/)
+        .filter((line) => line !== marker && line !== previous).join(newline);
+    return description ? `${description}${description.endsWith(newline) ? '' : newline}${marker}` : marker;
+}
+
+function ruleMarkers(rule: any): string[] {
+    return typeof rule?.comment === 'string'
+        ? rule.comment.split(/\r?\n/).filter((line: string) => /^fcd-.+$/.test(line))
+        : [];
+}
+
+// Read-only resolution. Callers must validate chain/action before tagging or mutating.
+export async function getLabRule(
+    organizationId: string,
+    ruleId: string,
+    interfaceName?: string,
+    requireMarker = false,
+): Promise<MikrotikResponse> {
+    if (interfaceName === undefined) {
+        if (requireMarker) return { success: false, error: 'An interface is required to resolve an fcd marker.' };
+        if (!ruleId) return { success: false, error: 'A firewall rule ID is required.' };
+        const response = await getRuleStatus(organizationId, ruleId);
+        if (!response.success) return response;
+        if (!response.data || typeof response.data['.id'] !== 'string') {
+            return { success: false, error: 'Firewall rule not found or missing its internal ID.' };
+        }
+        if (ruleMarkers(response.data).length) {
+            return { success: false, error: 'An interface is required to validate fcd rule ownership.' };
+        }
+        return response;
+    }
+    if (!interfaceName.trim() || /[\r\n]/.test(interfaceName)) {
+        return { success: false, error: 'A non-empty, single-line interface name is required.' };
+    }
+    const response = await getFirewallRules(organizationId);
+    if (!response.success) return response;
+    if (!Array.isArray(response.data)) return { success: false, error: 'Invalid firewall rule response.' };
+    const marker = labRuleMarker(interfaceName);
+    const byId = response.data.filter((rule: any) =>
+        typeof rule?.['.id'] === 'string' && rule['.id'].toLowerCase() === ruleId.toLowerCase());
+    const tagged = response.data.filter((rule: any) => ruleMarkers(rule).includes(marker));
+    if (byId.length > 1 || tagged.length > 1) {
+        return { success: false, error: `Ambiguous firewall rules for ${marker}.` };
+    }
+    if (byId.some((rule: any) => ruleMarkers(rule).some((line) => line !== marker))) {
+        return { success: false, error: 'Firewall rule ID is owned by a different fcd interface.' };
+    }
+    if (requireMarker && !tagged.length) {
+        return { success: false, error: `Required firewall marker ${marker} was not found.` };
+    }
+    const rule = tagged[0] ?? byId[0];
+    if (!rule || typeof rule['.id'] !== 'string' || !rule['.id']) {
+        return { success: false, error: `Firewall rule not found for ${marker}.` };
+    }
+    if (ruleMarkers(rule).some((line) => line !== marker)) {
+        return { success: false, error: 'Firewall rule has conflicting fcd ownership markers.' };
+    }
+    return { success: true, data: rule };
+}
+
+function usableRouterResource(row: any): boolean {
+    return row && ![true, 'true', 'yes'].includes(row.disabled) &&
+        ![true, 'true', 'yes'].includes(row.invalid);
+}
+
+export async function discoverLabInterface(
+    organizationId: string,
+    name: string,
+): Promise<MikrotikResponse> {
+    const fail = (error: string): MikrotikResponse => ({ success: false, error });
+    if (!name.trim() || /[\r\n]/.test(name)) return fail('A non-empty, single-line interface name is required.');
+    const interfaces = await callMikrotik(organizationId, `/interface?name=${encodeURIComponent(name)}`);
+    if (!interfaces.success) return interfaces;
+    const exact = Array.isArray(interfaces.data) ? interfaces.data.filter((row: any) => row?.name === name) : [];
+    if (exact.length !== 1 || !usableRouterResource(exact[0])) {
+        return fail(`Expected one usable interface named exactly ${name}.`);
+    }
+    const servers = await callMikrotik(organizationId, `/ip/dhcp-server?interface=${encodeURIComponent(name)}`);
+    if (!servers.success) return servers;
+    const attached = Array.isArray(servers.data) ? servers.data.filter((row: any) => row?.interface === name && usableRouterResource(row)) : [];
+    if (attached.length !== 1 || typeof attached[0].name !== 'string' || !attached[0].name) {
+        return fail(`Expected one usable DHCP server attached to ${name}.`);
+    }
+    const server = attached[0];
+    const poolName = server['address-pool'];
+    if (poolName === 'static-only') return fail('Static-only DHCP servers are not supported for lab discovery.');
+    if (typeof poolName !== 'string' || !poolName) return fail('DHCP server has no address-pool.');
+    const pools = await callMikrotik(organizationId, `/ip/pool?name=${encodeURIComponent(poolName)}`);
+    if (!pools.success) return pools;
+    const matchingPools = Array.isArray(pools.data) ? pools.data.filter((row: any) => row?.name === poolName) : [];
+    if (matchingPools.length !== 1 || !usableRouterResource(matchingPools[0])) return fail('DHCP address-pool is missing, invalid, or ambiguous.');
+    const pool = matchingPools[0];
+    if (pool['next-pool'] && pool['next-pool'] !== 'none') return fail('Chained DHCP address-pools are not supported for lab discovery.');
+    const ranges = typeof pool.ranges === 'string' ? pool.ranges.split(',').map((range: string) => ipv4Range(range)) : [];
+    if (!ranges.length || ranges.some((range: [number, number] | null) => !range)) return fail('DHCP address-pool has invalid or missing IPv4 ranges.');
+    const addresses = await callMikrotik(organizationId, `/ip/address?interface=${encodeURIComponent(name)}`);
+    if (!addresses.success) return addresses;
+    const attachedAddresses = Array.isArray(addresses.data) ? addresses.data.filter((row: any) => row?.interface === name && usableRouterResource(row)) : [];
+    const subnets = new Map<string, [number, number]>();
+    for (const row of attachedAddresses) {
+        if (typeof row.address !== 'string' || !/^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/.test(row.address)) return fail('Interface has an invalid IPv4 address.');
+        const bounds = ipv4Range(row.address);
+        if (!bounds) return fail('Interface has an invalid IPv4 subnet.');
+        const prefix = Number(row.address.split('/')[1]);
+        const network = [24, 16, 8, 0].map((shift) => (bounds[0] >>> shift) & 255).join('.');
+        subnets.set(`${network}/${prefix}`, bounds);
+    }
+    if (subnets.size !== 1) return fail('Interface IPv4 subnet is missing or ambiguous.');
+    const [subnet, bounds] = [...subnets.entries()][0]!;
+    if (ranges.some((range: [number, number]) => range[0] <= bounds[0] || range[1] >= bounds[1])) {
+        return fail('DHCP address-pool must contain usable addresses within the interface IPv4 subnet.');
+    }
+    if (attachedAddresses.some((row: any) => ranges.some((range: [number, number]) => {
+        const address = ipv4Range(row.address.split('/')[0])![0];
+        return address >= range[0] && address <= range[1];
+    }))) return fail('DHCP address-pool includes an interface address.');
+    return { success: true, data: { subnet, dhcpServer: server.name, pool: pool.name } };
+}
+
+// Legacy rule-based inference only; new interface-backed labs use discoverLabInterface.
 export async function resolveSubnetAndDhcpServer(
     organizationId: string,
     rule: any,

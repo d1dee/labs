@@ -81,7 +81,7 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove }) =>
     const usageDivisor = usageUnit === 'TB' ? 1024 ** 2 : usageUnit === 'GB' ? 1024 : 1;
 
     return (
-        <Grid.Col ref={cardRef} data-lab-order-id={lab.id} style={style} span={{ base: 12, sm: 6, md: 4 }} h='100%'>
+        <Grid.Col ref={cardRef} data-lab-order-id={lab.id} style={style} span={{ base: 12, sm: 6, md: 4 }} maw={420} h='100%'>
             <Card shadow='md' padding='lg' radius='md' withBorder>
                 <Card.Section p='md' pb={0}>
                     <Group justify='space-between' mb='md'>

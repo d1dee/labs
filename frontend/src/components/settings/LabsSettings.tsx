@@ -1,4 +1,3 @@
-import { useApiStream } from '@/api/useApiStream';
 import { orderLabs, useLabOrder } from '@/lib/lab-order';
 import { betterFetch } from '@better-fetch/fetch';
 import {
@@ -17,7 +16,7 @@ import {
     Title,
 } from '@mantine/core';
 import { schemaResolver, useForm } from '@mantine/form';
-import { randomId, useDebouncedValue, useMask } from '@mantine/hooks';
+import { randomId } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
     IconCheck,
@@ -26,7 +25,7 @@ import {
     IconTrash,
     IconX,
 } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import z from 'zod';
 import { DraggableLabCard } from './DraggableLabCard';
 import { FirewallConfig, Lab } from './FirewallSettings';
@@ -48,10 +47,13 @@ const dnsSuffixSchema = z.string().refine((value) => {
 const labSchema = z.object({
     id: z.string().optional(),
     name: z.string().min(1, 'Lab name is required'),
-    ruleId: z.string().min(1, 'Firewall ID is required'),
+    ruleId: z.string().regex(
+        /^\*[0-9a-f]+$/i,
+        'Use an internal hexadecimal .id such as *11, not a row number',
+    ),
     dhcpServer: z.string(),
     subnet: z.string(),
-    interface: z.string().trim().max(128),
+    interface: z.string().max(128),
     dnsSuffix: dnsSuffixSchema,
     key: z.string(),
 });
@@ -62,9 +64,26 @@ const labsFormSchema = z.object({
         const groups = new Map<string, number[]>();
         labs.forEach((lab, index) => {
             if (!lab.ruleId) return;
-            const arr = groups.get(lab.ruleId) ?? [];
+            const arr = groups.get(lab.ruleId.toUpperCase()) ?? [];
             arr.push(index);
-            groups.set(lab.ruleId, arr);
+            groups.set(lab.ruleId.toUpperCase(), arr);
+        });
+        const interfaces = new Map<string, number[]>();
+        labs.forEach((lab, index) => {
+            if (!lab.interface) return;
+            const indices = interfaces.get(lab.interface) ?? [];
+            indices.push(index);
+            interfaces.set(lab.interface, indices);
+        });
+        interfaces.forEach((indices) => {
+            if (indices.length < 2) return;
+            indices.forEach((index) => {
+                ctx.addIssue({
+                    code: 'custom',
+                    message: 'This interface is already used by another lab',
+                    path: [index, 'interface'],
+                });
+            });
         });
         groups.forEach((indices) => {
             if (indices.length > 1) {
@@ -94,92 +113,32 @@ const toFormLab = (lab: Lab) => ({
     key: randomId(),
 });
 
-// Firewall rule IDs always start with a literal "*". The mask below prepends
-// it automatically (the first entry is a literal) and the remaining slots are
-// editable alphanumeric characters — if the user types the "*" themselves it
-// is rejected because it does not match the slot pattern.
-const RULE_ID_MASK: Array<string | RegExp> = [
-    '*',
-    ...Array(20).fill(/[0-9A-Za-z_-]/),
-];
-
 interface LabRuleIdInputProps {
-    index: number;
     ruleId: string;
+    saved: boolean;
     error?: ReactNode;
-    enabled: boolean;
-    onChangeRuleId: (masked: string) => void;
-    onDetails: (
-        index: number,
-        details: { subnet?: string; dhcpServer?: string },
-    ) => void;
+    onChangeRuleId: (value: string) => void;
 }
 
-/**
- * Subscribe to the settled rule ID; snapshots update derived metadata only.
- */
 function LabRuleIdInput({
-    index,
     ruleId,
+    saved,
     error,
-    enabled,
     onChangeRuleId,
-    onDetails,
 }: LabRuleIdInputProps) {
-    const { ref } = useMask({
-        mask: RULE_ID_MASK,
-        slotChar: null,
-        onChangeRaw: (_raw, masked) => onChangeRuleId(masked),
-    });
-
-    const [debounced] = useDebouncedValue(ruleId, 600);
-
-    const [loadedRule, setLoadedRule] = useState('');
-    const path =
-        enabled && debounced === ruleId && ruleId.replace(/^\*/, '').trim()
-            ? `/api/labs/by-rule/${encodeURIComponent(ruleId)}`
-            : null;
-    useApiStream<{
-        success: boolean;
-        data: { subnet?: string; dhcpServer?: string };
-        error?: string;
-    }>(
-        path,
-        (snapshot) => {
-            setLoadedRule(ruleId);
-            if (snapshot.success && snapshot.data) {
-                onDetails(index, snapshot.data);
-            } else {
-                notifications.show({
-                    title: 'Error',
-                    message: snapshot.error ?? 'Failed to fetch lab details',
-                    color: 'red',
-                    icon: <IconX size={16} />,
-                });
-            }
-        },
-        (error) => {
-            setLoadedRule(ruleId);
-            notifications.show({
-                title: 'Error',
-                message: error.message,
-                color: 'red',
-                icon: <IconX size={16} />,
-            });
-        },
-    );
-
     return (
         <TextInput
             label='Rule ID'
             placeholder='*11'
             required
-            error={error}
-            ref={ref}
-            defaultValue={ruleId}
-            rightSection={
-                path && loadedRule !== ruleId ? <Loader size={16} /> : undefined
+            description={
+                saved
+                    ? 'Saved canonical rule ID. Edit only to recover the firewall mapping; saving resolves the canonical ID again.'
+                    : 'Required initial MikroTik internal .id (for example *11), not a row number. Saving stores the canonical rule ID.'
             }
+            error={error}
+            value={ruleId}
+            onChange={(event) => onChangeRuleId(event.currentTarget.value)}
         />
     );
 }
@@ -207,6 +166,9 @@ export function LabsSettings({
     onSaved: () => void;
 }) {
     const [saving, setSaving] = useState(false);
+    const savingRef = useRef(false);
+    const discoveryRequests = useRef(new Map<string, symbol>());
+    const [discoveringKeys, setDiscoveringKeys] = useState<Set<string>>(new Set());
     const { order, saveOrder } = useLabOrder();
     const [orderError, setOrderError] = useState<string | null>(null);
     // Tracks which saved labs are currently expanded into their edit form.
@@ -218,7 +180,18 @@ export function LabsSettings({
             defaultDnsSuffix: firewallConfig?.defaultDnsSuffix ?? '',
             labs: firewallConfig?.labs?.map(toFormLab) ?? [],
         },
-        validate: schemaResolver(labsFormSchema),
+        validate: schemaResolver(labsFormSchema.superRefine((values, ctx) => {
+            values.labs.forEach((lab, index) => {
+                const saved = firewallConfig?.labs?.find((item) => item.id === lab.id);
+                if (!lab.interface.trim() && (!saved || saved.interface)) {
+                    ctx.addIssue({
+                        code: 'custom',
+                        message: 'Exact MikroTik interface name is required',
+                        path: ['labs', index, 'interface'],
+                    });
+                }
+            });
+        })),
     });
 
     // Sort only the presentation so input paths and unsaved edits stay intact.
@@ -255,7 +228,8 @@ export function LabsSettings({
                 labs: form.getValues().labs.map((lab) => {
                     const saved = firewallConfig?.labs?.find(
                         (item) =>
-                            item.id === lab.id && item.ruleId === lab.ruleId,
+                            item.id === lab.id && item.ruleId === lab.ruleId &&
+                            (item.interface ?? '') === lab.interface,
                     );
                     return saved
                         ? {
@@ -275,14 +249,64 @@ export function LabsSettings({
         form.setValues(values);
         form.resetDirty(values);
     }, [firewallConfig]);
+    async function discover(key: string, name: string) {
+        if (!enabled || savingRef.current || !name.trim()) return;
+        const request = Symbol();
+        discoveryRequests.current.set(key, request);
+        setDiscoveringKeys((previous) => new Set(previous).add(key));
+        // Indices can shift when labs are added or deleted while discovering.
+        const currentIndex = () =>
+            discoveryRequests.current.get(key) === request && !savingRef.current
+                ? form.getValues().labs.findIndex(
+                      (lab) => lab.key === key && lab.interface === name,
+                  )
+                : -1;
+        try {
+            const { data, error } = await betterFetch<{
+                success: boolean;
+                data: { subnet: string; dhcpServer: string; pool?: string };
+                error?: string;
+            }, { error?: string; message?: string }>(`/api/settings/lab-interface?name=${encodeURIComponent(name)}`);
+            const index = currentIndex();
+            if (index < 0) return;
+            if (error || !data?.success || !data.data) {
+                throw new Error(error?.error || error?.message || data?.error || 'Failed to discover interface');
+            }
+            form.setFieldValue(`labs.${index}.subnet`, data.data.subnet);
+            form.setFieldValue(`labs.${index}.dhcpServer`, data.data.dhcpServer);
+        } catch (error) {
+            if (currentIndex() < 0) return;
+            notifications.show({
+                title: 'Discovery failed',
+                message: error instanceof Error ? error.message : 'Failed to discover interface',
+                color: 'red',
+                icon: <IconX size={16} />,
+            });
+        } finally {
+            if (discoveryRequests.current.get(key) === request) {
+                discoveryRequests.current.delete(key);
+                setDiscoveringKeys((previous) => {
+                    const next = new Set(previous);
+                    next.delete(key);
+                    return next;
+                });
+            }
+        }
+    }
+
     async function submit(values: LabsFormValues) {
+        if (!enabled || savingRef.current) return;
+        savingRef.current = true;
+        discoveryRequests.current.clear();
+        setDiscoveringKeys(new Set());
         setSaving(true);
         try {
-            const { error } = await betterFetch<{
+            const { data, error } = await betterFetch<{
                 success: boolean;
                 message: string;
+                error?: string;
                 data: FirewallConfig;
-            }>('/api/settings/labs', {
+            }, { error?: string; message?: string }>('/api/settings/labs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -300,11 +324,11 @@ export function LabsSettings({
                 }),
             });
 
-            if (error) {
+            if (error || !data?.success || !data.data?.labs) {
                 notifications.show({
                     title: 'Error',
                     message:
-                        error.message ??
+                        error?.error ?? error?.message ?? data?.error ?? data?.message ??
                         'Failed to save labs. Please try again.',
                     color: 'red',
                     icon: <IconX size={16} />,
@@ -318,18 +342,28 @@ export function LabsSettings({
                 color: 'green',
                 icon: <IconCheck size={16} />,
             });
-            form.resetDirty(values);
+            const savedValues = {
+                defaultDnsSuffix: data.data.defaultDnsSuffix ?? '',
+                labs: data.data.labs.map((lab, index) => ({
+                    ...toFormLab(lab),
+                    key: values.labs.find((item) => item.id && item.id === lab.id)?.key
+                        ?? values.labs[index]?.key ?? randomId(),
+                })),
+            };
+            form.setValues(savedValues);
+            form.resetDirty(savedValues);
             setEditingKeys(new Set());
             onSaved();
         } catch (err) {
             notifications.show({
                 title: 'Error',
-                message: 'Failed to save labs. Please try again.',
+                message: err instanceof Error ? err.message : 'Failed to save labs. Please try again.',
                 color: 'red',
                 icon: <IconX size={16} />,
             });
             console.error(err);
         } finally {
+            savingRef.current = false;
             setSaving(false);
         }
     }
@@ -337,6 +371,7 @@ export function LabsSettings({
     return (
         <Card withBorder p='md'>
             <form onSubmit={form.onSubmit(submit)}>
+                <fieldset disabled={!enabled || saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
                 <Flex justify='space-between' align='center' mb='md'>
                     <Title order={5}>Labs Configuration</Title>
                     <Button
@@ -506,56 +541,50 @@ export function LabsSettings({
                                                 `labs.${index}.name`,
                                             )}
                                         />
+                                        <TextInput
+                                            label='Lab Interface'
+                                            placeholder='vlan10::lab-1'
+                                            required={!isExisting || !!firewallConfig?.labs?.find((item) => item.id === lab.id)?.interface}
+                                            description='Exact MikroTik name, for example vlan10::lab-1. Subnet/DHCP are fetched when you leave this field. Saving verifies again and adds comment fcd-<interface name> (fcd-vlan10::lab-1).'
+                                            {...form.getInputProps(`labs.${index}.interface`)}
+                                            aria-busy={discoveringKeys.has(lab.key)}
+                                            rightSection={discoveringKeys.has(lab.key) ? <Loader size='xs' /> : undefined}
+                                            onBlur={(event) => {
+                                                form.getInputProps(`labs.${index}.interface`).onBlur?.(event);
+                                                void discover(lab.key, event.currentTarget.value);
+                                            }}
+                                            onChange={(event) => {
+                                                discoveryRequests.current.delete(lab.key);
+                                                setDiscoveringKeys((previous) => {
+                                                    const next = new Set(previous);
+                                                    next.delete(lab.key);
+                                                    return next;
+                                                });
+                                                form.setFieldValue(
+                                                    `labs.${index}.interface`,
+                                                    event.currentTarget.value,
+                                                );
+                                                form.setFieldValue(`labs.${index}.subnet`, '');
+                                                form.setFieldValue(`labs.${index}.dhcpServer`, '');
+                                            }}
+                                        />
+                                        {isExisting && !lab.interface && (
+                                            <Text size='xs' c='dimmed'>Legacy lab: the interface may remain blank until migrated.</Text>
+                                        )}
                                         <LabRuleIdInput
-                                            index={index}
                                             ruleId={lab.ruleId}
-                                            enabled={enabled}
+                                            saved={isExisting}
                                             error={
                                                 form.getInputProps(
                                                     `labs.${index}.ruleId`,
                                                 ).error
                                             }
-                                            onChangeRuleId={(masked) =>
+                                            onChangeRuleId={(value) =>
                                                 form.setFieldValue(
                                                     `labs.${index}.ruleId`,
-                                                    masked,
+                                                    value,
                                                 )
                                             }
-                                            onDetails={(
-                                                currentIndex,
-                                                details,
-                                            ) => {
-                                                form.setValues({
-                                                    labs: form
-                                                        .getValues()
-                                                        .labs.map(
-                                                            (
-                                                                item,
-                                                                itemIndex,
-                                                            ) =>
-                                                                itemIndex ===
-                                                                currentIndex
-                                                                    ? {
-                                                                          ...item,
-                                                                          subnet:
-                                                                              details.subnet ??
-                                                                              '',
-                                                                          dhcpServer:
-                                                                              details.dhcpServer ??
-                                                                              '',
-                                                                      }
-                                                                    : item,
-                                                        ),
-                                                });
-                                            }}
-                                        />
-                                        <TextInput
-                                            label='Lab Interface'
-                                            placeholder='vlan10 or bridge-lab'
-                                            description='Exact MikroTik interface name. Usage includes received and transmitted bytes since its counters were reset.'
-                                            {...form.getInputProps(
-                                                `labs.${index}.interface`,
-                                            )}
                                         />
                                         <TextInput
                                             label='Lab DNS suffix'
@@ -632,6 +661,7 @@ export function LabsSettings({
                         Save Labs
                     </Button>
                 </Group>
+                </fieldset>
             </form>
         </Card>
     );

@@ -267,6 +267,12 @@ const labColumns = sqliteDb.query('PRAGMA table_info(lab)').all() as Array<{
 }>;
 if (
     labColumns.length &&
+    !labColumns.some((column) => column.name === 'ruleMarker')
+) {
+    sqliteDb.run('ALTER TABLE lab ADD COLUMN ruleMarker TEXT');
+}
+if (
+    labColumns.length &&
     !labColumns.some((column) => column.name === 'interface')
 ) {
     sqliteDb.run('ALTER TABLE lab ADD COLUMN interface TEXT');

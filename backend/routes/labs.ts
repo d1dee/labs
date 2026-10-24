@@ -19,8 +19,8 @@ import { errorProperty, getLogger } from '../logger';
 import {
     getInterfaceUsage,
     getLabDetailsByRuleId,
+    getLabRule,
     getOnlineDevices,
-    getRuleStatus,
     parseByteCounter,
     resolveSubnetAndDhcpServer,
     toggleRuleDisabled,
@@ -42,10 +42,16 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
 
     // Get rule status
     const ruleResponse = await withLabActivation(lab.id, async () => {
-        const response = await getRuleStatus(organizationId, lab.ruleId);
+        const response = await getLabRule(
+            organizationId,
+            lab.ruleId,
+            lab.interface || undefined,
+            Boolean(lab.ruleMarker),
+        );
         if (!isDemoUser(user)) {
             if (
                 !response.success ||
+                (lab.ruleMarker && response.data?.chain !== 'forward') ||
                 !['accept', 'drop'].includes(response.data?.action) ||
                 ![false, 'false'].includes(response.data?.disabled)
             ) {
@@ -60,11 +66,9 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
     const ruleDisabled =
         ruleResponse.success && ruleResponse.data?.action === 'drop';
 
-    // Resolve the DHCP server live from the rule so address-list
-    // references are resolved to a concrete subnet, falling back to the
-    // stored config when resolution yields nothing.
+    // Interface-first labs use metadata verified at setup, not rule-name guesses.
     let { dhcpServer, subnet } = lab;
-    if (ruleResponse.success && ruleResponse.data) {
+    if (!lab.interface && ruleResponse.success && ruleResponse.data) {
         const resolved = await resolveSubnetAndDhcpServer(
             organizationId,
             ruleResponse.data,
@@ -101,7 +105,7 @@ async function buildLabStats(lab: ConfigLab, user: LabUser) {
             interface: lab.interface || '',
         },
         firewall: {
-            ruleId: lab.ruleId,
+            ruleId: ruleResponse.data?.['.id'] || lab.ruleId,
             disabled: ruleDisabled,
             comment: ruleResponse.data?.comment,
             status: ruleDisabled ? 'blocked' : 'active',
@@ -387,9 +391,36 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
 
         const organizationId = user.organizationId;
         return await withLabActivation(labId, async () => {
+            const resolved = lab.interface
+                ? await getLabRule(
+                      organizationId,
+                      lab.ruleId,
+                      lab.interface,
+                      Boolean(lab.ruleMarker),
+                  )
+                : {
+                      success: true,
+                      data: { '.id': lab.ruleId, action: 'accept' },
+                  };
+            if (
+                !resolved.success ||
+                !['accept', 'drop'].includes(resolved.data?.action) ||
+                (lab.ruleMarker && resolved.data?.chain !== 'forward')
+            ) {
+                return c.json(
+                    {
+                        success: false,
+                        error:
+                            resolved.error ||
+                            'The lab firewall rule is unavailable or unsupported.',
+                    },
+                    400,
+                );
+            }
+            const ruleId = resolved.data?.['.id'] || lab.ruleId;
             const result = await toggleRuleDisabled(
                 organizationId,
-                lab.ruleId,
+                ruleId,
                 enable,
                 lab.subnet,
             );
@@ -406,9 +437,15 @@ labsRouter.post('/labs/:labId/toggle', async (c) => {
                 );
             }
 
-            const verified = await getRuleStatus(organizationId, lab.ruleId);
+            const verified = await getLabRule(
+                organizationId,
+                ruleId,
+                lab.interface || undefined,
+                Boolean(lab.ruleMarker),
+            );
             if (
                 !verified.success ||
+                (lab.ruleMarker && verified.data?.['.id'] !== ruleId) ||
                 verified.data?.action !== (enable ? 'accept' : 'drop') ||
                 ![false, 'false'].includes(verified.data?.disabled)
             ) {
@@ -495,9 +532,11 @@ async function saveDataUsageSnapshot() {
                 const ruleResponse = await withLabActivation(
                     lab.id,
                     async () => {
-                        const response = await getRuleStatus(
+                        const response = await getLabRule(
                             storedConfig.organizationId,
                             lab.ruleId,
+                            lab.interface || undefined,
+                            Boolean(lab.ruleMarker),
                         );
                         if (
                             response.success &&

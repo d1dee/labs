@@ -99,7 +99,7 @@ const FirewallTab: FC = () => {
                         ]}
                     />
 
-                    <Grid grow>
+                    <Grid maw={1260}>
                         {sortedLabs
                             .map((lab) => (
                                 <LabCard

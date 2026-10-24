@@ -17,7 +17,19 @@ import {
 } from '../firewall-config';
 import { getFogConfigForOrg, isBearerToken, testFogConnection } from '../fog';
 import { errorProperty, getLogger } from '../logger';
-import { testMikrotikConnection } from '../mikrotik';
+import { withLabActivation } from '../lab-activation';
+import { ipv4Range } from '../../frontend/src/api/network';
+import {
+    callMikrotik,
+    discoverLabInterface,
+    getAddressLists,
+    getFirewallRules,
+    getLabRule,
+    getRuleStatus,
+    labRuleMarker,
+    ruleCommentWithMarker,
+    testMikrotikConnection,
+} from '../mikrotik';
 import { getPiholeConfigForOrg, testPiholeConnection } from '../pihole';
 import {
     assertValidPrivateKeyPem,
@@ -174,6 +186,18 @@ settingsRouter.post('/settings/mikrotik', async (c) => {
     }
 });
 
+settingsRouter.get('/settings/lab-interface', async (c) => {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Not authenticated' }, 401);
+    if (!user.organizationId)
+        return c.json({ error: 'You must join an organization first' }, 403);
+    const name = c.req.query('name')?.trim();
+    if (!name || name.length > 128 || /[\r\n]/.test(name))
+        return c.json({ error: 'A valid interface name is required' }, 400);
+    const result = await discoverLabInterface(user.organizationId, name);
+    return c.json(result, result.success ? 200 : 400);
+});
+
 settingsRouter.post('/settings/labs', async (c) => {
     const user = c.get('user');
     if (!user) {
@@ -184,122 +208,446 @@ settingsRouter.post('/settings/labs', async (c) => {
         return c.json({ error: 'You must join an organization first' }, 403);
     }
 
-    try {
-        const schema = z.object({
-            id: z.string().length(12).optional(),
-            defaultDnsSuffix: dnsSuffixSchema.optional(),
-            labs: z.array(
-                z.object({
-                    id: z.string().optional(),
-                    firewallId: z.string(),
-                    name: z.string(),
-                    description: z.string().optional(),
-                    subnet: z.string().optional(),
-                    dhcpServer: z.string().optional(),
-                    interface: z.string().trim().max(128).optional(),
-                    dnsSuffix: dnsSuffixSchema.nullable().optional(),
-                }),
-            ),
-        });
+    return withLabActivation(
+        `lab-settings:${user.organizationId}`,
+        async () => {
+            try {
+                const schema = z.object({
+                    id: z.string().length(12).optional(),
+                    defaultDnsSuffix: dnsSuffixSchema.optional(),
+                    labs: z.array(
+                        z.object({
+                            id: z.string().optional(),
+                            firewallId: z
+                                .string()
+                                .trim()
+                                .regex(/^\*[0-9a-f]+$/i),
+                            name: z.string().trim().min(1),
+                            description: z.string().optional(),
+                            subnet: z.string().optional(),
+                            dhcpServer: z.string().optional(),
+                            interface: z
+                                .string()
+                                .trim()
+                                .max(128)
+                                .refine((value) => !/[\r\n]/.test(value))
+                                .optional(),
+                            dnsSuffix: dnsSuffixSchema.nullable().optional(),
+                        }),
+                    ),
+                });
 
-        const body = schema.parse(await c.req.json());
+                const body = schema.parse(await c.req.json());
 
-        if (!body.id) {
-            return c.json({ error: 'Configuration ID is required' }, 400);
-        }
-
-        const existingConfig = await getFirewallConfigByIdWithLabs(body.id);
-
-        if (
-            !existingConfig ||
-            existingConfig.organizationId !== user.organizationId
-        ) {
-            return c.json({ error: 'Configuration not found' }, 404);
-        }
-
-        const existingIds = new Set(existingConfig.labs.map((item) => item.id));
-        const submittedIds = body.labs.flatMap((item) =>
-            item.id ? [item.id] : [],
-        );
-        if (
-            submittedIds.some((id) => !existingIds.has(id)) ||
-            new Set(submittedIds).size !== submittedIds.length
-        ) {
-            return c.json({ error: 'Invalid or duplicate lab ID' }, 400);
-        }
-        db.transaction((tx) => {
-            if (body.defaultDnsSuffix !== undefined) {
-                tx.update(firewallConfig)
-                    .set({
-                        defaultDnsSuffix: body.defaultDnsSuffix,
-                        updatedAt: new Date(),
-                    })
-                    .where(eq(firewallConfig.id, existingConfig.id))
-                    .run();
-            }
-            const removedIds = [...existingIds].filter(
-                (id) => !submittedIds.includes(id),
-            );
-            if (removedIds.length)
-                tx.delete(lab).where(inArray(lab.id, removedIds)).run();
-            for (const l of body.labs) {
-                const values = {
-                    firewallConfigId: existingConfig.id,
-                    name: l.name,
-                    ruleId: l.firewallId,
-                    description: l.description ?? null,
-                    subnet: l.subnet ?? null,
-                    dhcpServer: l.dhcpServer ?? null,
-                    interface: l.interface || null,
-                    ...(l.dnsSuffix !== undefined
-                        ? { dnsSuffix: l.dnsSuffix || null }
-                        : {}),
-                    updatedAt: new Date(),
-                };
-                if (l.id) {
-                    const old = existingConfig.labs.find(
-                        (item) => item.id === l.id,
-                    )!;
-                    if (
-                        (old.interface || '') !== (l.interface || '') ||
-                        (!l.interface && old.ruleId !== l.firewallId)
-                    ) {
-                        tx.delete(dataUsageHistory)
-                            .where(eq(dataUsageHistory.labId, l.id))
-                            .run();
-                    }
-                    tx.update(lab).set(values).where(eq(lab.id, l.id)).run();
-                } else {
-                    tx.insert(lab).values(values).run();
+                if (!body.id) {
+                    return c.json(
+                        { error: 'Configuration ID is required' },
+                        400,
+                    );
                 }
+
+                const existingConfig = await getFirewallConfigByIdWithLabs(
+                    body.id,
+                );
+
+                if (
+                    !existingConfig ||
+                    existingConfig.organizationId !== user.organizationId
+                ) {
+                    return c.json({ error: 'Configuration not found' }, 404);
+                }
+
+                const existingIds = new Set(
+                    existingConfig.labs.map((item) => item.id),
+                );
+                const submittedIds = body.labs.flatMap((item) =>
+                    item.id ? [item.id] : [],
+                );
+                if (
+                    submittedIds.some((id) => !existingIds.has(id)) ||
+                    new Set(submittedIds).size !== submittedIds.length
+                ) {
+                    return c.json(
+                        { error: 'Invalid or duplicate lab ID' },
+                        400,
+                    );
+                }
+                const interfaces = body.labs
+                    .map((item) => item.interface)
+                    .filter(Boolean);
+                if (new Set(interfaces).size !== interfaces.length)
+                    return c.json(
+                        { error: 'Each lab must use a different interface' },
+                        400,
+                    );
+
+                // Validate every mapping before making any router or database changes.
+                const prepared: Array<
+                    Omit<
+                        (typeof body.labs)[number],
+                        'subnet' | 'dhcpServer'
+                    > & {
+                        subnet?: string | null;
+                        dhcpServer?: string | null;
+                        ruleMarker: string | null;
+                        rule: Record<string, any> | null;
+                    }
+                > = [];
+                for (const item of body.labs) {
+                    const old = existingConfig.labs.find(
+                        (entry) => entry.id === item.id,
+                    );
+                    if (!item.interface) {
+                        if (
+                            !old ||
+                            old.interface ||
+                            old.ruleId !== item.firewallId
+                        )
+                            return c.json(
+                                {
+                                    error: `Interface is required for lab ${item.name}`,
+                                },
+                                400,
+                            );
+                        prepared.push({
+                            ...item,
+                            subnet: old.subnet,
+                            dhcpServer: old.dhcpServer,
+                            ruleMarker: null,
+                            rule: null,
+                        });
+                        continue;
+                    }
+                    const details = await discoverLabInterface(
+                        user.organizationId!,
+                        item.interface,
+                    );
+                    if (!details.success)
+                        return c.json(
+                            { error: `${item.name}: ${details.error}` },
+                            400,
+                        );
+                    const response = await getLabRule(
+                        user.organizationId!,
+                        item.firewallId,
+                        old?.interface || item.interface,
+                        Boolean(old?.ruleMarker),
+                    );
+                    if (!response.success)
+                        return c.json(
+                            { error: `${item.name}: ${response.error}` },
+                            400,
+                        );
+                    const rule = response.data;
+                    if (
+                        !/^\*[0-9a-f]+$/i.test(rule?.['.id'] ?? '') ||
+                        rule.chain !== 'forward' ||
+                        !['accept', 'drop'].includes(rule.action) ||
+                        [true, 'true'].includes(rule.dynamic) ||
+                        [true, 'true'].includes(rule.invalid)
+                    )
+                        return c.json(
+                            {
+                                error: `${item.name}: Select a static forward-chain accept/drop rule`,
+                            },
+                            400,
+                        );
+
+                    const subnet = ipv4Range(details.data.subnet)!;
+                    const withinSubnet = (value: string) => {
+                        const range = ipv4Range(value);
+                        return (
+                            range &&
+                            range[0] >= subnet[0] &&
+                            range[1] <= subnet[1]
+                        );
+                    };
+                    let scoped = rule['in-interface'] === item.interface;
+                    if (rule['in-interface'] && !scoped)
+                        return c.json(
+                            {
+                                error: `${item.name}: Firewall rule matches a different incoming interface`,
+                            },
+                            400,
+                        );
+                    if (rule['src-address']) {
+                        if (!withinSubnet(rule['src-address']))
+                            return c.json(
+                                {
+                                    error: `${item.name}: Firewall source address must be within the lab subnet`,
+                                },
+                                400,
+                            );
+                        scoped = true;
+                    }
+                    // Rule matchers are ANDed: an explicit lab interface/source
+                    // already scopes a shared address list to this lab.
+                    if (rule['src-address-list'] && !scoped) {
+                        const lists = await getAddressLists(
+                            user.organizationId!,
+                        );
+                        if (!lists.success || !Array.isArray(lists.data))
+                            return c.json(
+                                {
+                                    error: `${item.name}: Could not verify firewall address list`,
+                                },
+                                400,
+                            );
+                        const entries = lists.data.filter(
+                            (entry: any) =>
+                                entry.list === rule['src-address-list'] &&
+                                ![true, 'true'].includes(entry.disabled),
+                        );
+                        if (
+                            !entries.length ||
+                            entries.some(
+                                (entry: any) => !withinSubnet(entry.address),
+                            )
+                        )
+                            return c.json(
+                                {
+                                    error: `${item.name}: Firewall rule must be limited to this lab (${details.data.subnet}).`,
+                                },
+                                400,
+                            );
+                        scoped = true;
+                    }
+                    if (!scoped)
+                        return c.json(
+                            {
+                                error: `${item.name}: Firewall rule must explicitly match the lab interface or source subnet`,
+                            },
+                            400,
+                        );
+                    const ruleMarker = labRuleMarker(item.interface);
+                    prepared.push({
+                        ...item,
+                        ...details.data,
+                        firewallId: rule['.id'] as string,
+                        ruleMarker,
+                        rule,
+                    });
+                }
+                if (
+                    new Set(
+                        prepared.map((item) => item.firewallId.toLowerCase()),
+                    ).size !== prepared.length
+                )
+                    return c.json(
+                        {
+                            error: 'Each lab must use a different firewall rule',
+                        },
+                        400,
+                    );
+
+                // Detect conflicting markers before tagging, including on interface renames.
+                if (prepared.some((item) => item.rule)) {
+                    const rules = await getFirewallRules(user.organizationId!);
+                    if (!rules.success || !Array.isArray(rules.data))
+                        return c.json(
+                            {
+                                error:
+                                    rules.error ||
+                                    'Could not verify firewall ownership',
+                            },
+                            400,
+                        );
+                    for (const item of prepared) {
+                        const marker = item.ruleMarker;
+                        if (
+                            marker &&
+                            rules.data.some(
+                                (rule: any) =>
+                                    rule['.id'] !== item.firewallId &&
+                                    String(rule.comment || '')
+                                        .split(/\r?\n/)
+                                        .includes(marker),
+                            )
+                        )
+                            return c.json(
+                                {
+                                    error: `Firewall marker ${item.ruleMarker} is already used by another rule`,
+                                },
+                                400,
+                            );
+                    }
+                }
+                const changedComments: Array<{
+                    id: string;
+                    before: string;
+                    after: string;
+                }> = [];
+                try {
+                    for (const item of prepared) {
+                        if (!item.rule || !item.interface) continue;
+                        const old = existingConfig.labs.find(
+                            (entry) => entry.id === item.id,
+                        );
+                        const before = String(item.rule.comment || '');
+                        const after = ruleCommentWithMarker(
+                            before,
+                            item.interface,
+                            old?.interface || undefined,
+                        );
+                        if (after === before) continue;
+                        // A failed response may still mean the router applied the write.
+                        changedComments.push({
+                            id: item.firewallId,
+                            before,
+                            after,
+                        });
+                        const tagged = await callMikrotik(
+                            user.organizationId!,
+                            `/ip/firewall/filter/${encodeURIComponent(item.firewallId)}`,
+                            'PATCH',
+                            { comment: after },
+                        );
+                        if (!tagged.success)
+                            throw new Error(
+                                tagged.error || 'Failed to tag firewall rule',
+                            );
+                        const verified = await getRuleStatus(
+                            user.organizationId!,
+                            item.firewallId,
+                        );
+                        if (
+                            !verified.success ||
+                            verified.data?.comment !== after
+                        )
+                            throw new Error(
+                                `Could not verify firewall marker ${item.ruleMarker}`,
+                            );
+                    }
+                    db.transaction((tx) => {
+                        if (body.defaultDnsSuffix !== undefined) {
+                            tx.update(firewallConfig)
+                                .set({
+                                    defaultDnsSuffix: body.defaultDnsSuffix,
+                                    updatedAt: new Date(),
+                                })
+                                .where(eq(firewallConfig.id, existingConfig.id))
+                                .run();
+                        }
+                        const removedIds = [...existingIds].filter(
+                            (id) => !submittedIds.includes(id),
+                        );
+                        if (removedIds.length)
+                            tx.delete(lab)
+                                .where(inArray(lab.id, removedIds))
+                                .run();
+                        for (const l of prepared) {
+                            const values = {
+                                firewallConfigId: existingConfig.id,
+                                name: l.name,
+                                ruleId: l.firewallId,
+                                ruleMarker: l.ruleMarker,
+                                description: l.description ?? null,
+                                subnet: l.subnet ?? null,
+                                dhcpServer: l.dhcpServer ?? null,
+                                interface: l.interface || null,
+                                ...(l.dnsSuffix !== undefined
+                                    ? { dnsSuffix: l.dnsSuffix || null }
+                                    : {}),
+                                updatedAt: new Date(),
+                            };
+                            if (l.id) {
+                                const old = existingConfig.labs.find(
+                                    (item) => item.id === l.id,
+                                )!;
+                                if (
+                                    (old.interface || '') !==
+                                        (l.interface || '') ||
+                                    (!l.interface &&
+                                        old.ruleId !== l.firewallId)
+                                ) {
+                                    tx.delete(dataUsageHistory)
+                                        .where(eq(dataUsageHistory.labId, l.id))
+                                        .run();
+                                }
+                                tx.update(lab)
+                                    .set(values)
+                                    .where(eq(lab.id, l.id))
+                                    .run();
+                            } else {
+                                tx.insert(lab).values(values).run();
+                            }
+                        }
+                    });
+                } catch (error) {
+                    const failures = [];
+                    for (const change of changedComments.reverse()) {
+                        const current = await getRuleStatus(
+                            user.organizationId!,
+                            change.id,
+                        );
+                        if (
+                            current.success &&
+                            current.data?.comment === change.before
+                        )
+                            continue;
+                        if (
+                            !current.success ||
+                            current.data?.comment !== change.after
+                        ) {
+                            failures.push(change.id);
+                            continue;
+                        }
+                        const restored = await callMikrotik(
+                            user.organizationId!,
+                            `/ip/firewall/filter/${encodeURIComponent(change.id)}`,
+                            'PATCH',
+                            { comment: change.before },
+                        );
+                        const verified = restored.success
+                            ? await getRuleStatus(
+                                  user.organizationId!,
+                                  change.id,
+                              )
+                            : null;
+                        if (
+                            !verified?.success ||
+                            (verified.data?.comment || '') !== change.before
+                        )
+                            failures.push(change.id);
+                    }
+                    return c.json(
+                        {
+                            error: `${error instanceof Error ? error.message : String(error)}. Labs were not saved.${failures.length ? ` Could not restore comments for ${failures.join(', ')}; check the router before retrying.` : ''}`,
+                        },
+                        502,
+                    );
+                }
+
+                const configWithLabs = await getFirewallConfigByIdWithLabs(
+                    existingConfig.id,
+                );
+
+                return c.json({
+                    success: true,
+                    message: 'Labs saved successfully!',
+                    data: configWithLabs
+                        ? {
+                              ...configWithLabs,
+                              mikrotikPassword: '*'.repeat(
+                                  configWithLabs.mikrotikPassword.length,
+                              ),
+                              labs: mapLabs(configWithLabs.labs),
+                          }
+                        : undefined,
+                });
+            } catch (error) {
+                if (error instanceof z.ZodError || error instanceof SyntaxError)
+                    return c.json({ error: 'Invalid lab configuration' }, 400);
+                settingsLogger.error(
+                    'Failed to save firewall settings: {error}',
+                    {
+                        error: errorProperty(error),
+                    },
+                );
+                return c.json({ error: String(error) }, 500);
             }
-        });
-
-        const configWithLabs = await getFirewallConfigByIdWithLabs(
-            existingConfig.id,
-        );
-
-        return c.json({
-            success: true,
-            message: 'Labs saved successfully!',
-            data: configWithLabs
-                ? {
-                      ...configWithLabs,
-                      mikrotikPassword: '*'.repeat(
-                          configWithLabs.mikrotikPassword.length,
-                      ),
-                      labs: mapLabs(configWithLabs.labs),
-                  }
-                : undefined,
-        });
-    } catch (error) {
-        if (error instanceof z.ZodError || error instanceof SyntaxError)
-            return c.json({ error: 'Invalid lab configuration' }, 400);
-        settingsLogger.error('Failed to save firewall settings: {error}', {
-            error: errorProperty(error),
-        });
-        return c.json({ error: String(error) }, 500);
-    }
+        },
+    );
 });
 
 settingsRouter.get('/settings/firewall', async (c) => {
