@@ -18,7 +18,4 @@ dist/
 logs/
 *.test.*
 *.spec.*
-!backend/mikrotik-discovery.spec.ts
-!backend/lab-setup.test.ts
-!frontend/src/components/settings/FirewallSettings.test.tsx
 drizzle/
