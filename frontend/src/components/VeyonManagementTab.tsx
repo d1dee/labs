@@ -70,7 +70,6 @@ import {
     Modal,
     MultiSelect,
     PasswordInput,
-    ScrollArea,
     Select,
     Stack,
     Table,
@@ -2522,7 +2521,7 @@ function RemoteViewer({
 
     // One backend polling worker per machine feeds this view; the browser
     // never polls Veyon directly and failed polls keep the last frame.
-    const { frames, connected } = useVeyonScreenshots(
+    const { frames, connected, refreshOnce } = useVeyonScreenshots(
         computer ? [computer.id] : [],
         {
             minFrameIntervalMs: 1_000,
@@ -2561,119 +2560,201 @@ function RemoteViewer({
         frame?.lastUpdated != null
             ? Math.max(0, Math.round((Date.now() - frame.lastUpdated) / 1000))
             : null;
+    const displayName = identity?.hostname || computer.name || computer.host;
+    const hasImage = Boolean(frame?.image && failedImage !== frame.image);
+    const statusColor = status === 'Unavailable'
+        ? 'red'
+        : stale
+          ? 'orange'
+          : status === 'Live'
+            ? 'teal'
+            : 'gray';
     return (
         <Modal
             opened
             onClose={onClose}
-            closeButtonProps={{ 'aria-label': 'Close' }}
-            title={`Remote view · ${identity?.hostname || computer.name || computer.host}`}
-            size='calc(100vw - 48px)'
+            closeButtonProps={{ 'aria-label': 'Close remote viewer' }}
+            title={
+                <Group gap='sm' wrap='nowrap'>
+                    <ThemeIcon variant='light' color='teal' size='lg' radius='md'>
+                        <IconScreenShare size={20} />
+                    </ThemeIcon>
+                    <Stack gap={0} miw={0}>
+                        <Text fw={600} style={{ overflowWrap: 'anywhere' }}>
+                            {displayName}
+                        </Text>
+                        <Text size='xs' c='dimmed'>Remote viewer</Text>
+                    </Stack>
+                </Group>
+            }
+            size='min(1600px, calc(100vw - 24px))'
+            xOffset={12}
+            yOffset={12}
+            padding='md'
+            radius='lg'
+            styles={{ title: { minWidth: 0 }, close: { flexShrink: 0 } }}
             centered
         >
-            <Stack>
-                <DeviceIdentityDetails
-                    identity={identity}
-                    hostname={computer.name || computer.host}
-                    address={computer.host}
-                    lab={lab}
-                />
-                <Group justify='space-between'>
-                    <Group gap='xs'>
-                        <Badge
-                            color={
-                                status === 'Unavailable'
-                                    ? 'red'
-                                    : stale
-                                      ? 'orange'
-                                      : status === 'Live'
-                                        ? 'teal'
-                                        : 'gray'
-                            }
-                            variant='dot'
-                        >
-                            {status}
-                        </Badge>
-                        {stale && frame?.image ? (
-                            <Tooltip
-                                label={
-                                    frame.lastError ??
-                                    'Last screenshot is being kept while retries back off'
-                                }
+            <Flex direction={{ base: 'column', lg: 'row' }} gap='md' align='stretch'>
+                <Stack gap='sm' flex={1} miw={0}>
+                    <Group justify='space-between' gap='sm'>
+                        <Group gap='xs'>
+                            <Badge color={statusColor} variant='dot' role='status'>
+                                {status}
+                            </Badge>
+                            <Text size='xs' c='dimmed'>Read-only preview</Text>
+                        </Group>
+                        <Group gap='xs'>
+                            <Button
+                                size='xs'
+                                variant='default'
+                                leftSection={<IconReload size={14} />}
+                                onClick={() => {
+                                    setFailedImage(null);
+                                    refreshOnce();
+                                }}
                             >
-                                <Text size='sm' c='dimmed'>
-                                    {staleSeconds != null
-                                        ? `last frame ${staleSeconds}s ago`
-                                        : 'last frame kept'}
-                                </Text>
-                            </Tooltip>
-                        ) : null}
-                        {information?.user.login ? (
-                            <Text size='sm' c='dimmed'>
-                                {information.user.fullName ||
-                                    information.user.login}
-                            </Text>
-                        ) : null}
-                        {information ? (
-                            <Group
-                                gap='sm'
-                                style={{ overflowWrap: 'anywhere' }}
+                                Refresh
+                            </Button>
+                            <Button
+                                size='xs'
+                                component='a'
+                                href={veyonFramebufferUrl(computer.id, { download: true })}
+                                variant='light'
+                                color='teal'
+                                leftSection={<IconDeviceDesktop size={14} />}
+                                disabled={!hasImage}
                             >
-                                <Text size='xs' c='dimmed'>
-                                    Session {information.session.sessionId}
-                                </Text>
-                                <Text size='xs' c='dimmed'>
-                                    {information.session.sessionHostName ||
-                                        computer.host}
-                                </Text>
-                                <Text size='xs' c='dimmed'>
-                                    Uptime{' '}
-                                    {information.session.sessionUptime >= 0
-                                        ? `${Math.floor(information.session.sessionUptime / 60)} min`
-                                        : 'unavailable'}
-                                </Text>
-                            </Group>
-                        ) : null}
-                        <Tooltip label='Use the command deck for controls. Direct pointer and keyboard input are not supported.'>
-                            <Text size='xs' c='dimmed'>
-                                Read-only preview
-                            </Text>
-                        </Tooltip>
+                                Screenshot
+                            </Button>
+                        </Group>
                     </Group>
-                    <Group gap='xs'>
-                        <Button
-                            component='a'
-                            href={veyonFramebufferUrl(computer.id, {
-                                download: true,
-                            })}
-                            variant='light'
-                        >
-                            Screenshot
-                        </Button>
+                    <Box
+                        bg='#18212b'
+                        h={{ base: 'clamp(220px, 42dvh, 480px)', lg: 'min(68dvh, 850px)' }}
+                        style={{
+                            borderRadius: 'var(--mantine-radius-md)',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid #334454',
+                        }}
+                    >
+                        {hasImage ? (
+                            <Image
+                                src={frame!.image!}
+                                onError={() => setFailedImage(frame?.image ?? null)}
+                                alt={`Screen preview of ${displayName}`}
+                                fit='contain'
+                                w='100%'
+                                h='100%'
+                            />
+                        ) : (
+                            <Stack align='center' gap='sm' p='xl' maw={440} role='status'>
+                                {status === 'Unavailable' ? (
+                                    <IconDeviceDesktop size={36} color='#9badbe' />
+                                ) : (
+                                    <Loader color='teal.3' size='sm' />
+                                )}
+                                <Text c='white' fw={600} ta='center'>
+                                    {status === 'Unavailable'
+                                        ? 'Screen preview unavailable'
+                                        : 'Waiting for the screen'}
+                                </Text>
+                                <Text size='sm' c='#bccbd8' ta='center'>
+                                    {status === 'Unavailable'
+                                        ? 'Check that the computer is reachable and Veyon is running, then refresh.'
+                                        : 'The preview will appear when Veyon sends the first screenshot.'}
+                                </Text>
+                            </Stack>
+                        )}
+                    </Box>
+                    {stale && hasImage ? (
+                        <Alert color='orange' icon={<IconAlertCircle size={16} />} title='Showing the last available frame'>
+                            {staleSeconds != null ? `Captured ${staleSeconds}s ago. ` : ''}
+                            {frame?.lastError || 'The stream is reconnecting automatically.'}
+                        </Alert>
+                    ) : null}
+                    {error || (!hasImage && frame?.lastError) ? (
+                        <Alert color='red' icon={<IconAlertCircle size={16} />} title='Connection issue'>
+                            {error || frame?.lastError}
+                        </Alert>
+                    ) : null}
+                    <Group gap={6} wrap='nowrap' align='flex-start'>
+                        <IconInfoCircle size={15} style={{ flexShrink: 0 }} />
+                        <Text size='xs' c='dimmed'>
+                            Pointer and keyboard input are not sent to this computer. Use the controls to manage its session.
+                        </Text>
                     </Group>
-                </Group>
-                {error ? <Alert color='red'>{error}</Alert> : null}
-                <CommandDeck
-                    key={computer.id}
-                    selectedCount={1}
-                    targetName={computer.name}
-                    features={information?.features ?? []}
-                    onCommand={onCommand}
-                    onConfirm={onConfirm}
-                />
-                <ScrollArea
-                    bg='dark.9'
-                    style={{ borderRadius: 'var(--mantine-radius-md)' }}
+                </Stack>
+                <Stack
+                    gap='md'
+                    w={{ base: '100%', lg: 320 }}
+                    miw={0}
+                    style={{ flexShrink: 0 }}
                 >
-                    <Image
-                        src={frame?.image ?? undefined}
-                        onError={() => setFailedImage(frame?.image ?? null)}
-                        alt={`Live screen of ${computer.name}`}
-                        fit='contain'
-                        mah='72vh'
-                        fallbackSrc='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="450"%3E%3Crect width="100%25" height="100%25" fill="%23252b32"/%3E/svg%3E'
-                    />
-                </ScrollArea>
-            </Stack>
+                    <Card withBorder radius='md' p='md'>
+                        <Stack gap='md'>
+                            <Stack gap={4}>
+                                <Title order={5}>Session controls</Title>
+                                <Text size='xs' c='dimmed' style={{ overflowWrap: 'anywhere' }}>
+                                    Actions apply only to {displayName}.
+                                </Text>
+                            </Stack>
+                            <CommandDeck
+                                key={computer.id}
+                                selectedCount={1}
+                                targetName={displayName}
+                                features={information?.features ?? []}
+                                onCommand={onCommand}
+                                onConfirm={onConfirm}
+                            />
+                        </Stack>
+                    </Card>
+                    <Card withBorder radius='md' p='md'>
+                        <Stack gap='md' style={{ overflowWrap: 'anywhere' }}>
+                            <Title order={5}>Computer details</Title>
+                            <DeviceIdentityDetails
+                                identity={identity}
+                                hostname={computer.name || computer.host}
+                                address={computer.host}
+                                lab={lab}
+                            />
+                            <Stack gap={2}>
+                                <Text size='xs' c='dimmed'>Signed-in user</Text>
+                                <Text size='sm'>
+                                    {information?.user.login
+                                        ? information.user.fullName || information.user.login
+                                        : information ? 'No user signed in' : 'Session unavailable'}
+                                </Text>
+                            </Stack>
+                            {information ? (
+                                <>
+                                    <Stack gap={2}>
+                                        <Text size='xs' c='dimmed'>Session host</Text>
+                                        <Text size='sm'>{information.session.sessionHostName || computer.host}</Text>
+                                    </Stack>
+                                    <Group justify='space-between'>
+                                        <Stack gap={2}>
+                                            <Text size='xs' c='dimmed'>Session ID</Text>
+                                            <Text size='sm'>{information.session.sessionId}</Text>
+                                        </Stack>
+                                        <Stack gap={2}>
+                                            <Text size='xs' c='dimmed'>Uptime</Text>
+                                            <Text size='sm'>
+                                                {information.session.sessionUptime >= 0
+                                                    ? `${Math.floor(information.session.sessionUptime / 60)} min`
+                                                    : 'Unavailable'}
+                                            </Text>
+                                        </Stack>
+                                    </Group>
+                                </>
+                            ) : null}
+                        </Stack>
+                    </Card>
+                </Stack>
+            </Flex>
         </Modal>
     );
 }
