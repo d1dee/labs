@@ -42,6 +42,13 @@ veyonRouter.use('/veyon/*', async (c, next) => {
 });
 
 const veyonLogger = getLogger(['labs', 'veyon']);
+const informationConcurrency = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(64)
+    .catch(6)
+    .parse(process.env.VEYON_INFORMATION_CONCURRENCY);
 
 function watchStreamIdentity(
     headers: Headers,
@@ -780,7 +787,12 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                             let phaseError: unknown;
                             await Promise.all(
                                 Array.from(
-                                    { length: Math.min(6, phase.length) },
+                                    {
+                                        length: Math.min(
+                                            informationConcurrency,
+                                            phase.length,
+                                        ),
+                                    },
                                     async () => {
                                         while (!signal.aborted && !phaseError) {
                                             const computer = phase[next++];
