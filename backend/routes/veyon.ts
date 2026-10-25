@@ -746,20 +746,14 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                         })
                         .catch(abort);
                     try {
-                        const targets = computers.some(
-                            (computer) => computer.fogHostId != null,
-                        )
-                            ? ((await locations) ?? computers)
-                            : computers;
                         const client = await pending(
                             getVeyonClient(
                                 auth.user.organizationId,
                                 auth.user.id,
                             ),
                         );
-                        const ipTargets: typeof targets = [];
-                        const hostnameTargets: typeof targets = [];
-                        for (const computer of targets) {
+                        const ipTargets: typeof computers = [];
+                        for (const computer of computers) {
                             const bracketed = computer.host.match(
                                 /^\[([^\]]+)\](?::\d+)?$/,
                             );
@@ -769,12 +763,19 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                                 isIP(computer.host) ||
                                 (bracketed && isIP(bracketed[1]!) === 6) ||
                                 (ipv4WithPort && isIP(ipv4WithPort[1]!) === 4);
-                            (literal ? ipTargets : hostnameTargets).push(
-                                computer,
-                            );
+                            if (literal) ipTargets.push(computer);
                         }
-                        // Drain every IP check before starting any hostname check.
-                        for (const phase of [ipTargets, hostnameTargets]) {
+                        const ipTargetIds = new Set(
+                            ipTargets.map((computer) => computer.id),
+                        );
+                        // Start known IPs without waiting for DNS enrichment.
+                        // Drain them before checking the remaining resolved targets.
+                        for (const ipPhase of [true, false]) {
+                            const phase = ipPhase
+                                ? ipTargets
+                                : ((await locations) ?? computers).filter(
+                                      (computer) => !ipTargetIds.has(computer.id),
+                                  );
                             let next = 0;
                             let phaseError: unknown;
                             await Promise.all(
