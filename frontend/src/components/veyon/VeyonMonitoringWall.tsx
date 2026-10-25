@@ -16,6 +16,7 @@ import {
     Button,
     Checkbox,
     Group,
+    Menu,
     Modal,
     Paper,
     Popover,
@@ -32,6 +33,7 @@ import {
     IconArrowsMaximize,
     IconArrowsMinimize,
     IconBolt,
+    IconDotsVertical,
     IconEye,
     IconInfoCircle,
     IconKey,
@@ -607,6 +609,7 @@ export default function VeyonMonitoringWall({
                                         }}
                                     >
                                         <WallTile
+                                            compactControls={tileWidth < 400}
                                             computer={computer}
                                             identity={identities.lookup(
                                                 identityQuery(computer),
@@ -766,6 +769,7 @@ const TileImage = memo(function TileImage({
 });
 
 const WallTile = memo(function WallTile({
+    compactControls,
     computer,
     identity,
     lab,
@@ -776,6 +780,7 @@ const WallTile = memo(function WallTile({
     onOpenViewer,
     onCommand,
 }: {
+    compactControls: boolean;
     computer: VeyonComputer;
     identity: DeviceIdentity | null;
     lab: DeviceLab | null;
@@ -841,6 +846,49 @@ const WallTile = memo(function WallTile({
         }
     };
 
+    const actions = [
+        {
+            label: isFullscreen ? 'Exit fullscreen' : 'Fullscreen',
+            ariaLabel: `Fullscreen ${computer.name}`,
+            icon: isFullscreen ? IconArrowsMinimize : IconArrowsMaximize,
+            onClick: () => void toggleFullscreen(),
+        },
+        {
+            label: 'Open details',
+            ariaLabel: `Open details for ${computer.name}`,
+            icon: IconEye,
+            onClick: () => onOpenViewer(computer),
+        },
+        {
+            label: 'Lock screen',
+            ariaLabel: `Lock screen ${computer.name}`,
+            icon: IconLock,
+            color: 'orange',
+            onClick: () => void onCommand(computer.id, 'screen-lock'),
+        },
+        {
+            label: 'Unlock screen',
+            ariaLabel: `Unlock screen ${computer.name}`,
+            icon: IconLockOpen,
+            color: 'teal',
+            onClick: () => void onCommand(computer.id, 'screen-lock', false),
+        },
+        {
+            label: 'Lock input',
+            ariaLabel: `Lock input ${computer.name}`,
+            icon: IconKey,
+            color: 'orange',
+            onClick: () => void onCommand(computer.id, 'input-lock'),
+        },
+        {
+            label: 'Unlock input',
+            ariaLabel: `Unlock input ${computer.name}`,
+            icon: IconBolt,
+            color: 'teal',
+            onClick: () => void onCommand(computer.id, 'input-lock', false),
+        },
+    ];
+
     return (
         <Paper
             data-tile-id={computer.id}
@@ -861,7 +909,7 @@ const WallTile = memo(function WallTile({
         >
             <Stack gap='xs' style={{ height: '100%', minHeight: 0 }}>
                 <Group justify='space-between' wrap='nowrap' gap='xs'>
-                    <Group gap='xs' wrap='nowrap' style={{ minWidth: 0 }}>
+                    <Group gap='xs' wrap='nowrap' style={{ flex: 1, minWidth: 0 }}>
                         <Box
                             aria-hidden
                             style={{
@@ -888,88 +936,48 @@ const WallTile = memo(function WallTile({
                             ) : null}
                         </div>
                     </Group>
-                    <Group gap={2} wrap='nowrap'>
-                        <Tooltip
-                            label={
-                                isFullscreen ? 'Exit fullscreen' : 'Fullscreen'
-                            }
-                        >
-                            <ActionIcon
-                                variant='subtle'
-                                size='sm'
-                                aria-label={`Fullscreen ${computer.name}`}
-                                onClick={() => void toggleFullscreen()}
-                            >
-                                {isFullscreen ? (
-                                    <IconArrowsMinimize size={15} />
-                                ) : (
-                                    <IconArrowsMaximize size={15} />
-                                )}
-                            </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label='Open details'>
-                            <ActionIcon
-                                variant='subtle'
-                                size='sm'
-                                aria-label={`Open details for ${computer.name}`}
-                                onClick={() => onOpenViewer(computer)}
-                            >
-                                <IconEye size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label='Lock screen'>
-                            <ActionIcon
-                                variant='subtle'
-                                size='sm'
-                                color='orange'
-                                aria-label={`Lock screen ${computer.name}`}
-                                onClick={() =>
-                                    void onCommand(computer.id, 'screen-lock')
-                                }
-                            >
-                                <IconLock size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label='Unlock screen'>
-                            <ActionIcon
-                                variant='subtle'
-                                size='sm'
-                                color='teal'
-                                aria-label={`Unlock screen ${computer.name}`}
-                                onClick={() =>
-                                    void onCommand(computer.id, 'screen-lock', false)
-                                }
-                            >
-                                <IconLockOpen size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label='Lock input'>
-                            <ActionIcon
-                                variant='subtle'
-                                size='sm'
-                                color='orange'
-                                aria-label={`Lock input ${computer.name}`}
-                                onClick={() =>
-                                    void onCommand(computer.id, 'input-lock')
-                                }
-                            >
-                                <IconKey size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label='Unlock input'>
-                            <ActionIcon
-                                variant='subtle'
-                                size='sm'
-                                color='teal'
-                                aria-label={`Unlock input ${computer.name}`}
-                                onClick={() =>
-                                    void onCommand(computer.id, 'input-lock', false)
-                                }
-                            >
-                                <IconBolt size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                    </Group>
+                    {compactControls && !isFullscreen ? (
+                        <Menu position='bottom-end' shadow='md' width={200}>
+                            <Menu.Target>
+                                <ActionIcon
+                                    variant='subtle'
+                                    aria-label={`Actions for ${computer.name}`}
+                                    style={{ flexShrink: 0 }}
+                                >
+                                    <IconDotsVertical size={18} />
+                                </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                                {actions.map((action) => (
+                                    <Menu.Item
+                                        key={action.label}
+                                        leftSection={<action.icon size={15} />}
+                                        color={action.color}
+                                        aria-label={action.ariaLabel}
+                                        onClick={action.onClick}
+                                    >
+                                        {action.label}
+                                    </Menu.Item>
+                                ))}
+                            </Menu.Dropdown>
+                        </Menu>
+                    ) : (
+                        <Group gap={2} wrap='nowrap' style={{ flexShrink: 0 }}>
+                            {actions.map((action) => (
+                                <Tooltip key={action.label} label={action.label}>
+                                    <ActionIcon
+                                        variant='subtle'
+                                        size='sm'
+                                        color={action.color}
+                                        aria-label={action.ariaLabel}
+                                        onClick={action.onClick}
+                                    >
+                                        <action.icon size={15} />
+                                    </ActionIcon>
+                                </Tooltip>
+                            ))}
+                        </Group>
+                    )}
                 </Group>
                 <TileImage
                     computerId={computer.id}

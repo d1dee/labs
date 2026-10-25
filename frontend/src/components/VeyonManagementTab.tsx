@@ -31,6 +31,7 @@ import {
 } from '@/api/veyon';
 import { InventoryHostDetails } from '@/components/FOG/InventoryDetails';
 import { SelectedHostCard } from '@/components/FOG/SelectedHostCard';
+import { PendingClients } from '@/components/FOG/PendingClients';
 import { DeviceIdentityDetails } from '@/components/ui/DeviceIdentityDetails';
 import {
     MobileFilterPanel,
@@ -994,6 +995,15 @@ export default function ComputersManagementTab() {
                     { label: 'Selected', value: selected.length },
                 ]}
             />
+
+            {fogConfigured && (
+                <PendingClients
+                    hosts={fogHosts ?? []}
+                    disabled={Boolean(fogError || inventoryWarning)}
+                    onHostUpdated={handleHostUpdated}
+                    onHostsDeleted={handleHostsDeleted}
+                />
+            )}
 
             <Card withBorder radius='lg' p='sm'>
                 <Tabs defaultValue='veyon' keepMounted={false}>

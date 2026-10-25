@@ -103,7 +103,7 @@ export interface FogHost {
     kernel?: string;
     kernelDevice?: string;
     init?: string;
-    pending?: string;
+    pending?: string | number | boolean;
     pub_key?: string;
     sec_tok?: string;
     sec_time?: string;
