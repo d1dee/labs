@@ -108,8 +108,6 @@ const FirewallTab: FC = () => {
                     <Box
                         ref={cardsRef}
                         w='100%'
-                        maw={labs.length < 3 ? 1160 : 1260}
-                        mx={labs.length < 3 ? 'auto' : undefined}
                     >
                         <Grid gap={16}>
                             {sortedLabs.map((lab) => (
