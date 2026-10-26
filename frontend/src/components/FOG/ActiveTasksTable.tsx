@@ -9,6 +9,7 @@ import {
     Box,
     Checkbox,
     Group,
+    Menu,
     Pagination,
     Progress,
     Skeleton,
@@ -20,6 +21,7 @@ import { useSelection } from '@mantine/hooks';
 import {
     IconCheck,
     IconClock,
+    IconDotsVertical,
     IconPlayerPlay,
     IconRefresh,
     IconTrash,
@@ -214,7 +216,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                             handlers.resetSelection();
                                         }} />
                                 ))}
-                                <Table.Th>Actions</Table.Th>
+                                <Table.Th data-table-actions>Actions</Table.Th>
                             </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
@@ -268,7 +270,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                   />
                                               </Table.Td>
                                               <Table.Td><Skeleton height={24} width={80} /></Table.Td>
-                                              <Table.Td><Skeleton height={24} width={80} /></Table.Td>
+                                              <Table.Td data-table-actions><Skeleton height={24} width={80} /></Table.Td>
                                           </Table.Tr>
                                       ),
                                   )
@@ -289,11 +291,24 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                       const progressLabel =
                                           task.percent !== undefined
                                               ? `${Math.round(progress)}%`
-                                              : 'N/A';
+                                               : 'N/A';
+                                      const stateId = task.stateID ?? task.state?.id ?? 0;
+                                      const actionsDisabled = isTerminalState(task) || actioningTasks.has(task.id);
+                                      const runTask = () => {
+                                          if (stateId === 1 || stateId === 2) {
+                                              onTaskAction(task.id, 'force');
+                                          } else if (stateId === 3) {
+                                              onTaskAction(task.id, 'restart', {
+                                                  hostId: task.hostID,
+                                                  taskTypeId: task.typeID,
+                                              });
+                                          }
+                                      };
 
                                         return (
                                             <Table.Tr
                                                 key={task.id}
+                                                data-action-selection={selection.includes(task.id) ? 'blue' : undefined}
                                                 style={{ cursor: 'pointer' }}
                                                 onClick={(event) => onSelectionRowClick(event, () => handlers.toggle(task.id))}
                                                 bg={
@@ -379,8 +394,8 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                       </Text>
                                                   </Stack>
                                               </Table.Td>
-                                              <Table.Td>
-                                                  <Group gap='xs' wrap='nowrap'>
+                                              <Table.Td data-table-actions>
+                                                  <Group gap='xs' wrap='nowrap' visibleFrom='sm'>
                                                       <ActionIcon
                                                           variant='subtle'
                                                           color='blue'
@@ -394,35 +409,7 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                                   task.id,
                                                               )
                                                           }
-                                                          onClick={() => {
-                                                              const stateId =
-                                                                  task.stateID ??
-                                                                  task.state
-                                                                      ?.id ??
-                                                                  0;
-                                                              if (
-                                                                  stateId ===
-                                                                      1 ||
-                                                                  stateId === 2
-                                                              ) {
-                                                                  onTaskAction(
-                                                                      task.id,
-                                                                      'force',
-                                                                  );
-                                                              } else if (
-                                                                  stateId === 3
-                                                              ) {
-                                                                  onTaskAction(
-                                                                      task.id,
-                                                                      'restart',
-                                                                      {
-                                                                          hostId: task.hostID,
-                                                                          taskTypeId:
-                                                                              task.typeID,
-                                                                      },
-                                                                  );
-                                                              }
-                                                          }}
+                                                          onClick={runTask}
                                                       >
                                                           {(task.stateID ??
                                                               task.state?.id ??
@@ -462,6 +449,38 @@ const ActiveTasksTable: FC<ActiveTasksTableProps> = ({
                                                           />
                                                       </ActionIcon>
                                                   </Group>
+                                                  <Box hiddenFrom='sm'>
+                                                      <Menu position='bottom-end'>
+                                                          <Menu.Target>
+                                                              <ActionIcon
+                                                                  variant='subtle'
+                                                                  aria-label={`Actions for task ${task.id}`}
+                                                                  loading={actioningTasks.has(task.id)}
+                                                                  disabled={actionsDisabled}
+                                                                  onClick={(event) => event.stopPropagation()}
+                                                              >
+                                                                  <IconDotsVertical size={16} />
+                                                              </ActionIcon>
+                                                          </Menu.Target>
+                                                          <Menu.Dropdown>
+                                                              <Menu.Item
+                                                                  leftSection={stateId === 3 ? <IconRefresh size={16} /> : <IconPlayerPlay size={16} />}
+                                                                  disabled={actionsDisabled || ![1, 2, 3].includes(stateId)}
+                                                                  onClick={runTask}
+                                                              >
+                                                                  {stateId === 3 ? 'Restart' : 'Force'}
+                                                              </Menu.Item>
+                                                              <Menu.Item
+                                                                  color='red'
+                                                                  leftSection={<IconTrash size={16} />}
+                                                                  disabled={actionsDisabled}
+                                                                  onClick={() => onTaskAction(task.id, 'cancel')}
+                                                              >
+                                                                  Cancel
+                                                              </Menu.Item>
+                                                          </Menu.Dropdown>
+                                                      </Menu>
+                                                  </Box>
                                               </Table.Td>
                                           </Table.Tr>
                                       );

@@ -1292,7 +1292,7 @@ export default function ComputersManagementTab() {
                                             />
                                         ))}
                                         <Table.Th>Image</Table.Th>
-                                        <Table.Th ta='right'>Actions</Table.Th>
+                                        <Table.Th data-table-actions ta='right'>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
@@ -1629,6 +1629,7 @@ function ComputerRow({
     }
     return (
         <Table.Tr
+            data-action-selection={selected ? 'teal' : undefined}
             bg={selected ? 'var(--mantine-color-teal-light)' : undefined}
             style={{ cursor: 'pointer' }}
             onClick={(event) =>
@@ -1738,7 +1739,7 @@ function ComputerRow({
                             : 'Not registered')}
                 </Text>
             </Table.Td>
-            <Table.Td>
+            <Table.Td data-table-actions>
                 <Group justify='flex-end' gap={4} wrap='nowrap'>
                     <Tooltip label='Open live view'>
                         <ActionIcon

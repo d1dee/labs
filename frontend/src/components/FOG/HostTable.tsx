@@ -197,7 +197,7 @@ export function HostTable({
                                                     handlers.resetSelection();
                                                 }} />
                                         ))}
-                                        <Table.Th>Actions</Table.Th>
+                                        <Table.Th data-table-actions>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
 
@@ -250,7 +250,7 @@ export function HostTable({
                                                             radius='xl'
                                                         />
                                                     </Table.Td>
-                                                    <Table.Td>
+                                                    <Table.Td data-table-actions>
                                                         <Skeleton
                                                             height={24}
                                                             width={80}
@@ -276,6 +276,7 @@ export function HostTable({
                                         paginatedHosts.map((host) => (
                                             <Table.Tr
                                                 key={host.id}
+                                                data-action-selection={selection.includes(host.id) ? 'blue' : undefined}
                                                 bg={
                                                     selection.includes(host.id)
                                                         ? 'var(--mantine-color-blue-light)'
@@ -344,8 +345,9 @@ export function HostTable({
                                                         {statusFor(host)}
                                                     </Badge>
                                                 </Table.Td>
-                                                <Table.Td>
+                                                <Table.Td data-table-actions>
                                                     <Group
+                                                        wrap='nowrap'
                                                         justify='flex-end'
                                                         gap='xs'
                                                         visibleFrom='sm'

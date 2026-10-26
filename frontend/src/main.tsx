@@ -12,6 +12,7 @@ import 'dayjs/locale/en-gb';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './components/ui/tableActions.css';
 
 // Central palette mirrors the Veyon operations desk: a dark hero gradient
 // accented with teal. Teal is the primary color so every default Button,

@@ -1,0 +1,34 @@
+.mantine-Table-th[data-table-actions],
+.mantine-Table-td[data-table-actions] {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    white-space: nowrap;
+    background-color: var(--mantine-color-body);
+    background-image: linear-gradient(var(--table-action-tint, transparent), var(--table-action-tint, transparent));
+    box-shadow: -1px 0 0 var(--table-border-color);
+}
+
+.mantine-Table-th[data-table-actions] {
+    z-index: 2;
+}
+
+.mantine-Table-tr[data-action-selection='blue'] {
+    --table-action-tint: var(--mantine-color-blue-light);
+}
+
+.mantine-Table-tr[data-action-selection='teal'] {
+    --table-action-tint: var(--mantine-color-teal-light);
+}
+
+@media (hover: hover) {
+    .mantine-Table-tr[data-hover]:hover {
+        --table-action-tint: var(--tr-hover-bg);
+    }
+}
+
+@media (hover: none) {
+    .mantine-Table-tr[data-hover]:active {
+        --table-action-tint: var(--tr-hover-bg);
+    }
+}

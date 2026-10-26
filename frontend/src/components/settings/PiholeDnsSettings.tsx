@@ -17,7 +17,7 @@ import {
     Flex,
     Group,
     Loader,
-    ScrollArea,
+    Menu,
     Stack,
     Table,
     Tabs,
@@ -28,6 +28,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
     IconCheck,
+    IconDotsVertical,
     IconLink,
     IconMapPin,
     IconPlus,
@@ -301,8 +302,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
                         </Stack>
                     </Center>
                 ) : (
-                    <Table.ScrollContainer minWidth={config.columns.length === 1 ? 400 : 600}>
-                        <ScrollArea mah={420}>
+                    <Table.ScrollContainer minWidth={config.columns.length === 1 ? 400 : 600} maxHeight={420}>
                             <Table verticalSpacing='sm' highlightOnHover stickyHeader>
                                 <Table.Thead>
                                     <Table.Tr>
@@ -311,7 +311,7 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
                                                 direction={sort?.direction ?? 'asc'}
                                                 onSort={() => setSort((current) => toggleTableSort(current, col))} />
                                         ))}
-                                        <Table.Th style={{ textAlign: 'right' }}>
+                                        <Table.Th data-table-actions style={{ textAlign: 'right' }}>
                                             Actions
                                         </Table.Th>
                                     </Table.Tr>
@@ -344,9 +344,11 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
                                                     </Table.Td>
                                                 ))}
                                                 <Table.Td
+                                                    data-table-actions
                                                     style={{ textAlign: 'right' }}
                                                 >
                                                     <Group
+                                                        visibleFrom='sm'
                                                         gap='xs'
                                                         justify='flex-end'
                                                     >
@@ -362,13 +364,26 @@ const DnsListPanel: FC<{ config: DnsElementConfig; enabled: boolean }> = ({ conf
                                                             <IconTrash size={16} />
                                                         </ActionIcon>
                                                     </Group>
+                                                    <Box hiddenFrom='sm' ta='right'>
+                                                        <Menu position='bottom-end'>
+                                                            <Menu.Target>
+                                                                <ActionIcon variant='subtle' aria-label={`Actions for ${value}`}>
+                                                                    <IconDotsVertical size={16} />
+                                                                </ActionIcon>
+                                                            </Menu.Target>
+                                                            <Menu.Dropdown>
+                                                                <Menu.Item color='red' leftSection={<IconTrash size={16} />} onClick={() => handleDelete(value)}>
+                                                                    Delete
+                                                                </Menu.Item>
+                                                            </Menu.Dropdown>
+                                                        </Menu>
+                                                    </Box>
                                                 </Table.Td>
                                             </Table.Tr>
                                         );
                                     })}
                                 </Table.Tbody>
                             </Table>
-                        </ScrollArea>
                     </Table.ScrollContainer>
                 )}
                 {!loading && <TablePagination pagination={pagination} label='records' />}

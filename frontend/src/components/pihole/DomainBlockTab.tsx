@@ -22,6 +22,7 @@ import {
     ActionIcon,
     Alert,
     Badge,
+    Box,
     Button,
     Card,
     Center,
@@ -29,8 +30,8 @@ import {
     Flex,
     Group,
     Loader,
+    Menu,
     Modal,
-    ScrollArea,
     Select,
     Stack,
     Table,
@@ -42,6 +43,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import {
     IconCheck,
+    IconDotsVertical,
     IconEdit,
     IconPlus,
     IconTrash,
@@ -325,7 +327,6 @@ const DomainBlockTab: FC = () => {
                     </Text>
                 ) : (
                     <Table.ScrollContainer minWidth={600}>
-                        <ScrollArea>
                             <Table
                                 verticalSpacing='sm'
                                 highlightOnHover
@@ -362,6 +363,7 @@ const DomainBlockTab: FC = () => {
                                             />
                                         ))}
                                         <Table.Th
+                                            data-table-actions
                                             style={{ textAlign: 'right' }}
                                         >
                                             Actions
@@ -410,9 +412,12 @@ const DomainBlockTab: FC = () => {
                                                 </Badge>
                                             </Table.Td>
                                             <Table.Td
+                                                data-table-actions
                                                 style={{ textAlign: 'right' }}
                                             >
                                                 <Group
+                                                    visibleFrom='sm'
+                                                    wrap='nowrap'
                                                     gap='xs'
                                                     justify='flex-end'
                                                 >
@@ -461,12 +466,35 @@ const DomainBlockTab: FC = () => {
                                                         <IconTrash size={16} />
                                                     </ActionIcon>
                                                 </Group>
+                                                <Box hiddenFrom='sm'>
+                                                    <Menu position='bottom-end'>
+                                                        <Menu.Target>
+                                                            <ActionIcon variant='subtle' aria-label={`Actions for ${d.domain}`}>
+                                                                <IconDotsVertical size={16} />
+                                                            </ActionIcon>
+                                                        </Menu.Target>
+                                                        <Menu.Dropdown>
+                                                            <Menu.Item leftSection={<IconEdit size={16} />} onClick={() => openEdit(d)}>
+                                                                Edit
+                                                            </Menu.Item>
+                                                            <Menu.Item
+                                                                color={d.enabled ? 'yellow' : 'green'}
+                                                                leftSection={d.enabled ? <IconX size={16} /> : <IconCheck size={16} />}
+                                                                onClick={() => handleToggle(d)}
+                                                            >
+                                                                {d.enabled ? 'Disable' : 'Enable'}
+                                                            </Menu.Item>
+                                                            <Menu.Item color='red' leftSection={<IconTrash size={16} />} onClick={() => handleDelete(d)}>
+                                                                Delete
+                                                            </Menu.Item>
+                                                        </Menu.Dropdown>
+                                                    </Menu>
+                                                </Box>
                                             </Table.Td>
                                         </Table.Tr>
                                     ))}
                                 </Table.Tbody>
                             </Table>
-                        </ScrollArea>
                     </Table.ScrollContainer>
                 )}
                 {!loading && <TablePagination pagination={pagination} label='domains' />}

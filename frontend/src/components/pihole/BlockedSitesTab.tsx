@@ -21,16 +21,18 @@ import {
     type SortState,
 } from '@/components/ui/tableUtils';
 import {
+    ActionIcon,
     Alert,
     Badge,
+    Box,
     Button,
     Card,
     Center,
     Flex,
     Group,
     Loader,
+    Menu,
     Modal,
-    ScrollArea,
     Select,
     Stack,
     Table,
@@ -40,6 +42,7 @@ import {
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
+import { IconDotsVertical, IconPlus } from '@tabler/icons-react';
 import { useState, type FC } from 'react';
 
 const isBlockedStatus = (status: string): boolean => {
@@ -366,8 +369,7 @@ const BlockedSitesTab: FC = () => {
                         </Text>
                     </Center>
                 ) : (
-                    <Table.ScrollContainer minWidth={900}>
-                        <ScrollArea h={500}>
+                    <Table.ScrollContainer minWidth={900} maxHeight={500} scrollAreaProps={{ h: 500 }}>
                             <Table
                                 verticalSpacing='sm'
                                 highlightOnHover
@@ -403,7 +405,7 @@ const BlockedSitesTab: FC = () => {
                                                 }
                                             />
                                         ))}
-                                        <Table.Th>Actions</Table.Th>
+                                        <Table.Th data-table-actions>Actions</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
@@ -452,8 +454,9 @@ const BlockedSitesTab: FC = () => {
                                                         {q.status}
                                                     </Badge>
                                                 </Table.Td>
-                                                <Table.Td>
+                                                <Table.Td data-table-actions>
                                                     <Button
+                                                        visibleFrom='sm'
                                                         size='xs'
                                                         variant='light'
                                                         color='red'
@@ -464,13 +467,30 @@ const BlockedSitesTab: FC = () => {
                                                     >
                                                         Add to block
                                                     </Button>
+                                                    <Box hiddenFrom='sm'>
+                                                        <Menu position='bottom-end'>
+                                                            <Menu.Target>
+                                                                <ActionIcon variant='subtle' aria-label={`Actions for query ${q.id}`}>
+                                                                    <IconDotsVertical size={16} />
+                                                                </ActionIcon>
+                                                            </Menu.Target>
+                                                            <Menu.Dropdown>
+                                                                <Menu.Item
+                                                                    color='red'
+                                                                    leftSection={<IconPlus size={16} />}
+                                                                    onClick={() => openBlock(q.domain)}
+                                                                >
+                                                                    Add to block
+                                                                </Menu.Item>
+                                                            </Menu.Dropdown>
+                                                        </Menu>
+                                                    </Box>
                                                 </Table.Td>
                                             </Table.Tr>
                                         );
                                     })}
                                 </Table.Tbody>
                             </Table>
-                        </ScrollArea>
                     </Table.ScrollContainer>
                 )}
                 <TablePagination pagination={pagination} label='queries' />
