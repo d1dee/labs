@@ -93,6 +93,7 @@ type Connection = {
     organizationId: string;
     userId: string;
     host: string;
+    proxy: string;
     inFlight: number;
     dispose: (signal?: AbortSignal) => Promise<void>;
 };
@@ -109,20 +110,36 @@ const generations = new Map<string, number>();
 function generation(organizationId: string) {
     return generations.get(organizationId) ?? 0;
 }
+export { generation as getVeyonGeneration };
 const IDLE_RECONNECT_MS = 50_000;
 const MAX_CONNECTIONS = 256;
+// Keep this at or below WebAPI/ConnectionLimit on every proxy used by this process.
+const configuredProxyLimit = Number(
+    process.env.VEYON_MAX_CONNECTIONS_PER_PROXY ?? 10,
+);
+const MAX_CONNECTIONS_PER_PROXY = Number.isSafeInteger(configuredProxyLimit)
+    ? Math.min(MAX_CONNECTIONS, Math.max(1, configuredProxyLimit))
+    : 10;
+// Slots include authentication and remote DELETE, not just cached connections.
+const connectionSlots = new Map<string, number>();
+let totalConnectionSlots = 0;
 const MAX_REQUESTS = 8;
 const MAX_QUEUED_REQUESTS = 256;
 let activeRequests = 0;
 const requestQueue: Array<() => void> = [];
-let informationActive = false;
+let informationActive = 0;
+const MAX_INFORMATION_REQUESTS = 2;
 const informationQueue: Array<() => void> = [];
 let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
 
-// One information batch uses up to three HTTP slots; leave at least five for other work.
+// Two hosts may each issue three parallel information reads, leaving two of the
+// process-wide HTTP slots available for frames and commands.
 function acquireInformation(signal: AbortSignal): Promise<() => void> {
     signal.throwIfAborted();
-    if (informationActive && informationQueue.length >= MAX_QUEUED_REQUESTS) {
+    if (
+        informationActive >= MAX_INFORMATION_REQUESTS &&
+        informationQueue.length >= MAX_QUEUED_REQUESTS
+    ) {
         return Promise.reject(
             new VeyonApiError(
                 'Veyon information queue is full',
@@ -134,9 +151,12 @@ function acquireInformation(signal: AbortSignal): Promise<() => void> {
     return new Promise((resolve, reject) => {
         const grant = () => {
             signal.removeEventListener('abort', abort);
-            informationActive = true;
+            informationActive += 1;
+            let released = false;
             resolve(() => {
-                informationActive = false;
+                if (released) return;
+                released = true;
+                informationActive -= 1;
                 informationQueue.shift()?.();
             });
         };
@@ -146,7 +166,7 @@ function acquireInformation(signal: AbortSignal): Promise<() => void> {
             signal.removeEventListener('abort', abort);
             reject(signal.reason);
         };
-        if (!informationActive) grant();
+        if (informationActive < MAX_INFORMATION_REQUESTS) grant();
         else {
             informationQueue.push(grant);
             signal.addEventListener('abort', abort, { once: true });
@@ -225,19 +245,54 @@ function scheduleConnectionCleanup() {
     cleanupTimer.unref();
 }
 
-function reserveConnection() {
+async function reserveConnection(
+    proxy: string,
+    signal: AbortSignal,
+): Promise<() => void> {
+    signal.throwIfAborted();
     sweepConnections();
-    if (connections.size + pendingConnections.size < MAX_CONNECTIONS) return;
-    const oldest = [...connections.entries()]
-        .filter(([, connection]) => !connection.inFlight)
-        .sort(([, a], [, b]) => a.lastUsed - b.lastUsed)[0];
-    if (!oldest)
-        throw new VeyonApiError(
-            'Veyon connection cache is full',
-            503,
-            'VEYON_CONNECTION_LIMIT',
-        );
-    removeConnection(...oldest);
+    while (
+        totalConnectionSlots >= MAX_CONNECTIONS ||
+        (connectionSlots.get(proxy) ?? 0) >= MAX_CONNECTIONS_PER_PROXY
+    ) {
+        const proxyFull =
+            (connectionSlots.get(proxy) ?? 0) >= MAX_CONNECTIONS_PER_PROXY;
+        const oldest = [...connections.entries()]
+            .filter(([, connection]) =>
+                !connection.inFlight && (!proxyFull || connection.proxy === proxy))
+            .sort(([, a], [, b]) => a.lastUsed - b.lastUsed)[0];
+        if (!oldest)
+            throw new VeyonApiError(
+                'Veyon connection capacity is busy; retry later',
+                503,
+                'VEYON_CONNECTION_LIMIT',
+            );
+        connections.delete(oldest[0]);
+        // Do not open a replacement until the remote slot has been released.
+        try {
+            await oldest[1].dispose(signal);
+        } catch (error) {
+            signal.throwIfAborted();
+            if (!isInvalidSessionError(error))
+                throw new VeyonApiError(
+                    'Could not release Veyon connection capacity',
+                    503,
+                    'VEYON_CONNECTION_LIMIT',
+                );
+        }
+        signal.throwIfAborted();
+    }
+    connectionSlots.set(proxy, (connectionSlots.get(proxy) ?? 0) + 1);
+    totalConnectionSlots += 1;
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        totalConnectionSlots -= 1;
+        const remaining = (connectionSlots.get(proxy) ?? 1) - 1;
+        if (remaining) connectionSlots.set(proxy, remaining);
+        else connectionSlots.delete(proxy);
+    };
 }
 
 type VeyonConfigRow = typeof veyonConfig.$inferSelect;
@@ -638,6 +693,20 @@ export class VeyonClient {
     ): Promise<Connection> {
         this.assertCurrent();
         assertKeyCredentials(this.config);
+        const release = await reserveConnection(new URL(this.baseUrl).origin, signal);
+        try {
+            return await this.openConnection(host, signal, release);
+        } catch (error) {
+            release();
+            throw error;
+        }
+    }
+
+    private async openConnection(
+        host: string,
+        signal: AbortSignal,
+        release: () => void,
+    ): Promise<Connection> {
         const response = await this.request(
             `/authentication/${encodeURIComponent(host)}`,
             {
@@ -697,8 +766,15 @@ export class VeyonClient {
             organizationId: this.organizationId,
             userId: this.userId,
             host,
+            proxy: new URL(this.baseUrl).origin,
             inFlight: 0,
-            dispose: (callerSignal) => this.dispose(host, uid, callerSignal),
+            dispose: async (callerSignal) => {
+                try {
+                    await this.dispose(host, uid, callerSignal);
+                } finally {
+                    release();
+                }
+            },
         };
         connections.set(
             connectionKey(this.organizationId, this.userId, host),
@@ -750,7 +826,6 @@ export class VeyonClient {
         }
         let pending = pendingConnections.get(key);
         if (!pending) {
-            reserveConnection();
             const controller = new AbortController();
             pending = {
                 organizationId: this.organizationId,
@@ -918,30 +993,59 @@ export class VeyonClient {
         await connection?.dispose(signal);
     }
 
+    private async informationRequest<T>(
+        signal: AbortSignal | undefined,
+        read: (signal: AbortSignal) => Promise<T>,
+        settle?: () => Promise<unknown>,
+    ): Promise<T> {
+        // Waiting behind other hosts must not consume this host's lookup budget.
+        const release = await withDeadline(signal, 12_000, acquireInformation).catch(
+            (error) => {
+                if (signal?.aborted) throw signal.reason;
+                if (error instanceof DOMException && error.name === 'TimeoutError') {
+                    throw new VeyonApiError(
+                        'Veyon information queue timed out; retry later',
+                        503,
+                        'VEYON_BUSY',
+                    );
+                }
+                throw error;
+            },
+        );
+        try {
+            return await withDeadline(signal, 12_000, read);
+        } finally {
+            // If one parallel read fails, retain this host permit until its
+            // sibling transports have also settled.
+            if (settle) void settle().finally(release);
+            else release();
+        }
+    }
+
     async information(host: string, signal?: AbortSignal) {
-        return withDeadline(signal, 12_000, async (deadline) => {
-            const release = await acquireInformation(deadline);
-            const requests = [
+        let requests: readonly Promise<Response>[] = [];
+        return this.informationRequest(signal, async (deadline) => {
+            const batch = [
                 this.authenticatedRequest(host, '/user', { signal: deadline }),
-                this.authenticatedRequest(host, '/session', {
-                    signal: deadline,
-                }),
-                this.authenticatedRequest(host, '/feature', {
-                    signal: deadline,
-                }),
+                this.authenticatedRequest(host, '/session', { signal: deadline }),
+                this.authenticatedRequest(host, '/feature', { signal: deadline }),
             ] as const;
-            try {
-                const [userResponse, sessionResponse, featuresResponse] =
-                    await Promise.all(requests);
-                return {
-                    user: await userResponse.json(),
-                    session: await sessionResponse.json(),
-                    features: await featuresResponse.json(),
-                };
-            } finally {
-                // A failed request must not release the batch while its siblings still run.
-                void Promise.allSettled(requests).then(release);
-            }
+            requests = batch;
+            const [userResponse, sessionResponse, featuresResponse] =
+                await Promise.all(batch);
+            return {
+                user: await userResponse.json(),
+                session: await sessionResponse.json(),
+                features: await featuresResponse.json(),
+            };
+        }, () => Promise.allSettled(requests));
+    }
+
+    async status(host: string, signal?: AbortSignal) {
+        return this.informationRequest(signal, async (deadline) => {
+            // An authenticated read distinguishes usable Veyon access from a TCP probe.
+            await this.authenticatedRequest(host, '/user', { signal: deadline });
+            return { state: 'online' as const };
         });
     }
 
@@ -1002,6 +1106,32 @@ export class VeyonClient {
             signal,
         });
     }
+
+    async setFeatureBatch(
+        hosts: string[],
+        uid: string,
+        active: boolean,
+        args: Record<string, unknown> = {},
+        signal?: AbortSignal,
+    ): Promise<PromiseSettledResult<void>[]> {
+        const results: PromiseSettledResult<void>[] = new Array(hosts.length);
+        let next = 0;
+        await Promise.all(Array.from({ length: Math.min(2, hosts.length) }, async () => {
+            for (;;) {
+                const index = next++;
+                if (index >= hosts.length) return;
+                try {
+                    signal?.throwIfAborted();
+                    // Each target gets its execution deadline only when a worker starts it.
+                    await this.setFeature(hosts[index]!, uid, active, args, signal);
+                    results[index] = { status: 'fulfilled', value: undefined };
+                } catch (reason) {
+                    results[index] = { status: 'rejected', reason };
+                }
+            }
+        }));
+        return results;
+    }
 }
 
 export async function getVeyonClient(
@@ -1036,6 +1166,7 @@ export function listOpenConnections(organizationId: string, userId: string) {
                 userId: _user,
                 dispose: _dispose,
                 inFlight: _inFlight,
+                proxy: _proxy,
                 ...connection
             }) => connection,
         );

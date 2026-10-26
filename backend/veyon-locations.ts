@@ -32,6 +32,11 @@ function literalIPv4(host: string): string | null {
     return addressInSubnet(address, address) ? address : null;
 }
 
+function connectionHost(host: string, address: string): string {
+    const port = host.match(/^(?:\[[^\]]+\]|[^:]+):(\d+)$/)?.[1];
+    return port ? `${address}:${port}` : address;
+}
+
 export function assignComputerLocations<T extends Computer>(
     computers: T[],
     labs: ComputerLocationLab[],
@@ -90,7 +95,13 @@ export async function resolveComputerLocations<T extends Computer>(
                     : lookup({ address: literalIPv4(computer.host) }));
             const labId = device?.lab?.id;
             const suffix = labId ? firewall?.labs.find((lab) => lab.id === labId)?.dnsSuffix || firewall?.defaultDnsSuffix : undefined;
-            const host = computer.fogHostId != null ? qualifyFogHostname(computer.host, suffix) : computer.host;
+            const addresses = [...new Set(device?.addresses.map(literalIPv4).filter((address): address is string => Boolean(address)) ?? [])];
+            const lab = labId ? directory.labs?.find((candidate) => candidate.id === labId) : undefined;
+            const labAddresses = lab?.subnet ? addresses.filter((address) => addressInSubnet(address, lab.subnet!)) : [];
+            const address = labAddresses.length === 1 ? labAddresses[0] : addresses.length === 1 ? addresses[0] : undefined;
+            const host = computer.fogHostId != null
+                ? address ? connectionHost(computer.host, address) : qualifyFogHostname(computer.host, suffix)
+                : computer.host;
             if (!device?.lab && host === computer.host) return computer;
             return { ...computer, host, location: device?.lab?.name ?? computer.location };
         });

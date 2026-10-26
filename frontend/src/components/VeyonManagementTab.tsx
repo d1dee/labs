@@ -237,7 +237,6 @@ export default function ComputersManagementTab() {
     const [search, setSearch] = useState('');
     const mobileFilters = useMobileTableFilters();
     const [statusFilter, setStatusFilter] = useState<string | null>(null);
-    const [locationFilter, setLocationFilter] = useState<string | null>(null);
     const [labFilter, setLabFilter] = useState<string[]>([]);
     const [sessionFilter, setSessionFilter] = useState<string | null>(null);
     const [sort, setSort] = useState<SortState<ComputerSortKey> | null>(null);
@@ -486,9 +485,6 @@ export default function ComputersManagementTab() {
                 : 'unavailable';
             return (
                 (!statusFilter || statusFor(computer) === statusFilter) &&
-                (!locationFilter ||
-                    JSON.stringify(locationFor(computer) || '') ===
-                        locationFilter) &&
                 (!labFilter.length ||
                     labFilter.includes(lab ? `lab:${lab.id}` : 'unassigned')) &&
                 (!sessionFilter || session === sessionFilter) &&
@@ -533,7 +529,6 @@ export default function ComputersManagementTab() {
         live,
         fogHostsById,
         statusFilter,
-        locationFilter,
         labFilter,
         sessionFilter,
         sort,
@@ -546,7 +541,6 @@ export default function ComputersManagementTab() {
         JSON.stringify([
             deferredSearch,
             statusFilter,
-            locationFilter,
             labFilter,
             sessionFilter,
             sort?.key,
@@ -1136,28 +1130,6 @@ export default function ComputersManagementTab() {
                                     { value: 'loading', label: 'Loading' },
                                 ]}
                             />
-                            <Select
-                                miw={{ base: '100%', sm: 180 }}
-                                label='Location'
-                                placeholder='All locations'
-                                clearable
-                                searchable
-                                value={locationFilter}
-                                onChange={setLocationFilter}
-                                data={[
-                                    ...new Set(
-                                        computers.map(
-                                            (computer) =>
-                                                locationFor(computer) || '',
-                                        ),
-                                    ),
-                                ]
-                                    .sort()
-                                    .map((location) => ({
-                                        value: JSON.stringify(location),
-                                        label: location || 'Unassigned',
-                                    }))}
-                            />
                             <MultiSelect
                                 miw={{ base: '100%', sm: 180 }}
                                 label='Lab'
@@ -1204,7 +1176,7 @@ export default function ComputersManagementTab() {
                         </Group>
                     </MobileFilterPanel>
                     {computers.length ? (
-                        <Table.ScrollContainer minWidth={760}>
+                        <Table.ScrollContainer minWidth={960}>
                             <Table verticalSpacing='sm' highlightOnHover>
                                 <Table.Thead>
                                     <Table.Tr>
@@ -1291,6 +1263,7 @@ export default function ComputersManagementTab() {
                                                 }
                                             />
                                         ))}
+                                        <Table.Th>Inventory</Table.Th>
                                         <Table.Th>Image</Table.Th>
                                         <Table.Th data-table-actions ta='right'>Actions</Table.Th>
                                     </Table.Tr>
@@ -1298,7 +1271,7 @@ export default function ComputersManagementTab() {
                                 <Table.Tbody>
                                     {filteredComputers.length === 0 ? (
                                         <Table.Tr>
-                                            <Table.Td colSpan={7}>
+                                            <Table.Td colSpan={8}>
                                                 <Text ta='center' c='dimmed'>
                                                     No computers match the
                                                     current filters.
@@ -1606,6 +1579,22 @@ function ComputerRow({
     const information = live?.state === 'online' ? live.information : null;
     const status = computerStatus(live, fogHost);
     const fogHostId = fogHostIdFor(computer, identity);
+    const inventory = fogHost?.inventory;
+    const inventoryName = [inventory?.sysman, inventory?.sysproduct]
+        .map((value) => value?.trim())
+        .filter(Boolean)
+        .join(' \u00b7 ');
+    const inventoryDescription = [
+        inventory?.cpuversion?.trim(),
+        (inventory?.memory?.trim() || inventory?.mem?.trim())
+            ? `RAM: ${inventory?.memory?.trim() || inventory?.mem?.trim()}`
+            : null,
+        inventory?.hdmodel?.trim()
+            ? `HDD/SSD: ${inventory.hdmodel.trim()}`
+            : null,
+    ]
+        .filter(Boolean)
+        .join(' \u00b7 ');
     const wakeUnavailable = wakeUnavailableReason(identity);
     async function wake() {
         if (!identity || waking) return;
@@ -1728,6 +1717,24 @@ function ComputerRow({
                     <Badge color='gray' variant='light'>
                         Offline
                     </Badge>
+                )}
+            </Table.Td>
+            <Table.Td maw={280} style={{ overflowWrap: 'anywhere' }}>
+                {inventoryName || inventoryDescription ? (
+                    <div>
+                        <Text size='sm'>
+                            {inventoryName || 'Unknown brand/model'}
+                        </Text>
+                        {inventoryDescription ? (
+                            <Text size='xs' c='dimmed'>
+                                {inventoryDescription}
+                            </Text>
+                        ) : null}
+                    </div>
+                ) : (
+                    <Text size='sm' c='dimmed'>
+                        No inventory
+                    </Text>
                 )}
             </Table.Td>
             <Table.Td>

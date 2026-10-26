@@ -15,11 +15,13 @@ import { isFogConfigured } from '../fog';
 import { errorProperty, getLogger } from '../logger';
 import {
     getVeyonClient,
+    getVeyonGeneration,
     listOpenConnections,
     VEYON_FEATURES,
     VeyonApiError,
 } from '../veyon';
 import { resolveComputerLocations } from '../veyon-locations';
+import { veyonInformationError, veyonInformationPoller } from '../veyon-information-poller';
 import { veyonPoller } from '../veyon-poller';
 import { createVeyonStreamWriter } from '../veyon-stream';
 import type { VeyonSyncPlan } from '../veyon-sync';
@@ -42,13 +44,6 @@ veyonRouter.use('/veyon/*', async (c, next) => {
 });
 
 const veyonLogger = getLogger(['labs', 'veyon']);
-const informationConcurrency = z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(64)
-    .catch(6)
-    .parse(process.env.VEYON_INFORMATION_CONCURRENCY);
 
 function watchStreamIdentity(
     headers: Headers,
@@ -630,15 +625,46 @@ veyonRouter.get('/veyon/information/stream', (c) => {
     if (auth.response) return auth.response;
     const session = c.get('session');
     if (!session) return c.json({ error: 'Not authenticated' }, 401);
+    const mode = c.req.query('mode') === 'status' ? 'status' : 'full';
     const response = streamSSE(c, async (stream) => {
         const controller = new AbortController();
         const { signal } = controller;
         let stopIdentityWatch = () => {};
+        const subscriptions = new Map<string, { host: string; identity: string; stop: () => void }>();
+        let remaining = new Set<string>();
+        let directoryData = '';
+        let sentDirectory = '';
         const abort = () => {
+            if (signal.aborted) return;
             stopIdentityWatch();
             controller.abort();
+            writer.close();
+            for (const subscription of subscriptions.values()) subscription.stop();
+            subscriptions.clear();
             c.req.raw.signal.removeEventListener('abort', abort);
             stream.abort();
+        };
+        const writer = createVeyonStreamWriter<Array<SSEMessage & { valid: () => boolean }>>(async (messages) => {
+            for (const message of messages) {
+                if (signal.aborted) return;
+                if (!message.valid()) continue;
+                // A coalesced directory must reach the browser before its observations.
+                if (message.event === 'information' && sentDirectory !== directoryData) {
+                    const data = directoryData;
+                    await stream.writeSSE({ event: 'directory', data });
+                    sentDirectory = data;
+                }
+                if (signal.aborted || !message.valid()) continue;
+                await stream.writeSSE(message);
+                if (message.event === 'directory') sentDirectory = await message.data;
+            }
+        }, abort, 30_000, 2 * 1_024 ** 2);
+        const write = (event: string, data: unknown, key = event, valid = () => true) => {
+            if (signal.aborted) return;
+            const json = JSON.stringify(data);
+            const bytes = Buffer.byteLength(json);
+            if (bytes > 1_024 ** 2) throw new Error('Information stream event exceeds the byte limit');
+            writer.enqueue(key, () => valid() ? [{ event, data: json, valid }] : [], bytes);
         };
         stream.onAbort(abort);
         c.req.raw.signal.addEventListener('abort', abort, { once: true });
@@ -666,28 +692,6 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                 signal.addEventListener('abort', finish, { once: true });
                 if (signal.aborted) finish();
             });
-        let writes = Promise.resolve();
-        const write = (event: string, data: unknown) => {
-            writes = writes.then(async () => {
-                if (!signal.aborted)
-                    await pending(
-                        stream.writeSSE({ event, data: JSON.stringify(data) }),
-                    );
-            });
-            return writes;
-        };
-        const sanitizedError = (error: unknown) =>
-            error instanceof VeyonApiError && error.status === 429
-                ? 'Live status checks are unavailable because the connection limit was reached. Retrying automatically; displayed statuses may be out of date.'
-                : error instanceof VeyonApiError &&
-                    (error.code === 'VEYON_BUSY' ||
-                        error.code === 'VEYON_CONNECTION_LIMIT')
-                  ? 'Live status checks are queued at capacity. Retrying automatically; displayed statuses may be out of date.'
-                  : error instanceof Error &&
-                      (error.name === 'TimeoutError' ||
-                          error.name === 'AbortError')
-                    ? 'Veyon connection timed out'
-                    : 'Veyon request failed';
         const heartbeat = (async () => {
             while (!signal.aborted) {
                 await sleep(15_000);
@@ -706,6 +710,42 @@ veyonRouter.get('/veyon/information/stream', (c) => {
             );
         let directorySignature = '';
         let resolvedDirectory: (typeof veyonComputer.$inferSelect)[] = [];
+        const identity = (computer: typeof veyonComputer.$inferSelect) =>
+            JSON.stringify([computer.host, computer.macAddress, computer.fogHostId]);
+        const subscribe = (computer: typeof veyonComputer.$inferSelect, source: typeof computer) => {
+            const previous = subscriptions.get(computer.id);
+            if (previous?.host === computer.host && previous.identity === identity(source)) return;
+            previous?.stop();
+            const subscription = { host: computer.host, identity: identity(source), stop: () => {} };
+            subscriptions.set(computer.id, subscription);
+            try {
+                subscription.stop = veyonInformationPoller.subscribe({
+                    organizationId: auth.user.organizationId,
+                    userId: auth.user.id,
+                    host: computer.host,
+                    mode,
+                }, ({ type, ...data }) => {
+                    if (signal.aborted || subscriptions.get(computer.id) !== subscription) return;
+                    const generation = getVeyonGeneration(auth.user.organizationId);
+                    write(type, type === 'information' ? { computerId: computer.id, ...data } : data,
+                        type === 'information' ? `computer:${computer.id}` : 'unavailable',
+                        () => subscriptions.get(computer.id) === subscription &&
+                            generation === getVeyonGeneration(auth.user.organizationId));
+                    if (remaining.delete(computer.id) && remaining.size === 0) write('complete', {});
+                });
+                if (signal.aborted) subscription.stop();
+            } catch (error) {
+                subscriptions.delete(computer.id);
+                remaining.delete(computer.id);
+                write('unavailable', { error: veyonInformationError(error) });
+            }
+        };
+        const directory = (computers: typeof resolvedDirectory, inventoryWarning: string | undefined) => {
+            const data = { computers, inventoryWarning };
+            directoryData = JSON.stringify(data);
+            const current = directoryData;
+            write('directory', data, 'directory', () => current === directoryData);
+        };
         try {
             while (!signal.aborted) {
                 try {
@@ -713,146 +753,57 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                         getComputerInventory(auth.user.organizationId),
                     );
                     const computers = inventory.computers;
+                    const byId = new Map(computers.map((computer) => [computer.id, computer]));
+                    // Remove old identities before any asynchronous enrichment can finish.
+                    for (const [id, subscription] of subscriptions) {
+                        const computer = byId.get(id);
+                        if (!computer || identity(computer) !== subscription.identity) {
+                            subscriptions.delete(id);
+                            subscription.stop();
+                        }
+                    }
                     const signature = JSON.stringify(computers);
+                    // Directory refreshes can outpace a scan of slow/offline hosts.
+                    // Preserve outstanding observations until that scan completes.
+                    if (!remaining.size || signature !== directorySignature)
+                        remaining = new Set(computers.map((computer) => computer.id));
+                    if (computers.length > veyonInformationPoller.config.maxWorkers)
+                        throw new VeyonApiError('Too many information targets', 503, 'VEYON_BUSY');
                     const displayedComputers =
                         signature === directorySignature
                             ? resolvedDirectory
                             : computers;
-                    await write('directory', {
-                        computers: displayedComputers,
-                        inventoryWarning: inventory.warning,
-                    });
+                    directory(displayedComputers, inventory.warning);
                     signal.throwIfAborted();
-                    // Send the directory immediately; only FOG-linked targets need DNS enrichment before connecting.
-                    const locations = pending(
+                    // Known IPs can start immediately; slow DNS never blocks their workers.
+                    for (const computer of displayedComputers) {
+                        const bracketed = computer.host.match(/^\[([^\]]+)\](?::\d+)?$/);
+                        const ipv4WithPort = computer.host.match(/^([^:]+):\d+$/);
+                        if (isIP(computer.host) ||
+                            (bracketed && isIP(bracketed[1]!) === 6) ||
+                            (ipv4WithPort && isIP(ipv4WithPort[1]!) === 4))
+                            subscribe(computer, byId.get(computer.id)!);
+                    }
+                    const resolved = await pending(
                         resolveComputerLocations(
                             auth.user.organizationId,
                             computers,
                         ),
-                    )
-                        .then(async (resolved) => {
-                            if (signal.aborted) return;
-                            directorySignature = signature;
-                            resolvedDirectory = resolved;
-                            if (
-                                resolved.some(
-                                    (computer, index) =>
-                                        computer.location !==
-                                            displayedComputers[index]
-                                                ?.location ||
-                                        computer.host !==
-                                            displayedComputers[index]?.host,
-                                )
-                            ) {
-                                await write('directory', {
-                                    computers: resolved,
-                                    inventoryWarning: inventory.warning,
-                                });
-                            }
-                            return resolved;
-                        })
-                        .catch(abort);
-                    try {
-                        const client = await pending(
-                            getVeyonClient(
-                                auth.user.organizationId,
-                                auth.user.id,
-                            ),
-                        );
-                        const ipTargets: typeof computers = [];
-                        for (const computer of computers) {
-                            const bracketed = computer.host.match(
-                                /^\[([^\]]+)\](?::\d+)?$/,
-                            );
-                            const ipv4WithPort =
-                                computer.host.match(/^([^:]+):\d+$/);
-                            const literal =
-                                isIP(computer.host) ||
-                                (bracketed && isIP(bracketed[1]!) === 6) ||
-                                (ipv4WithPort && isIP(ipv4WithPort[1]!) === 4);
-                            if (literal) ipTargets.push(computer);
-                        }
-                        const ipTargetIds = new Set(
-                            ipTargets.map((computer) => computer.id),
-                        );
-                        // Start known IPs without waiting for DNS enrichment.
-                        // Drain them before checking the remaining resolved targets.
-                        for (const ipPhase of [true, false]) {
-                            const phase = ipPhase
-                                ? ipTargets
-                                : ((await locations) ?? computers).filter(
-                                      (computer) => !ipTargetIds.has(computer.id),
-                                  );
-                            let next = 0;
-                            let phaseError: unknown;
-                            await Promise.all(
-                                Array.from(
-                                    {
-                                        length: Math.min(
-                                            informationConcurrency,
-                                            phase.length,
-                                        ),
-                                    },
-                                    async () => {
-                                        while (!signal.aborted && !phaseError) {
-                                            const computer = phase[next++];
-                                            if (!computer) return;
-                                            let data;
-                                            try {
-                                                const information =
-                                                    await pending(
-                                                        client.information(
-                                                            computer.host,
-                                                            signal,
-                                                        ),
-                                                    );
-                                                data = {
-                                                    computerId: computer.id,
-                                                    state: 'online',
-                                                    information,
-                                                };
-                                            } catch (error) {
-                                                if (signal.aborted) return;
-                                                // Proxy saturation says nothing about this computer's status.
-                                                // Keep prior observations and report the service error instead.
-                                                if (
-                                                    error instanceof
-                                                        VeyonApiError &&
-                                                    (error.status === 429 ||
-                                                        error.code ===
-                                                            'VEYON_BUSY' ||
-                                                        error.code ===
-                                                            'VEYON_CONNECTION_LIMIT')
-                                                ) {
-                                                    phaseError = error;
-                                                    return;
-                                                }
-                                                data = {
-                                                    computerId: computer.id,
-                                                    state: 'offline',
-                                                    error: sanitizedError(
-                                                        error,
-                                                    ),
-                                                };
-                                            }
-                                            await write('information', data);
-                                        }
-                                    },
-                                ),
-                            );
-                            if (phaseError) throw phaseError;
-                        }
-                    } finally {
-                        await locations;
-                    }
+                    );
+                    signal.throwIfAborted();
+                    directorySignature = signature;
+                    resolvedDirectory = resolved;
+                    if (JSON.stringify(resolved) !== JSON.stringify(displayedComputers))
+                        directory(resolved, inventory.warning);
+                    for (const computer of resolved) subscribe(computer, byId.get(computer.id)!);
+                    if (!remaining.size) write('complete', {});
                 } catch (error) {
                     if (signal.aborted) break;
                     await write('unavailable', {
-                        error: sanitizedError(error),
+                        error: veyonInformationError(error),
                     });
                 }
                 if (signal.aborted) break;
-                await write('complete', {});
                 await sleep(10_000);
             }
         } catch {
@@ -1571,22 +1522,18 @@ veyonRouter.post('/veyon/commands', async (c) => {
             auth.user.organizationId,
             auth.user.id,
         );
-        const settled = await Promise.allSettled(
-            targets.map(async (computer) => {
-                await client.setFeature(
-                    computer.host,
-                    featureUid,
-                    body.active,
-                    body.arguments,
-                );
-                return { id: computer.id, name: computer.name };
-            }),
+        const settled = await client.setFeatureBatch(
+            targets.map((computer) => computer.host),
+            featureUid,
+            body.active,
+            body.arguments,
+            c.req.raw.signal,
         );
         const results = settled.map((result, index) => {
-            if (result.status === 'fulfilled') {
-                return { ...result.value, success: true };
-            }
             const target = targets[index]!;
+            if (result.status === 'fulfilled') {
+                return { id: target.id, name: target.name, success: true };
+            }
             return {
                 id: target.id,
                 name: target.name,

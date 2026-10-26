@@ -34,7 +34,7 @@ export function useFogHostStatus(hosts: FogHost[], lookup: (query: DeviceLookup)
         const connect = () => {
             if (cancelled || document.hidden || source) return;
             try {
-                const connection = new EventSource('/api/veyon/information/stream');
+                const connection = new EventSource('/api/veyon/information/stream?mode=status');
                 source = connection;
                 const active = () => !cancelled && !document.hidden && source === connection;
                 connection.addEventListener('directory', (event) => {

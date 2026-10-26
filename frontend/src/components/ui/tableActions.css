@@ -1,12 +1,21 @@
+.mantine-Paper-root {
+    --table-actions-background: var(--mantine-color-body);
+}
+
+.mantine-Card-root {
+    --table-actions-background: light-dark(var(--mantine-color-white), var(--mantine-color-dark-6));
+}
+
 .mantine-Table-th[data-table-actions],
 .mantine-Table-td[data-table-actions] {
     position: sticky;
     right: 0;
     z-index: 1;
+    width: 1%;
+    padding-inline: calc(var(--mantine-spacing-xs) / 2);
     white-space: nowrap;
-    background-color: var(--mantine-color-body);
+    background-color: var(--table-actions-background, var(--mantine-color-body));
     background-image: linear-gradient(var(--table-action-tint, transparent), var(--table-action-tint, transparent));
-    box-shadow: -1px 0 0 var(--table-border-color);
 }
 
 .mantine-Table-th[data-table-actions] {
