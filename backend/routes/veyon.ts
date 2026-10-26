@@ -30,6 +30,16 @@ import { streamIdentityMatches, type StreamIdentity } from './stream';
 
 export const veyonRouter = createApp();
 
+function isLiteralTarget(host: string) {
+    const bracketed = host.match(/^\[([^\]]+)\](?::\d+)?$/);
+    const ipv4WithPort = host.match(/^([^:]+):\d+$/);
+    return Boolean(
+        isIP(host) ||
+            (bracketed && isIP(bracketed[1]!) === 6) ||
+            (ipv4WithPort && isIP(ipv4WithPort[1]!) === 4),
+    );
+}
+
 veyonRouter.use('/veyon/*', async (c, next) => {
     if (c.req.method !== 'GET' && isDemoUser(c.get('user'))) {
         return c.json(
@@ -777,11 +787,7 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                     signal.throwIfAborted();
                     // Known IPs can start immediately; slow DNS never blocks their workers.
                     for (const computer of displayedComputers) {
-                        const bracketed = computer.host.match(/^\[([^\]]+)\](?::\d+)?$/);
-                        const ipv4WithPort = computer.host.match(/^([^:]+):\d+$/);
-                        if (isIP(computer.host) ||
-                            (bracketed && isIP(bracketed[1]!) === 6) ||
-                            (ipv4WithPort && isIP(ipv4WithPort[1]!) === 4))
+                        if (isLiteralTarget(computer.host))
                             subscribe(computer, byId.get(computer.id)!);
                     }
                     const resolved = await pending(
@@ -795,7 +801,13 @@ veyonRouter.get('/veyon/information/stream', (c) => {
                     resolvedDirectory = resolved;
                     if (JSON.stringify(resolved) !== JSON.stringify(displayedComputers))
                         directory(resolved, inventory.warning);
-                    for (const computer of resolved) subscribe(computer, byId.get(computer.id)!);
+                    // DHCP/device enrichment turns otherwise unresolvable FOG names
+                    // into literal targets. Fill the worker pool with those first.
+                    const prioritized = [
+                        ...resolved.filter((computer) => isLiteralTarget(computer.host)),
+                        ...resolved.filter((computer) => !isLiteralTarget(computer.host)),
+                    ];
+                    for (const computer of prioritized) subscribe(computer, byId.get(computer.id)!);
                     if (!remaining.size) write('complete', {});
                 } catch (error) {
                     if (signal.aborted) break;
