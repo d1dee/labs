@@ -36,10 +36,11 @@ interface LabCardProps {
     history: ActivationHistoryEntry[];
     onToggle: (labId: string) => void;
     onMove?: (targetId: string) => void;
-    layout?: 'standard' | 'wide' | 'pair';
+    layout?: 'standard' | 'wide';
+    columns?: 1 | 2 | 3;
 }
 
-const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove, layout = 'standard' }) => {
+const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove, layout = 'standard', columns = 1 }) => {
     const [toggling, setToggling] = useState<boolean>(false);
     const { cardRef, style, dragHandle } = useLabDrag({
         id: lab.id, name: lab.name, grid: true, disabled: !onMove, onMove: (targetId) => onMove?.(targetId),
@@ -109,7 +110,7 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove, layo
         ] as const;
 
         return (
-            <Grid.Col span={12}>
+            <Grid.Col ref={cardRef} data-lab-order-id={lab.id} style={style} span={12}>
                 <Card shadow='md' padding={0} radius='md' withBorder>
                     <Group justify='space-between' p='lg' wrap='nowrap'>
                         <Group wrap='nowrap'>
@@ -121,9 +122,12 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove, layo
                                 {lab.interface && <Text size='xs' c='dimmed'>{lab.interface}</Text>}
                             </Box>
                         </Group>
-                        <Badge leftSection={statusIcon} color={statusColor} variant='light' size='lg'>
-                            {statusLabel}
-                        </Badge>
+                        <Group gap={4} wrap='nowrap'>
+                            <Badge leftSection={statusIcon} color={statusColor} variant='light' size='lg'>
+                                {statusLabel}
+                            </Badge>
+                            {onMove && dragHandle}
+                        </Group>
                     </Group>
                     <Divider />
                     <Grid gap={0}>
@@ -181,7 +185,7 @@ const LabCard: FC<LabCardProps> = ({ lab, stats, history, onToggle, onMove, layo
     }
 
     return (
-        <Grid.Col ref={cardRef} data-lab-order-id={lab.id} style={style} span={{ base: 12, sm: 6, md: layout === 'pair' ? 6 : 4 }} maw={layout === 'pair' ? undefined : 420} h='100%'>
+        <Grid.Col ref={cardRef} data-lab-order-id={lab.id} style={style} span={12 / columns} h='100%'>
             <Card shadow='md' padding='lg' radius='md' withBorder>
                 <Card.Section p='md' pb={0}>
                     <Group justify='space-between' mb='md'>

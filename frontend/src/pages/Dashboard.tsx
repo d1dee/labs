@@ -18,8 +18,8 @@ import {
     Title,
 } from '@mantine/core';
 import {
-    IconExclamationCircle,
     IconDeviceDesktop,
+    IconExclamationCircle,
     IconKey,
     IconLogout,
     IconNetwork,
@@ -54,7 +54,11 @@ const Dashboard: FC<DashboardProps> = ({
     const userName = user?.name || user?.username || 'Teacher';
     const [activeTab, setActiveTab] = useState<string | null>('firewall');
     const tabsList = (
-        <Tabs.List className={classes.tabsList} aria-label='Main navigation' grow>
+        <Tabs.List
+            className={classes.tabsList}
+            aria-label='Main navigation'
+            grow
+        >
             {navTabs.map((tab) => (
                 <Tabs.Tab
                     key={tab.value}
@@ -76,8 +80,12 @@ const Dashboard: FC<DashboardProps> = ({
         <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
             <AppShell
                 header={{ height: 60 }}
-                footer={{ height: { base: 'calc(72px + env(safe-area-inset-bottom, 0px))', md: 48 } }}
-                padding='md'
+                footer={{
+                    height: {
+                        base: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+                        md: 48,
+                    },
+                }}
             >
                 <AppShell.Header>
                     <Container size='xl' h='100%'>

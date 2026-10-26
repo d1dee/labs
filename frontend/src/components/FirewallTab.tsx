@@ -8,15 +8,14 @@ import LabCard from '@/components/LabCard';
 import { useApiStream } from '@/api/useApiStream';
 import { PageHero } from '@/components/ui/PageHero';
 import { orderLabs, useLabOrder } from '@/lib/lab-order';
-import { Alert, Box, Center, Grid, Loader, Stack, Text, useMantineTheme } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { Alert, Box, Center, Grid, Loader, Stack, Text } from '@mantine/core';
+import { useResizeObserver } from '@mantine/hooks';
 import { IconInfoCircle, IconShieldCheck } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { type FC, useState } from 'react';
 
 const FirewallTab: FC = () => {
-    const theme = useMantineTheme();
-    const aboveMd = useMediaQuery(`(min-width: ${theme.breakpoints.md})`);
+    const [cardsRef, { width: cardsWidth }] = useResizeObserver<HTMLDivElement>();
     const { order, saveOrder } = useLabOrder();
     const [orderError, setOrderError] = useState<string | null>(null);
     const [labs, setLabs] = useState<Lab[]>([]);
@@ -50,6 +49,10 @@ const FirewallTab: FC = () => {
         (lab) => labStats[lab.id]?.firewall.disabled,
     ).length;
     const sortedLabs = orderLabs(labs, order);
+    // Keep each standard card at least 400px wide, with 16px between cards.
+    const columns = labs.length >= 3 && cardsWidth >= 1232 ? 3
+        : labs.length >= 2 && cardsWidth >= 816 ? 2 : 1;
+    const cardLayout = columns === 1 && cardsWidth >= 720 ? 'wide' : 'standard';
     const moveLab = (id: string, targetId: string) => {
         const ids = sortedLabs.map((lab) => lab.id);
         const from = ids.indexOf(id);
@@ -103,12 +106,12 @@ const FirewallTab: FC = () => {
                     />
 
                     <Box
+                        ref={cardsRef}
                         w='100%'
                         maw={labs.length < 3 ? 1160 : 1260}
                         mx={labs.length < 3 ? 'auto' : undefined}
-                        px={labs.length === 2 ? { base: 0, md: 'xl' } : 0}
                     >
-                        <Grid>
+                        <Grid gap={16}>
                             {sortedLabs.map((lab) => (
                                 <LabCard
                                     key={lab.id}
@@ -116,7 +119,8 @@ const FirewallTab: FC = () => {
                                     stats={labStats[lab.id]}
                                     history={labHistory[lab.id]}
                                     onToggle={refresh}
-                                    layout={labs.length === 1 && aboveMd ? 'wide' : labs.length === 2 ? 'pair' : 'standard'}
+                                    layout={cardLayout}
+                                    columns={columns}
                                     onMove={labs.length > 1 ? (targetId) => moveLab(lab.id, targetId) : undefined}
                                 />
                             ))}
